@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,6 +34,19 @@ class HomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState = _uiState.asStateFlow()
+
+    /** 首页推荐流单列大图布局（预览图更大），默认开启。 */
+    val homeSingleColumn = appSettings.homeFeedSingleColumn.stateIn(
+        viewModelScope,
+        kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+        true
+    )
+
+    fun toggleHomeSingleColumn() {
+        viewModelScope.launch {
+            appSettings.setHomeFeedSingleColumn(!homeSingleColumn.value)
+        }
+    }
 
     private var flush = 0
 
@@ -130,7 +144,9 @@ class HomeViewModel @Inject constructor(
                 val feed = feedRepo.fetchFeed(idx = currentTopIdx, pull = true, flush = flush)
                 if (feed.items.isNotEmpty()) {
                     val merged = withContext(Dispatchers.Default) {
-                        feed.items + _uiState.value.items
+                        // 按 (goto|param|idx) 去重：服务端偶发重复下发卡片，
+                        // 重复 key 会让 LazyStaggeredGrid 直接抛异常崩溃
+                        (feed.items + _uiState.value.items).distinctBy { it.actionKey() }
                     }
                     _uiState.update { it.copy(items = merged) }
                     flush++
@@ -152,8 +168,14 @@ class HomeViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoadingMore = true) }
                 val lastIdx = _uiState.value.items.lastOrNull()?.idx ?: 0L
                 val feed = feedRepo.fetchFeed(idx = lastIdx, pull = false, flush = flush)
-                _uiState.update { it.copy(items = it.items + feed.items) }
-                flush++
+                if (feed.items.isNotEmpty()) {
+                    val merged = withContext(Dispatchers.Default) {
+                        // 追加时同样去重，保留已有条目在前
+                        (_uiState.value.items + feed.items).distinctBy { it.actionKey() }
+                    }
+                    _uiState.update { it.copy(items = merged) }
+                    flush++
+                }
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载更多失败" }
                 _uiState.update { it.copy(errorMessage = e.message) }

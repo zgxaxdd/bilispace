@@ -1,5 +1,7 @@
 package com.naaammme.bbspace.core.designsystem.component
 
+import androidx.compose.foundation.gestures.FlingBehavior
+import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -59,10 +61,11 @@ fun <T> AdaptiveMediaGrid(
     loadingPlaceholderCount: Int = 10,
     horizontalSpacing: Dp = 6.dp,
     verticalSpacing: Dp = 6.dp,
+    flingBehavior: FlingBehavior? = null,
     contentPadding: PaddingValues = PaddingValues(
-        start = 6.dp,
+        start = 4.dp,
         top = 0.dp,
-        end = 6.dp,
+        end = 4.dp,
         bottom = 4.dp
     ),
     key: (index: Int, item: T) -> Any = { index, _ -> index },
@@ -79,6 +82,7 @@ fun <T> AdaptiveMediaGrid(
     itemContent: @Composable LazyStaggeredGridItemScope.(item: T) -> Unit
 ) {
     val gridState = state ?: rememberLazyStaggeredGridState()
+    val effectiveFling = flingBehavior ?: ScrollableDefaults.flingBehavior()
     val currentItems by rememberUpdatedState(items)
     val shouldLoadMore by remember(gridState, loadMoreEnabled) {
         derivedStateOf {
@@ -103,7 +107,8 @@ fun <T> AdaptiveMediaGrid(
             modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
             verticalItemSpacing = verticalSpacing,
-            contentPadding = contentPadding
+            contentPadding = contentPadding,
+            flingBehavior = effectiveFling
         ) {
             when {
                 items.isEmpty() && isRefreshing -> {

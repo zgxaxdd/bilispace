@@ -66,7 +66,11 @@ object GrpcFrameCodec {
      * - 标志!=0 且响应头 grpc-encoding=gzip → gzip 解压
      */
     fun decode(responseBytes: ByteArray, grpcEncoding: String? = null): ByteArray {
-        if (responseBytes.size < 5) return ByteArray(0)
+        // 不足一个 frame 头（5 字节）说明服务端返回的不是有效 gRPC 数据，
+        // 静默返回空数组会被上层解析成"空的成功响应"掩盖真实错误
+        if (responseBytes.size < 5) {
+            throw IllegalStateException("gRPC 响应体过短 (${responseBytes.size} 字节)，非有效 frame")
+        }
 
         val compressionFlag = responseBytes[0].toInt()
         val payload = responseBytes.copyOfRange(5, responseBytes.size)

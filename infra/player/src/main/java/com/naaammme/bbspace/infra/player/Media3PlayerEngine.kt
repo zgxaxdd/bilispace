@@ -268,7 +268,8 @@ class Media3PlayerEngine @Inject constructor(
 
         return ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(buildLoadControl(config))
-            .setWakeMode(C.WAKE_MODE_NONE)
+            // 后台播放依赖 PlaybackService 前台服务，网络唤醒锁避免息屏后停流
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .apply {
                 setAudioAttributes(
@@ -388,10 +389,20 @@ class Media3PlayerEngine @Inject constructor(
         if (requestSpec.headers.isNotEmpty()) {
             upstreamFactory.setDefaultRequestProperties(requestSpec.headers)
         }
+        // 直播 FLV 有主备线路；VOD 分段/本地文件仅单一线路，不启用切换
+        val candidatesByUrl = when (source) {
+            is EngineSource.LiveFlv ->
+                mapOf(source.url to (listOf(source.url) + source.backupUrls).distinct())
+            else -> emptyMap()
+        }
         return ProgressiveMediaSource.Factory(
-            DefaultDataSource.Factory(appContext, upstreamFactory)
+            CdnFailoverDataSourceFactory(
+                DefaultDataSource.Factory(appContext, upstreamFactory),
+                candidatesByUrl
+            )
         )
-            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(1))
+            // CDN 偶发 403/超时配合 CdnFailoverDataSource 换线重试，重试次数过少会直接报错
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
     }
 
     private fun mediaItem(uri: String, metadata: MediaMetadata): MediaItem {
@@ -444,7 +455,7 @@ class Media3PlayerEngine @Inject constructor(
         progressJob?.cancel()
         progressJob = runtimeScope.launch {
             while (isActive) {
-                delay(1_000)
+                delay(500)
                 updatePlaybackProgress()
             }
         }

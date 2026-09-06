@@ -1,23 +1,41 @@
 package com.naaammme.bbspace.feature.favorite
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -27,6 +45,7 @@ import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
+import com.naaammme.bbspace.core.model.FavoriteFolder
 import com.naaammme.bbspace.feature.favorite.folder.FavoriteFolderList
 import com.naaammme.bbspace.feature.favorite.item.FavoriteContentList
 
@@ -39,8 +58,20 @@ fun FavoriteScreen(
     viewModel: FavoriteViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val sortState by viewModel.sortState.collectAsStateWithLifecycle()
     val contentListState = rememberLazyListState()
     val folderListState = rememberLazyListState()
+    val context = LocalContext.current
+
+    var showCreate by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<FavoriteFolder?>(null) }
+    var deleteTarget by remember { mutableStateOf<FavoriteFolder?>(null) }
+
+    LaunchedEffect(viewModel) {
+        viewModel.msg.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     CollapsingTopBarScaffold(
         topBar = { scrollBehavior ->
@@ -52,6 +83,16 @@ fun FavoriteScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
                         )
+                    }
+                },
+                actions = {
+                    if (state.tab == FavoriteTab.FOLDER) {
+                        TextButton(onClick = { showCreate = true }) {
+                            Text("新建")
+                        }
+                        TextButton(onClick = viewModel::openFolderSort) {
+                            Text("排序")
+                        }
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -82,11 +123,210 @@ fun FavoriteScreen(
                     onOpenContent = onOpenContent,
                     onOpenFolder = onOpenFolder,
                     onRetry = viewModel::refresh,
-                    onLoadMore = viewModel::loadMore
+                    onLoadMore = viewModel::loadMore,
+                    onRenameFolder = { renameTarget = it },
+                    onDeleteFolder = { deleteTarget = it }
                 )
             }
         }
     }
+
+    if (showCreate) {
+        FolderEditDialog(
+            title = "新建收藏夹",
+            initialTitle = "",
+            initialPrivate = false,
+            confirmText = "创建",
+            onDismiss = { showCreate = false },
+            onConfirm = { name, privacy ->
+                showCreate = false
+                viewModel.createFolder(name, privacy)
+            }
+        )
+    }
+
+    renameTarget?.let { folder ->
+        FolderEditDialog(
+            title = "重命名收藏夹",
+            initialTitle = folder.title,
+            initialPrivate = folder.isPrivate,
+            confirmText = "保存",
+            onDismiss = { renameTarget = null },
+            onConfirm = { name, privacy ->
+                renameTarget = null
+                viewModel.renameFolder(folder.fid, name, privacy)
+            }
+        )
+    }
+
+    deleteTarget?.let { folder ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除收藏夹") },
+            text = { Text("确认删除「${folder.title}」吗？其中的 ${folder.mediaCount} 个内容将一并移除。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteTarget = null
+                        viewModel.deleteFolder(folder.fid)
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (sortState.visible) {
+        FolderSortDialog(
+            state = sortState,
+            onMove = viewModel::moveSortEntry,
+            onConfirm = viewModel::submitFolderSort,
+            onDismiss = viewModel::dismissFolderSort
+        )
+    }
+}
+
+@Composable
+private fun FolderEditDialog(
+    title: String,
+    initialTitle: String,
+    initialPrivate: Boolean,
+    confirmText: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String, Int) -> Unit
+) {
+    var name by remember { mutableStateOf(initialTitle) }
+    var privateFolder by remember { mutableStateOf(initialPrivate) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    placeholder = { Text("收藏夹标题") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = !privateFolder,
+                        onClick = { privateFolder = false },
+                        label = { Text("公开") }
+                    )
+                    FilterChip(
+                        selected = privateFolder,
+                        onClick = { privateFolder = true },
+                        label = { Text("私有") }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim(), if (privateFolder) 1 else 0) },
+                enabled = name.isNotBlank()
+            ) {
+                Text(confirmText)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun FolderSortDialog(
+    state: FolderSortUiState,
+    onMove: (Long, Int) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("收藏夹排序") },
+        text = {
+            when {
+                state.loading -> {
+                    Text(
+                        text = "加载中…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 20.dp)
+                    )
+                }
+
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        items(
+                            items = state.entries,
+                            key = { it.fid }
+                        ) { folder ->
+                            val index = state.entries.indexOfFirst { it.fid == folder.fid }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = folder.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(vertical = 8.dp)
+                                )
+                                IconButton(
+                                    onClick = { onMove(folder.fid, -1) },
+                                    enabled = index > 0
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowUp,
+                                        contentDescription = "上移"
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onMove(folder.fid, 1) },
+                                    enabled = index < state.entries.lastIndex
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "下移"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = !state.submitting && !state.loading) {
+                Text(if (state.submitting) "保存中…" else "完成")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable
@@ -97,7 +337,9 @@ private fun FavoriteBody(
     onOpenContent: (FavoriteContentTarget) -> Unit,
     onOpenFolder: (Long) -> Unit,
     onRetry: () -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    onRenameFolder: (FavoriteFolder) -> Unit,
+    onDeleteFolder: (FavoriteFolder) -> Unit
 ) {
     val content = state.content
     val folder = state.folder
@@ -153,7 +395,9 @@ private fun FavoriteBody(
             FavoriteFolderList(
                 folders = folder.folders,
                 listState = folderListState,
-                onOpenFolder = onOpenFolder
+                onOpenFolder = onOpenFolder,
+                onRenameFolder = onRenameFolder,
+                onDeleteFolder = onDeleteFolder
             )
         }
     }

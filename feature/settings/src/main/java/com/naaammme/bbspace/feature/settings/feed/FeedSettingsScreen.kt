@@ -28,6 +28,7 @@ fun FeedSettingsScreen(
     val lessonsMode by viewModel.lessonsMode.collectAsStateWithLifecycle()
     val teenagersMode by viewModel.teenagersMode.collectAsStateWithLifecycle()
     val teenagersAge by viewModel.teenagersAge.collectAsStateWithLifecycle()
+    val homeSingleColumn by viewModel.homeFeedSingleColumn.collectAsStateWithLifecycle()
     var teenagersAgeDraft by remember(teenagersAge) { mutableFloatStateOf(teenagersAge.toFloat()) }
     val teenagersAgeText = teenagersAgeDraft.roundToInt().coerceIn(1, 17).toString()
 
@@ -55,6 +56,31 @@ fun FeedSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("首页布局", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "开启后首页使用单列大图，关闭为双列网格；也可在首页顶栏切换",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = homeSingleColumn,
+                            onCheckedChange = viewModel::updateHomeFeedSingleColumn
+                        )
+                    }
+                }
+            }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(

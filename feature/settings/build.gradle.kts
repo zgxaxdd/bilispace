@@ -28,6 +28,7 @@ android {
 dependencies {
     implementation(project(":core:auth"))
     implementation(project(":core:settings"))
+    implementation(project(":core:sponsorblock"))
     implementation(project(":core:designsystem"))
 
     implementation(libs.hilt.android)

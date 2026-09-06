@@ -121,7 +121,7 @@ private fun parseQueryParams(rawQuery: String?): Map<String, String> {
         .toMap()
 }
 
-private fun mergePlaybackUrls(primaryUrl: String?, backupUrls: List<String>): List<String> {
+fun mergePlaybackUrls(primaryUrl: String?, backupUrls: List<String>): List<String> {
     return (listOfNotNull(primaryUrl) + backupUrls)
         .filter(String::isNotBlank)
         .distinct()

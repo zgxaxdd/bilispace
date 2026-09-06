@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
@@ -42,6 +45,7 @@ import com.naaammme.bbspace.core.designsystem.component.PreviewImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImageGrid
 import com.naaammme.bbspace.core.model.CommentReply
 import com.naaammme.bbspace.core.model.CommentUser
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 internal sealed interface CommentReplyAction {
     data class Check(val rpid: Long) : CommentReplyAction
@@ -51,6 +55,9 @@ internal sealed interface CommentReplyAction {
     data class OpenReplies(val reply: CommentReply) : CommentReplyAction
     data class OpenUser(val user: CommentUser) : CommentReplyAction
     data class OpenOriginalContent(val reply: CommentReply) : CommentReplyAction
+    data class Like(val reply: CommentReply) : CommentReplyAction
+    data class Dislike(val reply: CommentReply) : CommentReplyAction
+    data class Share(val reply: CommentReply) : CommentReplyAction
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -72,7 +79,7 @@ internal fun CommentCard(
                 currentMid = currentMid,
                 busyReplyIds = busyReplyIds,
                 onAction = onAction,
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(BiliSpacing.lg)
             )
 
             if (reply.replyCount > 0L) {
@@ -88,7 +95,7 @@ internal fun CommentCard(
                             ?: "查看 ${reply.replyCount} 条回复",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = BiliSpacing.sm, vertical = BiliSpacing.xs)
                     )
                 }
             }
@@ -115,7 +122,7 @@ internal fun ThreadReplyCard(
             currentMid = currentMid,
             busyReplyIds = busyReplyIds,
             onAction = onAction,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.md, vertical = 10.dp)
         )
     }
 }
@@ -140,7 +147,7 @@ private fun ReplyBody(
     }
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
         verticalAlignment = Alignment.Top
     ) {
         Surface(
@@ -166,7 +173,7 @@ private fun ReplyBody(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -186,8 +193,8 @@ private fun ReplyBody(
                         color = MaterialTheme.colorScheme.primary
                     )
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                     ) {
                         reply.user.level?.let { level ->
                             MiniChip("Lv.$level")
@@ -225,7 +232,7 @@ private fun ReplyBody(
             ) {
                 val isSelf = currentMid > 0L && reply.user.mid == currentMid
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
@@ -240,10 +247,20 @@ private fun ReplyBody(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = "点赞 ${reply.likeCount}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    val rateEnabled = reply.rpid !in busyReplyIds
+                    ReplyRateButton(
+                        contentDescription = "点踩",
+                        selected = reply.disliked,
+                        enabled = rateEnabled,
+                        rotate = true,
+                        onClick = { onAction(CommentReplyAction.Dislike(reply)) }
+                    )
+                    ReplyRateButton(
+                        contentDescription = "点赞",
+                        selected = reply.liked,
+                        enabled = rateEnabled,
+                        count = reply.likeCount,
+                        onClick = { onAction(CommentReplyAction.Like(reply)) }
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
@@ -256,7 +273,8 @@ private fun ReplyBody(
                     canDelete = isSelf,
                     onCheck = { onAction(CommentReplyAction.Check(reply.rpid)) },
                     onTranslate = { onAction(CommentReplyAction.Translate(reply.rpid)) },
-                    onDelete = { onAction(CommentReplyAction.Delete(reply)) }
+                    onDelete = { onAction(CommentReplyAction.Delete(reply)) },
+                    onShare = { onAction(CommentReplyAction.Share(reply)) }
                 )
             }
         }
@@ -302,7 +320,8 @@ private fun ReplyMenuButton(
     canDelete: Boolean,
     onCheck: () -> Unit,
     onTranslate: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onShare: () -> Unit
 ) {
     var show by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -332,6 +351,13 @@ private fun ReplyMenuButton(
                 onClick = {
                     show = false
                     onTranslate()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("分享评论") },
+                onClick = {
+                    show = false
+                    onShare()
                 }
             )
             if (canDelete) {
@@ -370,6 +396,46 @@ private fun ReplyMenuButton(
 }
 
 @Composable
+private fun ReplyRateButton(
+    contentDescription: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    rotate: Boolean = false,
+    count: Long? = null
+) {
+    val tint = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.extraLarge)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 2.dp, vertical = 2.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.ThumbUp,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier
+                .size(15.dp)
+                .rotate(if (rotate) 180f else 0f)
+        )
+        count?.let { value ->
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.bodySmall,
+                color = tint,
+                modifier = Modifier.padding(start = BiliSpacing.xs)
+            )
+        }
+    }
+}
+
+@Composable
 private fun MiniChip(text: String) {
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
@@ -379,7 +445,7 @@ private fun MiniChip(text: String) {
             text = text,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = BiliSpacing.sm, vertical = BiliSpacing.xs),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

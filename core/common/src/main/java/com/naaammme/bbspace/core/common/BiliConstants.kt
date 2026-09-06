@@ -50,6 +50,12 @@ object BiliConstants {
     const val BASE_URL_LIVE_API = "https://api.live.bilibili.com"
     const val BASE_URL_PASSPORT = "https://passport.bilibili.com"
 
+    // Web 端点（点赞三连/收藏管理/评论赞踩/动态互动）使用的站点地址与 UA
+    const val BASE_URL_WEB = "https://www.bilibili.com"
+    const val BASE_URL_WEB_DYNAMIC = "https://t.bilibili.com"
+    const val WEB_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+
     // Statistics JSON
     const val STATISTICS_JSON = """{"appId":1,"platform":3,"version":"8.62.0","abtest":""}"""
 

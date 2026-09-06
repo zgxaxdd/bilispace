@@ -9,8 +9,10 @@ import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.naaammme.bbspace.core.common.media.BILI_IMAGE_DEFAULT_Q
+import com.naaammme.bbspace.core.common.media.BiliCoverSize
 import com.naaammme.bbspace.core.common.media.avatarThumbnailUrl
 import com.naaammme.bbspace.core.common.media.coverThumbnailUrl
+import com.naaammme.bbspace.core.common.media.coverUrlFor
 import com.naaammme.bbspace.core.common.media.originImageUrl
 import com.naaammme.bbspace.core.common.media.thumbnailUrl
 
@@ -20,6 +22,8 @@ enum class BiliImageVariant(
 ) {
     Avatar,
     CardCover,
+    CardCover43,
+    CardCoverLarge,
     PreviewThumb,
     Banner,
     Original(original = true)
@@ -36,6 +40,8 @@ fun rememberBiliImageRequest(
         val resolvedUrl = when {
             variant.original -> originImageUrl(url)
             variant == BiliImageVariant.Avatar -> avatarThumbnailUrl(url)
+            variant == BiliImageVariant.CardCoverLarge -> coverUrlFor(url, BiliCoverSize.Large)
+            variant == BiliImageVariant.CardCover43 -> coverUrlFor(url, BiliCoverSize.Small43)
             variant == BiliImageVariant.CardCover -> coverThumbnailUrl(url)
             else -> thumbnailUrl(url, variant.q)
         }

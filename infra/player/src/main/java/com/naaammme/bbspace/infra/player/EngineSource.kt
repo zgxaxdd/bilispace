@@ -2,7 +2,10 @@ package com.naaammme.bbspace.infra.player
 
 sealed interface EngineSource {
 
-    data class LiveFlv(val url: String) : EngineSource
+    data class LiveFlv(
+        val url: String,
+        val backupUrls: List<String> = emptyList()
+    ) : EngineSource
 
     data class LocalMerged(
         val videoUrl: String,
@@ -14,7 +17,10 @@ sealed interface EngineSource {
         val audioUrl: String? = null,
         val videoSampleMimeType: String? = null,
         val audioSampleMimeType: String? = null,
-        val durationMs: Long? = null
+        val durationMs: Long? = null,
+        // 打开失败时按顺序尝试的备用线路（首元素为主线路本身）
+        val videoBackupUrls: List<String> = emptyList(),
+        val audioBackupUrls: List<String> = emptyList()
     ) : EngineSource
 
     data class ProgressiveSegment(

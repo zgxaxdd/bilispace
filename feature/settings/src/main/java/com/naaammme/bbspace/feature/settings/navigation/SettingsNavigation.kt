@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.settings.navigation
+package com.naaammme.bbspace.feature.settings.navigation
 
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraphBuilder
@@ -12,6 +12,7 @@ import com.naaammme.bbspace.feature.settings.errorlog.ErrorLogScreen
 import com.naaammme.bbspace.feature.settings.feed.FeedSettingsScreen
 import com.naaammme.bbspace.feature.settings.performance.PerformanceSettingsScreen
 import com.naaammme.bbspace.feature.settings.privacy.PrivacySettingsScreen
+import com.naaammme.bbspace.feature.settings.sponsorblock.SponsorBlockSettingsScreen
 
 const val SETTINGS_ROUTE = "settings"
 const val APPEARANCE_ROUTE = "settings/appearance"
@@ -19,6 +20,7 @@ const val PERFORMANCE_ROUTE = "settings/performance"
 const val PRIVACY_ROUTE = "settings/privacy"
 const val FEED_SETTINGS_ROUTE = "settings/feed"
 const val AUDIO_VIDEO_ROUTE = "settings/audio_video"
+const val SPONSOR_BLOCK_ROUTE = "settings/sponsor_block"
 const val ERROR_LOG_ROUTE = "settings/error_log"
 const val ABOUT_ROUTE = "settings/about"
 const val HOME_INTEREST_ROUTE = "home/interest"
@@ -33,6 +35,7 @@ fun NavGraphBuilder.settingsScreen(
             onNavigateToPerformance = { navController.navigate(PERFORMANCE_ROUTE) },
             onNavigateToFeed = { navController.navigate(FEED_SETTINGS_ROUTE) },
             onNavigateToAudioVideo = { navController.navigate(AUDIO_VIDEO_ROUTE) },
+            onNavigateToSponsorBlock = { navController.navigate(SPONSOR_BLOCK_ROUTE) },
             onNavigateToPrivacy = { navController.navigate(PRIVACY_ROUTE) },
             onNavigateToErrorLog = { navController.navigate(ERROR_LOG_ROUTE) },
             onNavigateToAbout = { navController.navigate(ABOUT_ROUTE) }
@@ -60,6 +63,10 @@ fun NavGraphBuilder.settingsScreen(
             onBack = { navController.popBackStack() },
             onNavigateToInterest = { navController.navigate(HOME_INTEREST_ROUTE) }
         )
+    }
+
+    composable(SPONSOR_BLOCK_ROUTE) {
+        SponsorBlockSettingsScreen(onBack = { navController.popBackStack() })
     }
 
     composable(ERROR_LOG_ROUTE) {

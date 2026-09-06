@@ -22,8 +22,10 @@ android {
 
 dependencies {
     api(project(":core:model"))
+    implementation(project(":core:auth"))
     implementation(project(":core:common"))
     implementation(project(":infra:network-grpc"))
+    implementation(project(":infra:network-http"))
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 }

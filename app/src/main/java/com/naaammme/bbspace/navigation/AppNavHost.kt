@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.navigation
 
+import android.os.Bundle
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -39,6 +40,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -49,6 +51,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.naaammme.bbspace.core.designsystem.component.roundScreenSafePadding
+import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
+import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.buildNavTransitions
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
@@ -180,9 +185,48 @@ fun AppNavHost(
         rootNavController.popBackStack(MAIN_ROUTE, false)
         currentTab = TopLevelRoute.HOME
     }
+    val context = LocalContext.current
+    val openVideoActivity: (VideoTarget, String?, Boolean, Bundle?) -> Unit =
+        { target, coverUrl, coverLarge, bundle ->
+            val intent = videoDetailIntent(
+                context = context,
+                target = target,
+                coverUrl = coverUrl,
+                coverLarge = coverLarge,
+                fromSeamless = bundle != null
+            )
+            if (bundle != null) {
+                context.startActivity(intent, bundle)
+            } else {
+                context.startActivity(intent)
+            }
+        }
+
+    // 统一路由：支持无缝动画的设备（ColorOS 16.1+）一律走视频详情 Activity——
+    // 有锚点（首页卡片）时 bundle 非空、封面矩形无缝展开；无锚点（深链/搜索/历史等）
+    // 用系统普通过渡；不支持设备维持覆盖层路径，行为与接入前一致。能力判定与
+    // FeedCard 侧同源（系统版本），同一会话内结果恒定，路径不会漂移。
+    val openVideoRoute: (VideoTarget, String?, Boolean, Bundle?) -> Unit =
+        { target, coverUrl, coverLarge, bundle ->
+            if (OplusViewSeamlessCompat.isVersionSupported()) {
+                openVideoActivity(target, coverUrl, coverLarge, bundle)
+            } else {
+                playbackHostViewModel.expand()
+                videoViewModel.openRoot(target)
+            }
+        }
     val openVideo: (VideoTarget) -> Unit = { target ->
-        playbackHostViewModel.expand()
-        videoViewModel.openRoot(target)
+        openVideoRoute(target, null, false, null)
+    }
+    val openVideoSeamless: (VideoTarget, String, Boolean, Bundle) -> Unit =
+        { target, coverUrl, coverLarge, bundle ->
+            openVideoRoute(target, coverUrl, coverLarge, bundle)
+        }
+    // 共享无缝卡片执行器：任意页面的视频卡片经 LocalSeamlessCardOpener 接入
+    val seamlessCardOpener = remember {
+        SeamlessCardOpener { target, coverUrl, coverLarge, bundle ->
+            openVideoSeamless(target, coverUrl ?: "", coverLarge, bundle)
+        }
     }
     val openLive: (LiveRoute) -> Unit = { route ->
         liveViewModel.openRoute(route)
@@ -224,6 +268,21 @@ fun AppNavHost(
         }
     }
 
+    // 视频详情 Activity 的跨 Activity 导航请求：详情页内「回首页 / UP 主空间 /
+    // 查看缓存 / 开始下载」先投递再 finish，这里复用覆盖层时代的既有逻辑执行。
+    // 请求由 Channel 排队，MainActivity 不可见时投递会在回到前台后继续处理。
+    LaunchedEffect(Unit) {
+        playbackHostViewModel.videoDetailNavBus.requests.collect { request ->
+            when (request) {
+                is VideoDetailNavBus.NavRequest.GoHome -> goHomeFromVideo()
+                is VideoDetailNavBus.NavRequest.OpenSpace -> openSpaceFromVideo(request.route)
+                is VideoDetailNavBus.NavRequest.OpenDownloadCache -> openDownloadFromVideo()
+                is VideoDetailNavBus.NavRequest.StartDownload ->
+                    downloadViewModel.enqueueDownload(request.request)
+            }
+        }
+    }
+
     LaunchedEffect(appLink) {
         when (val target = appLink ?: return@LaunchedEffect) {
             is WebLinkTarget.ToVideo -> openVideo(target.target)
@@ -239,7 +298,8 @@ fun AppNavHost(
         onAppLinkConsumed()
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalSeamlessCardOpener provides seamlessCardOpener) {
+        Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             modifier = Modifier
                 .fillMaxSize()
@@ -413,6 +473,10 @@ fun AppNavHost(
             mode = playbackMode,
             playbackHostViewModel = playbackHostViewModel,
             onExpand = {
+                // 视频可能在独立详情 Activity 中切换过：以会话当前目标重置本地目标栈。
+                // openVideoInternal 对同一 target 短路返回，不会打断播放。
+                (playbackHostViewModel.currentTarget.value as? StreamPlaybackTarget.Video)
+                    ?.let { videoViewModel.openRoot(it.target) }
                 playbackHostViewModel.expand()
             },
             onTogglePlay = playbackHostViewModel::togglePlayPause,
@@ -431,6 +495,7 @@ fun AppNavHost(
             videoViewModel = videoViewModel,
             liveViewModel = liveViewModel
         )
+        }
     }
 }
 

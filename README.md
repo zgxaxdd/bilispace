@@ -117,6 +117,7 @@ BBSpace 与哔哩哔哩官方无关。项目主要用于学习、研究和 Andro
 
 ## 致谢
 
+- [BBSpace（官方原版）](https://github.com/naaammme/bbspace) —— 本项目基于官方 BBSpace 源码衍生维护，衷心感谢原作者的开源贡献
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)
 - [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)
 - [androidx/media](https://github.com/androidx/media)

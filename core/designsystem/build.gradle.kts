@@ -42,5 +42,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.google.material)
 
+    // OPPO View 无缝动画：仅参与编译，运行时类由 ColorOS 16.1+ 系统提供，禁止打入 APK
+    compileOnly(libs.oplus.viewseamless)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -100,9 +100,11 @@ data class PlayerPlaybackPrefs(
     val reportPlayback: Boolean = true,
     val preferSoftwareDecode: Boolean = false,
     val decoderFallback: Boolean = true,
-    val autoRotateFullscreen: Boolean = false,
+    val autoRotateFullscreen: Boolean = true,
     val gestureSpeed: Float = 2f,
-    val videoCdnMode: VideoCdnMode = VideoCdnMode.Backup2
+    val videoCdnMode: VideoCdnMode = VideoCdnMode.Backup2,
+    /** 双击画面点赞：关闭时双击为暂停（默认） */
+    val doubleTapLike: Boolean = false
 )
 
 @Immutable

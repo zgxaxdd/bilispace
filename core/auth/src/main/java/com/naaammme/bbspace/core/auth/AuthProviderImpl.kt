@@ -10,4 +10,7 @@ class AuthProviderImpl @Inject constructor(
 ) : AuthProvider {
     override val mid: Long get() = authStore.mid
     override val accessToken: String get() = authStore.accessToken
+    override val hasWebCredential: Boolean get() = authStore.hasWebCredential()
+    override fun cookieHeader(): String = authStore.cookieHeader()
+    override fun csrfToken(): String = authStore.csrfToken()
 }

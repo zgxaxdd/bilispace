@@ -314,10 +314,20 @@ private fun saveSupportTipCode(context: Context) {
         )
         put(MediaStore.MediaColumns.IS_PENDING, 1)
     }
-    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
-    resolver.openOutputStream(uri, "w")!!.use { output ->
+    // insert/openOutputStream 在存储空间不足或被禁限时可能返回 null，需空安全兜底
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+    if (uri == null) {
+        Toast.makeText(context, "保存失败：无法创建图片文件", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val output = resolver.openOutputStream(uri, "w")
+    if (output == null) {
+        Toast.makeText(context, "保存失败：无法写入图片", Toast.LENGTH_SHORT).show()
+        return
+    }
+    output.use { stream ->
         context.resources.openRawResource(R.drawable.support_tip_code).use { input ->
-            input.copyTo(output)
+            input.copyTo(stream)
         }
     }
     resolver.update(

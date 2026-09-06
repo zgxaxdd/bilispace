@@ -11,6 +11,9 @@ import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
+import com.naaammme.bbspace.core.sponsorblock.SbCategory
+import com.naaammme.bbspace.core.sponsorblock.SbSkipType
+import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import androidx.compose.ui.graphics.Color
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,10 +25,112 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val appSettings: AppSettings,
-    private val authRepo: AuthRepository
+    private val authRepo: AuthRepository,
+    private val sponsorBlockClient: SponsorBlockClient
 ) : ViewModel() {
 
     val hdFeedAvailable = MutableStateFlow(false)
+
+    // ===== 首页布局 =====
+    val homeFeedSingleColumn = appSettings.homeFeedSingleColumn.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        true
+    )
+
+    fun updateHomeFeedSingleColumn(enabled: Boolean) {
+        viewModelScope.launch { appSettings.setHomeFeedSingleColumn(enabled) }
+    }
+
+    // ===== 空降助手 =====
+    val sponsorBlockEnabled = appSettings.sponsorBlockEnabled.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        false
+    )
+
+    val sponsorBlockCategoryTypes = appSettings.sponsorBlockCategoryTypes.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        emptyMap()
+    )
+
+    val sponsorBlockToast = appSettings.sponsorBlockToast.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        true
+    )
+
+    val sponsorBlockMarkers = appSettings.sponsorBlockMarkers.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        true
+    )
+
+    val sponsorBlockServerUrl = appSettings.sponsorBlockServerUrl.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        ""
+    )
+
+    val sponsorBlockUserId = appSettings.sponsorBlockUserId.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        null
+    )
+
+    val sponsorBlockServerTestResult = MutableStateFlow<String?>(null)
+
+    fun updateSponsorBlockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            if (enabled) {
+                // 首次开启时确保身份 ID 已生成
+                appSettings.ensureSponsorBlockUserId()
+            }
+            appSettings.updateSponsorBlockEnabled(enabled)
+        }
+    }
+
+    fun updateSponsorBlockCategoryType(category: SbCategory, type: SbSkipType) {
+        viewModelScope.launch {
+            val next = sponsorBlockCategoryTypes.value.toMutableMap()
+            next[category.wire] = type.ordinal
+            appSettings.updateSponsorBlockCategoryTypes(next)
+        }
+    }
+
+    fun updateSponsorBlockToast(enabled: Boolean) {
+        viewModelScope.launch { appSettings.updateSponsorBlockToast(enabled) }
+    }
+
+    fun updateSponsorBlockMarkers(enabled: Boolean) {
+        viewModelScope.launch { appSettings.updateSponsorBlockMarkers(enabled) }
+    }
+
+    fun updateSponsorBlockServerUrl(url: String) {
+        viewModelScope.launch { appSettings.updateSponsorBlockServerUrl(url) }
+    }
+
+    fun testSponsorBlockServer() {
+        viewModelScope.launch {
+            sponsorBlockServerTestResult.value = "正在测试…"
+            val url = sponsorBlockServerUrl.value.ifBlank { SponsorBlockClient.DEFAULT_SERVER }
+            sponsorBlockServerTestResult.value = if (sponsorBlockClient.checkServer(url)) {
+                "连接正常"
+            } else {
+                "连接失败 请检查地址或网络"
+            }
+        }
+    }
+
+    fun regenerateSponsorBlockUserId() {
+        viewModelScope.launch { appSettings.regenerateSponsorBlockUserId() }
+    }
+
+    fun sponsorBlockSkipTypeFor(category: SbCategory): SbSkipType =
+        sponsorBlockCategoryTypes.value[category.wire]
+            ?.let { ordinal -> SbSkipType.entries.getOrNull(ordinal) }
+            ?: category.defaultSkipType
 
     val themeConfig = appSettings.themeConfig.stateIn(
         viewModelScope,

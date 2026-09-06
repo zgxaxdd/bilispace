@@ -19,9 +19,13 @@ import com.bapis.bilibili.app.dynamic.v2.MdlDynForward
 import com.bapis.bilibili.app.dynamic.v2.MdlDynLive
 import com.bapis.bilibili.app.dynamic.v2.MdlDynLiveRcmd
 import com.bapis.bilibili.app.dynamic.v2.MdlDynUGCSeason
+import com.bapis.bilibili.app.dynamic.v2.ModuleDynamic
 import com.bapis.bilibili.app.dynamic.v2.OpusDetailReq
 import com.bapis.bilibili.app.dynamic.v2.OpusDetailResp
 import com.bapis.bilibili.app.dynamic.v2.Refresh
+import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.BiliConstants
+import com.naaammme.bbspace.core.common.BiliWebHeaderTool
 import com.naaammme.bbspace.core.common.media.httpsImageUrlOrNull
 import com.naaammme.bbspace.core.model.DynamicAuthor
 import com.naaammme.bbspace.core.model.DynamicBody
@@ -33,6 +37,7 @@ import com.naaammme.bbspace.core.model.DynamicDetailAuthor
 import com.naaammme.bbspace.core.model.DynamicDetailParagraph
 import com.naaammme.bbspace.core.model.DynamicItem as DynamicFeedItem
 import com.naaammme.bbspace.core.model.DynamicPage
+import com.naaammme.bbspace.core.model.DynamicPicUpload
 import com.naaammme.bbspace.core.model.DynamicRefresh
 import com.naaammme.bbspace.core.model.DynamicStats
 import com.naaammme.bbspace.core.model.DynamicUpItem
@@ -43,16 +48,20 @@ import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
 import com.naaammme.bbspace.infra.grpc.BiliGrpcClient
+import com.naaammme.bbspace.infra.network.BiliRestClient
 import java.util.TimeZone
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 @Singleton
 class DynamicRepository @Inject constructor(
-    private val grpcClient: BiliGrpcClient
+    private val grpcClient: BiliGrpcClient,
+    private val restClient: BiliRestClient,
+    private val authProvider: AuthProvider
 ) {
 
     suspend fun fetchAll(
@@ -185,12 +194,7 @@ class DynamicRepository @Inject constructor(
 
         val stats = modules.firstNotNullOfOrNull { module ->
             if (module.hasModuleButtom()) {
-                val s = module.moduleButtom.moduleStat
-                DynamicStats(
-                    repost = s.repost,
-                    reply = s.reply,
-                    like = s.like
-                )
+                mapStats(module.moduleButtom.moduleStat)
             } else null
         }
 
@@ -214,6 +218,114 @@ class DynamicRepository @Inject constructor(
             replyBizId = reply.replyBizId.takeIf { it > 0L } ?: 0L,
             replyBizType = reply.replyBizType.takeIf { it > 0L } ?: 0L,
             forwardOrigin = forwardOrigin
+        )
+    }
+
+    /**
+     * 动态点赞/取消点赞（Web 端点）
+     */
+    suspend fun thumbDyn(dynId: String, up: Boolean) {
+        val csrf = authProvider.csrfToken()
+        check(csrf.isNotBlank()) { "登录凭证缺少 Web 授权，请重新登录" }
+        restClient.postWebForm(
+            url = "${BiliConstants.BASE_URL_API}$THUMB_DYN_ENDPOINT",
+            query = mapOf("csrf" to csrf),
+            form = mapOf(
+                "dyn_id_str" to dynId,
+                "up" to if (up) "1" else "0",
+                "spmid" to "333.1365.0.0"
+            ),
+            headers = BiliWebHeaderTool.build(authProvider.cookieHeader(), BiliConstants.BASE_URL_WEB_DYNAMIC)
+        )
+    }
+
+    /**
+     * 发布/转发动态（Web 端点，JSON body）
+     *
+     * scene：1=纯文本，2=带图，4=转发动态，5=转发视频等源内容
+     */
+    suspend fun createDyn(
+        mid: Long,
+        text: String,
+        pics: List<DynamicPicUpload> = emptyList(),
+        repostDynId: String? = null,
+        repostRid: Long = 0L,
+        repostDynType: Long = 0L
+    ) {
+        val csrf = authProvider.csrfToken()
+        check(csrf.isNotBlank()) { "登录凭证缺少 Web 授权，请重新登录" }
+        val isRepostVideo = repostRid > 0L
+        val scene = when {
+            isRepostVideo -> 5
+            !repostDynId.isNullOrBlank() -> 4
+            pics.isNotEmpty() -> 2
+            else -> 1
+        }
+        val contents = JSONArray().put(
+            JSONObject()
+                .put("raw_text", text)
+                .put("type", 1)
+                .put("biz_id", "")
+        )
+        val dynReq = JSONObject().apply {
+            put("content", JSONObject().put("contents", contents))
+            put("scene", scene)
+            if (pics.isNotEmpty()) {
+                put(
+                    "pics",
+                    JSONArray().apply {
+                        pics.forEach { pic ->
+                            put(
+                                JSONObject()
+                                    .put("img_url", pic.url)
+                                    .put("img_width", pic.width)
+                                    .put("img_height", pic.height)
+                                    .put("img_size", pic.sizeBytes)
+                            )
+                        }
+                    }
+                )
+            }
+            put(
+                "upload_id",
+                "${if (isRepostVideo) 0 else mid}_" +
+                    "${System.currentTimeMillis() / 1000}_" +
+                    "${(1000..9999).random()}"
+            )
+            put(
+                "meta",
+                JSONObject().put(
+                    "app_meta",
+                    JSONObject().put("from", "create.dynamic.web").put("mobi_app", "web")
+                )
+            )
+        }
+        val body = JSONObject().apply {
+            put("dyn_req", dynReq)
+            if (!repostDynId.isNullOrBlank()) {
+                put("web_repost_src", JSONObject().put("dyn_id_str", repostDynId))
+            } else if (isRepostVideo) {
+                put(
+                    "web_repost_src",
+                    JSONObject().put(
+                        "revs_id",
+                        JSONObject()
+                            .put("dyn_type", if (repostDynType > 0L) repostDynType else 8L)
+                            .put("rid", repostRid)
+                    )
+                )
+            }
+        }
+        restClient.postWebJson(
+            url = "${BiliConstants.BASE_URL_API}$CREATE_DYN_ENDPOINT",
+            body = body,
+            query = mapOf(
+                "platform" to "web",
+                "csrf" to csrf,
+                "x-bili-device-req-json" to """{"platform": "web", "device": "pc"}""",
+                "x-bili-web-req-json" to """{"spm_id": "333.999"}"""
+            ),
+            headers = BiliWebHeaderTool.build(authProvider.cookieHeader(), BiliConstants.BASE_URL_WEB_DYNAMIC)
         )
     }
 
@@ -326,7 +438,13 @@ class DynamicRepository @Inject constructor(
             spaceRoute = spaceRoute,
             trackId = extend.trackId.blankToNull(),
             reportFlowData = extend.reportMetricData.blankToNull(),
-            canOpen = summary.videoTarget != null || summary.liveRoute != null
+            canOpen = summary.videoTarget != null || summary.liveRoute != null,
+            dynType = item.modulesList
+                .firstOrNull { it.hasModuleDynamic() }
+                ?.moduleDynamic
+                ?.takeIf { it.moduleItemCase == ModuleDynamic.ModuleItemCase.DYN_ARCHIVE }
+                ?.let { 8L }
+                ?: 0L
         )
     }
 
@@ -379,7 +497,8 @@ class DynamicRepository @Inject constructor(
         return DynamicStats(
             repost = stat.repost,
             reply = stat.reply,
-            like = stat.like
+            like = stat.like,
+            liked = stat.hasLikeInfo() && stat.likeInfo.isLike
         )
     }
 
@@ -741,6 +860,8 @@ class DynamicRepository @Inject constructor(
         const val ENDPOINT = "bilibili.app.dynamic.v2.Dynamic/DynAll"
         const val OPUS_DETAIL_ENDPOINT = "bilibili.app.dynamic.v2.Opus/OpusDetail"
         const val SPACE_ENDPOINT = "bilibili.app.dynamic.v2.Dynamic/DynSpace"
+        const val THUMB_DYN_ENDPOINT = "/x/dynamic/feed/dyn/thumb"
+        const val CREATE_DYN_ENDPOINT = "/x/dynamic/feed/create/dyn"
         const val DEFAULT_QN = 80L
         const val DEFAULT_FNVER = 0L
         const val DEFAULT_FNVAL = 272L

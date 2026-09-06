@@ -95,7 +95,11 @@ data class CommentReply(
     val parentName: String? = null,
     val user: CommentUser,
     val emotes: List<CommentEmote> = emptyList(),
-    val pictures: List<CommentPicture> = emptyList()
+    val pictures: List<CommentPicture> = emptyList(),
+    /** 当前用户是否已点赞（gRPC reply_control.action == 1） */
+    val liked: Boolean = false,
+    /** 当前用户是否已点踩（gRPC reply_control.action == 2） */
+    val disliked: Boolean = false
 )
 
 @Immutable

@@ -15,8 +15,15 @@ data class FavoriteFolder(
     val attrDesc: String?,
     val mediaCount: Int,
     val createdAtSec: Long,
-    val isTop: Boolean
-)
+    val isTop: Boolean,
+    /** 目标内容是否已在该收藏夹内（list-all 携带 rid 时返回，1=已收藏），其余场景为 0 */
+    val favState: Int = 0,
+    /** 收藏夹属性位：bit0=私有（与 PiliPlus 语义一致） */
+    val attr: Int = 0
+) {
+    val isPrivate: Boolean
+        get() = attr and 0b1 == 0b1
+}
 
 @Immutable
 data class FavoriteContentCursor(

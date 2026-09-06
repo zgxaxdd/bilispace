@@ -51,10 +51,10 @@ private val MonochromeDarkColorScheme = darkColorScheme(
     surfaceContainerLow = Color(0xFF0A0A0A),
     surfaceContainerLowest = Color.Black,
     surfaceDim = Color.Black,
-    error = Color(0xFFE0E0E0),
-    onError = Color.Black,
-    errorContainer = Color(0xFF2A2A2A),
-    onErrorContainer = Color.White
+    error = Color(0xFFCF6679),
+    onError = Color(0xFF000000),
+    errorContainer = Color(0xFF8C1D18),
+    onErrorContainer = Color(0xFFF9DEDC)
 )
 
 private val MonochromeLightColorScheme = lightColorScheme(
@@ -90,10 +90,10 @@ private val MonochromeLightColorScheme = lightColorScheme(
     surfaceContainerLow = Color(0xFFFAFAFA),
     surfaceContainerLowest = Color.White,
     surfaceDim = Color(0xFFF3F3F3),
-    error = Color(0xFF2E2E2E),
-    onError = Color.White,
-    errorContainer = Color(0xFFE2E2E2),
-    onErrorContainer = Color.Black
+    error = Color(0xFFB3261E),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B)
 )
 
 @Composable
@@ -251,10 +251,10 @@ private fun createSeedColorScheme(seedColor: Color, isDark: Boolean): ColorSchem
             surfaceContainerLow = surfaceContainerLow,
             surfaceContainerLowest = surfaceContainerLowest,
             surfaceDim = surfaceDim,
-            error = Color(0xFFE0E0E0),
-            onError = Color.Black,
-            errorContainer = Color(0xFF2A2A2A),
-            onErrorContainer = Color.White
+            error = Color(0xFFCF6679),
+            onError = Color(0xFF000000),
+            errorContainer = Color(0xFF8C1D18),
+            onErrorContainer = Color(0xFFF9DEDC)
         )
     } else {
         lightColorScheme(
@@ -290,10 +290,10 @@ private fun createSeedColorScheme(seedColor: Color, isDark: Boolean): ColorSchem
             surfaceContainerLow = surfaceContainerLow,
             surfaceContainerLowest = surfaceContainerLowest,
             surfaceDim = surfaceDim,
-            error = Color(0xFF2E2E2E),
-            onError = Color.White,
-            errorContainer = Color(0xFFE2E2E2),
-            onErrorContainer = Color.Black
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+            errorContainer = Color(0xFFF9DEDC),
+            onErrorContainer = Color(0xFF410E0B)
         )
     }
 }

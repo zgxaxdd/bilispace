@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.designsystem.component.CommentCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.CommentHeaderSkeleton
@@ -183,6 +184,19 @@ fun CommentPanel(
                 is CommentReplyAction.Translate -> viewModel.translateReply(action.rpid)
                 is CommentReplyAction.Delete -> viewModel.deleteReply(action.reply)
                 is CommentReplyAction.Reply -> viewModel.replyTo(action.reply)
+                is CommentReplyAction.Like -> viewModel.likeReply(action.reply)
+                is CommentReplyAction.Dislike -> viewModel.dislikeReply(action.reply)
+                is CommentReplyAction.Share -> {
+                    val subj = routeSubject
+                    if (subj != null) {
+                        val url = if (subj.type == CommentSubjectTool.TYPE_DYNAMIC) {
+                            ShareUtils.dynamicUrl(subj.oid.toString())
+                        } else {
+                            ShareUtils.commentUrl(null, subj.oid, action.reply.rpid)
+                        }
+                        ShareUtils.shareText(context, "评论分享", url)
+                    }
+                }
                 is CommentReplyAction.OpenReplies -> viewModel.openReplyThread(action.reply)
                 is CommentReplyAction.OpenUser -> {
                     action.user.toSpaceRoute(routeSubject)?.let(onOpenSpace)

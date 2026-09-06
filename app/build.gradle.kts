@@ -40,8 +40,8 @@ android {
         applicationId = "com.naaammme.bbspace"
         minSdk = 24
         targetSdk = 36
-        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
-        versionName = (project.findProperty("versionName") as String?) ?: "1.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 10804
+        versionName = (project.findProperty("versionName") as String?) ?: "1.8.04"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -51,7 +51,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a")
+            include("arm64-v8a")
             isUniversalApk = false
         }
     }

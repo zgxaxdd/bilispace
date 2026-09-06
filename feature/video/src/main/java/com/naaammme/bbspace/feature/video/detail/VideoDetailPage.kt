@@ -1,8 +1,11 @@
 package com.naaammme.bbspace.feature.video.detail
 
 import android.text.format.DateFormat
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +18,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -27,14 +32,25 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,21 +64,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoDetailInfoSkeleton
 import com.naaammme.bbspace.core.designsystem.component.VideoRelateCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
+import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.model.CommentSubject
 import com.naaammme.bbspace.core.model.QualityOption
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.SpaceRouteTool
 import com.naaammme.bbspace.core.model.VideoDetail
+import com.naaammme.bbspace.core.model.PlayBiz
 import com.naaammme.bbspace.core.model.VideoOwner
 import com.naaammme.bbspace.core.model.VideoPagePart
 import com.naaammme.bbspace.core.model.VideoRelate
@@ -71,14 +92,20 @@ import com.naaammme.bbspace.core.model.VideoSeason
 import com.naaammme.bbspace.core.model.VideoSeasonEpisode
 import com.naaammme.bbspace.core.model.VideoStat
 import com.naaammme.bbspace.feature.comment.CommentPanel
+import com.naaammme.bbspace.feature.video.FavFolderSheetState
+import com.naaammme.bbspace.feature.video.VideoInteractionState
+import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.formatDuration
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun VideoDetailPage(
     modifier: Modifier = Modifier,
+    viewModel: VideoViewModel,
     detail: VideoDetail?,
     ids: ResolvedVideoIds,
+    biz: PlayBiz,
     detailLoading: Boolean,
     detailError: String?,
     commentSubject: CommentSubject?,
@@ -100,6 +127,33 @@ internal fun VideoDetailPage(
     val commentThreadListState = remember(aidKey) { LazyListState() }
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val interaction by viewModel.interaction.collectAsStateWithLifecycle()
+    val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
+
+    val handleAction: (VideoDetailUiAction) -> Unit = { action ->
+        when (action) {
+            VideoDetailUiAction.Like -> viewModel.toggleLike()
+            VideoDetailUiAction.Triple -> viewModel.triple()
+            VideoDetailUiAction.Coin -> sheet = DetailSheet.Coin
+            VideoDetailUiAction.Favorite -> {
+                viewModel.openFavSheet()
+                sheet = DetailSheet.Fav
+            }
+            VideoDetailUiAction.Share -> {
+                val pgcEp = ids.epId.takeIf { it > 0L }
+                val url = if (biz == PlayBiz.PGC && pgcEp != null) {
+                    ShareUtils.pgcUrl(pgcEp)
+                } else {
+                    val pageIndex = detail?.pages
+                        ?.indexOfFirst { it.cid == ids.cid }
+                        ?.takeIf { it >= 0 }
+                    ShareUtils.videoUrl(ids.bvid, ids.aid, (pageIndex ?: -1) + 1)
+                }
+                ShareUtils.shareText(context, detail?.title, url)
+            }
+        }
+    }
 
     LaunchedEffect(aidKey) {
         pagerState.scrollToPage(0)
@@ -112,6 +166,13 @@ internal fun VideoDetailPage(
             }
             sheet = null
             afterClose?.invoke()
+        }
+    }
+
+    LaunchedEffect(favSheetState.dismissRequest) {
+        if (favSheetState.dismissRequest) {
+            viewModel.consumeFavDismiss()
+            closeSheet()
         }
     }
 
@@ -146,7 +207,9 @@ internal fun VideoDetailPage(
                 },
                 onOpenVideo = onOpenVideo,
                 onOpenSpace = onOpenSpace,
-                onDownloadClick = onDownloadClick
+                onDownloadClick = onDownloadClick,
+                onAction = handleAction,
+                interaction = interaction
             )
 
             else -> {
@@ -159,9 +222,9 @@ internal fun VideoDetailPage(
                     threadListState = commentThreadListState,
                     contentPadding = PaddingValues(
                         start = contentHorizontalPad,
-                        top = 12.dp,
+                        top = BiliSpacing.md,
                         end = contentHorizontalPad,
-                        bottom = 20.dp
+                        bottom = BiliSpacing.xl
                     )
                 )
             }
@@ -197,6 +260,27 @@ internal fun VideoDetailPage(
                         }
                     )
                 }
+
+                is DetailSheet.Coin -> {
+                    CoinSheetContent(
+                        coinBalance = viewModel.coinBalance(),
+                        copyright = detail?.copyright,
+                        userCoinCount = interaction.userState?.coinCount ?: 0,
+                        busy = interaction.busy,
+                        onSubmit = { multiply, withLike ->
+                            viewModel.submitCoin(multiply, withLike)
+                        }
+                    )
+                }
+
+                is DetailSheet.Fav -> {
+                    FavFolderSheetContent(
+                        state = favSheetState,
+                        onToggle = viewModel::toggleFavFolder,
+                        onCreateFolder = viewModel::createFolderInSheet,
+                        onSubmit = viewModel::submitFav
+                    )
+                }
             }
         }
     }
@@ -220,7 +304,9 @@ private fun DetailPageContent(
     onOpenComments: () -> Unit,
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit,
-    onDownloadClick: () -> Unit
+    onDownloadClick: () -> Unit,
+    onAction: (VideoDetailUiAction) -> Unit,
+    interaction: VideoInteractionState
 ) {
     val itemMod = remember(horizontalPad) {
         if (horizontalPad > 0.dp) Modifier.padding(horizontal = horizontalPad) else Modifier
@@ -232,8 +318,8 @@ private fun DetailPageContent(
     LazyColumn(
         state = infoListState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = infoTopPad, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(top = infoTopPad, bottom = BiliSpacing.xl),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
     ) {
         detailItems(
             detail = detail,
@@ -250,7 +336,9 @@ private fun DetailPageContent(
             onOpenVideo = onOpenVideo,
             onOpenSpace = onOpenSpace,
             onDownloadClick = onDownloadClick,
-            onOpenComments = onOpenComments
+            onOpenComments = onOpenComments,
+            onAction = onAction,
+            interaction = interaction
         )
     }
 }
@@ -270,7 +358,9 @@ private fun LazyListScope.detailItems(
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit,
     onDownloadClick: () -> Unit,
-    onOpenComments: () -> Unit
+    onOpenComments: () -> Unit,
+    onAction: (VideoDetailUiAction) -> Unit,
+    interaction: VideoInteractionState
 ) {
     val curCid = ids.cid.takeIf { it > 0L }
     when {
@@ -318,6 +408,8 @@ private fun LazyListScope.detailItems(
                     onOpenSpace = onOpenSpace,
                     onDownloadClick = onDownloadClick,
                     onOpenComments = onOpenComments,
+                    onAction = onAction,
+                    interaction = interaction,
                     modifier = itemMod
                 )
             }
@@ -391,12 +483,14 @@ private fun VideoSummarySection(
     onToggleTag: () -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit,
     onDownloadClick: () -> Unit,
-    onOpenComments: () -> Unit
+    onOpenComments: () -> Unit,
+    onAction: (VideoDetailUiAction) -> Unit,
+    interaction: VideoInteractionState
 ) {
     val spaceRoute = detail.toSpaceRouteOrNull(ids.aid.takeIf { it > 0L })
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         detail.owner?.let { owner ->
             OwnerCapsule(
@@ -416,7 +510,8 @@ private fun VideoSummarySection(
             onOpenComments = onOpenComments
         )
         ActionCapsule(
-            stat = detail.stat,
+            interaction = interaction,
+            onAction = onAction,
             onDownloadClick = onDownloadClick
         )
     }
@@ -433,7 +528,7 @@ private fun OwnerCapsule(
         onClick = onClick
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             owner.face?.takeIf(String::isNotBlank)?.let { face ->
@@ -457,8 +552,8 @@ private fun OwnerCapsule(
                     style = MaterialTheme.typography.titleMedium
                 )
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     owner.fansText?.takeIf(String::isNotBlank)?.let { fans ->
                         SoftChip(fans)
@@ -495,8 +590,8 @@ private fun InfoCapsule(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             ids.aid.takeIf { it > 0L }?.let { SoftChip("AV$it", onLongPressLabel = "AV号") }
             ids.bvid?.takeIf(String::isNotBlank)?.let { SoftChip(it, onLongPressLabel = "BV号") }
@@ -516,9 +611,9 @@ private fun InfoCapsule(
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(top = BiliSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             if (detail.desc.isNotBlank()) {
                 ToggleChip(
@@ -539,7 +634,7 @@ private fun InfoCapsule(
                 text = detail.desc,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier
-                    .padding(top = 12.dp)
+                    .padding(top = BiliSpacing.md)
                     .copyTextOnLongPress(detail.desc, "简介")
             )
         }
@@ -548,9 +643,9 @@ private fun InfoCapsule(
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(top = BiliSpacing.md),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 detail.tags.forEach { tag ->
                     SoftChip(tag)
@@ -563,29 +658,61 @@ private fun InfoCapsule(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ActionCapsule(
-    stat: VideoStat?,
+    interaction: VideoInteractionState,
     modifier: Modifier = Modifier,
+    onAction: (VideoDetailUiAction) -> Unit,
     onDownloadClick: () -> Unit
 ) {
+    val stat = interaction.stat
+    val userState = interaction.userState
+    val liked = userState?.liked == true
+    val coinated = (userState?.coinCount ?: 0) > 0
+    val faved = userState?.faved == true
     CapsuleCard(modifier = modifier) {
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             stat?.let {
-                ActionChip("点赞", it.like)
-                ActionChip("投币", it.coin)
-                ActionChip("收藏", it.fav)
-                ActionChip("分享", it.share)
+                ActionChip(
+                    label = "点赞",
+                    value = actionCount(it.likeValue, interaction.likeDelta),
+                    icon = Icons.Default.ThumbUp,
+                    selected = liked,
+                    onClick = { onAction(VideoDetailUiAction.Like) },
+                    onLongClick = { onAction(VideoDetailUiAction.Triple) }
+                )
+                ActionChip(
+                    label = "投币",
+                    value = actionCount(it.coinValue, interaction.coinDelta),
+                    selected = coinated,
+                    onClick = { onAction(VideoDetailUiAction.Coin) }
+                )
+                ActionChip(
+                    label = "收藏",
+                    value = actionCount(it.favValue, interaction.favDelta),
+                    icon = if (faved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    selected = faved,
+                    onClick = { onAction(VideoDetailUiAction.Favorite) }
+                )
+                ActionChip(
+                    label = "分享",
+                    value = it.share,
+                    icon = Icons.Default.Share,
+                    onClick = { onAction(VideoDetailUiAction.Share) }
+                )
             }
             ActionChip(
                 label = "下载",
+                tone = ActionChipTone.Secondary,
                 onClick = onDownloadClick
             )
         }
     }
 }
+
+private fun actionCount(base: Long, delta: Long): String = (base + delta).toString()
 
 @Composable
 private fun CapsuleCard(
@@ -603,7 +730,7 @@ private fun CapsuleCard(
             )
         ) {
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(BiliSpacing.lg)
             ) {
                 content()
             }
@@ -617,7 +744,7 @@ private fun CapsuleCard(
             )
         ) {
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(BiliSpacing.lg)
             ) {
                 content()
             }
@@ -663,33 +790,62 @@ private fun ToggleChip(
             text = text,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onTertiaryContainer,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.sm)
         )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ActionChip(
     label: String,
     value: String? = null,
-    onClick: (() -> Unit)? = null
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    selected: Boolean = false,
+    tone: ActionChipTone = ActionChipTone.Primary,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null
 ) {
+    val containerColor = when {
+        tone == ActionChipTone.Secondary -> MaterialTheme.colorScheme.secondaryContainer
+        selected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.primaryContainer
+    }
+    val contentColor = when {
+        tone == ActionChipTone.Secondary -> MaterialTheme.colorScheme.onSecondaryContainer
+        selected -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
+    }
+    val clickableModifier = when {
+        onClick != null && onLongClick != null -> Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = onLongClick
+        )
+
+        onClick != null -> Modifier.clickable(onClick = onClick)
+        else -> Modifier
+    }
     Surface(
-        modifier = if (onClick != null) {
-            Modifier.clickable(onClick = onClick)
-        } else {
-            Modifier
-        },
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = clickableModifier.then(modifier),
+        color = containerColor,
         shape = MaterialTheme.shapes.extraLarge
     ) {
         Row(
             modifier = Modifier
                 .defaultMinSize(minWidth = 76.dp, minHeight = 36.dp)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.sm),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            icon?.let {
+                Icon(
+                    imageVector = it,
+                    contentDescription = label,
+                    tint = contentColor,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
             Text(
                 text = label,
                 style = if (value == null) {
@@ -697,13 +853,13 @@ private fun ActionChip(
                 } else {
                     MaterialTheme.typography.labelMedium
                 },
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                color = contentColor
             )
             value?.let {
                 Text(
                     text = it,
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                    color = contentColor
                 )
             }
         }
@@ -721,10 +877,13 @@ private fun SeasonEntryCard(
 
     Card(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(BiliSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
@@ -764,10 +923,13 @@ private fun PageEntryCard(
 
     Card(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(BiliSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
@@ -808,14 +970,14 @@ private fun SeasonSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         item(
             key = "season_title",
             contentType = "title"
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)) {
                 Text(
                     text = season.title,
                     style = MaterialTheme.typography.titleLarge
@@ -836,13 +998,13 @@ private fun SeasonSheetContent(
                 contentType = "section"
             ) {
                 if (secIdx > 0) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = BiliSpacing.xs))
                 }
                 if (sec.title.isNotBlank()) {
                     Text(
                         text = sec.title,
                         style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier.padding(top = BiliSpacing.xs)
                     )
                 }
             }
@@ -881,8 +1043,8 @@ private fun PageSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         item(
             key = "page_title",
@@ -929,7 +1091,7 @@ private fun SeasonEpisodeRow(
 
     Row(
         modifier = rowMod.padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
         verticalAlignment = Alignment.Top
     ) {
         ep.cover?.takeIf(String::isNotBlank)?.let { cover ->
@@ -946,11 +1108,11 @@ private fun SeasonEpisodeRow(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -969,7 +1131,7 @@ private fun SeasonEpisodeRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
+            HorizontalDivider(modifier = Modifier.padding(top = BiliSpacing.xs))
         }
     }
 }
@@ -991,11 +1153,11 @@ private fun PageSheetRow(
 
     Column(
         modifier = rowMod.padding(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -1014,7 +1176,7 @@ private fun PageSheetRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
+        HorizontalDivider(modifier = Modifier.padding(top = BiliSpacing.xs))
     }
 }
 
@@ -1032,13 +1194,16 @@ private fun RelateRow(
 
     Card(
         onClick = { onOpenVideo(relate.target) },
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(BiliSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             verticalAlignment = Alignment.Top
         ) {
             BiliAsyncImage(
@@ -1128,7 +1293,7 @@ internal fun QualityOptionItem(
         Modifier.fillMaxWidth()
     }
     Row(
-        modifier = rowMod.padding(12.dp),
+        modifier = rowMod.padding(BiliSpacing.md),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1267,6 +1432,230 @@ private sealed interface DetailSheet {
         val pages: List<VideoPagePart>,
         val curCid: Long?
     ) : DetailSheet
+
+    data object Coin : DetailSheet
+
+    data object Fav : DetailSheet
+}
+
+/** 互动 chip 主次：Primary=赞/投/藏/享（主色系），Secondary=下载（次级） */
+internal enum class ActionChipTone {
+    Primary,
+    Secondary
+}
+
+internal sealed interface VideoDetailUiAction {
+    data object Like : VideoDetailUiAction
+
+    data object Triple : VideoDetailUiAction
+
+    data object Coin : VideoDetailUiAction
+
+    data object Favorite : VideoDetailUiAction
+
+    data object Share : VideoDetailUiAction
+}
+
+@Composable
+private fun CoinSheetContent(
+    coinBalance: Double?,
+    copyright: Int?,
+    userCoinCount: Int,
+    busy: Boolean,
+    onSubmit: (Int, Boolean) -> Unit
+) {
+    var multiply by remember { mutableStateOf(1) }
+    var withLike by remember { mutableStateOf(true) }
+    // 转载视频与已投过币的视频最多再投 1 枚；投满 2 枚后不能再投
+    val reachedLimit = userCoinCount >= 2 || (copyright == 2 && userCoinCount >= 1)
+    val maxCoin = if (copyright == 2 || userCoinCount >= 1) 1 else 2
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("投币", style = MaterialTheme.typography.titleLarge)
+        if (reachedLimit) {
+            Text(
+                text = "达到投币上限啦~",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
+                FilterChip(
+                    selected = multiply == 1,
+                    onClick = { multiply = 1 },
+                    label = { Text("1 枚") }
+                )
+                FilterChip(
+                    selected = multiply == 2,
+                    onClick = { multiply = 2 },
+                    enabled = maxCoin == 2,
+                    label = { Text("2 枚") }
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
+            ) {
+                Checkbox(checked = withLike, onCheckedChange = { withLike = it })
+                Text("同时点赞", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        coinBalance?.let { balance ->
+            Text(
+                text = "硬币余额：$balance",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (!reachedLimit) {
+            Button(
+                onClick = { onSubmit(multiply, withLike) },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (busy) "投币中…" else "确认投币")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavFolderSheetContent(
+    state: FavFolderSheetState,
+    onToggle: (Long) -> Unit,
+    onCreateFolder: (String, Int) -> Unit,
+    onSubmit: () -> Unit
+) {
+    var showCreate by remember { mutableStateOf(false) }
+    var newTitle by remember { mutableStateOf("") }
+    var privateFolder by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("收藏", style = MaterialTheme.typography.titleLarge)
+        when {
+            state.loading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 160.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            state.folders.isEmpty() -> {
+                StateMessageCard(text = "暂无收藏夹，新建一个吧")
+            }
+
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                ) {
+                    items(
+                        items = state.folders,
+                        key = { it.fid }
+                    ) { folder ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggle(folder.fid) }
+                                .padding(vertical = BiliSpacing.sm),
+                            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = folder.fid in state.selectedIds,
+                                onCheckedChange = { onToggle(folder.fid) }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(folder.title, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = "${folder.mediaCount} 个内容",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        TextButton(onClick = { showCreate = true }) {
+            Text("＋ 新建收藏夹")
+        }
+        Button(
+            onClick = onSubmit,
+            enabled = !state.submitting && !state.loading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (state.submitting) "保存中…" else "完成")
+        }
+    }
+
+    if (showCreate) {
+        AlertDialog(
+            onDismissRequest = { showCreate = false },
+            title = { Text("新建收藏夹") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = newTitle,
+                        onValueChange = { newTitle = it },
+                        placeholder = { Text("收藏夹标题") },
+                        singleLine = true
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
+                        FilterChip(
+                            selected = !privateFolder,
+                            onClick = { privateFolder = false },
+                            label = { Text("公开") }
+                        )
+                        FilterChip(
+                            selected = privateFolder,
+                            onClick = { privateFolder = true },
+                            label = { Text("私有") }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val title = newTitle.trim()
+                        if (title.isNotEmpty()) {
+                            onCreateFolder(title, if (privateFolder) 1 else 0)
+                            newTitle = ""
+                            privateFolder = false
+                            showCreate = false
+                        }
+                    },
+                    enabled = newTitle.isNotBlank()
+                ) {
+                    Text("创建")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreate = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @Immutable

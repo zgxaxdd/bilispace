@@ -25,6 +25,7 @@ import com.naaammme.bbspace.core.model.VideoCdnMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -207,6 +208,110 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.edit { it[blockGaiaKey] = enabled }
     }
 
+    // ===== 首页布局 =====
+    private val homeFeedSingleColumnKey = booleanPreferencesKey("home_feed_single_column")
+
+    /** 首页推荐流是否使用单列大图布局，默认开启（预览图更大）。 */
+    val homeFeedSingleColumn: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[homeFeedSingleColumnKey] ?: true }
+
+    suspend fun setHomeFeedSingleColumn(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[homeFeedSingleColumnKey] = enabled }
+    }
+
+    // ===== 空降助手（SponsorBlock） =====
+    private val sponsorBlockEnabledKey = booleanPreferencesKey("sponsor_block_enabled")
+
+    /** 空降助手总开关，默认关闭。 */
+    val sponsorBlockEnabled: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[sponsorBlockEnabledKey] ?: false }
+
+    suspend fun updateSponsorBlockEnabled(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[sponsorBlockEnabledKey] = enabled }
+    }
+
+    private val sponsorBlockServerUrlKey = stringPreferencesKey("sponsor_block_server_url")
+
+    /** 空降助手社区服务器地址，留空使用官方默认。 */
+    val sponsorBlockServerUrl: Flow<String> =
+        context.appSettingsDataStore.data.map { it[sponsorBlockServerUrlKey] ?: "" }
+
+    suspend fun updateSponsorBlockServerUrl(url: String) {
+        context.appSettingsDataStore.edit { it[sponsorBlockServerUrlKey] = url.trim() }
+    }
+
+    private val sponsorBlockUserIdKey = stringPreferencesKey("sponsor_block_user_id")
+
+    /** 私人用户 ID（36 位随机串），首次使用时生成；丢失无法找回，务必只存本地。 */
+    val sponsorBlockUserId: Flow<String?> =
+        context.appSettingsDataStore.data.map { it[sponsorBlockUserIdKey]?.takeIf(String::isNotBlank) }
+
+    suspend fun ensureSponsorBlockUserId(): String {
+        val existing = context.appSettingsDataStore.data
+            .map { it[sponsorBlockUserIdKey]?.takeIf(String::isNotBlank) }
+            .first()
+        if (existing != null) return existing
+        val charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        val random = java.security.SecureRandom()
+        val next = buildString {
+            repeat(36) { append(charset[random.nextInt(charset.length)]) }
+        }
+        context.appSettingsDataStore.edit { it[sponsorBlockUserIdKey] = next }
+        return next
+    }
+
+    suspend fun regenerateSponsorBlockUserId(): String {
+        context.appSettingsDataStore.edit { it.remove(sponsorBlockUserIdKey) }
+        return ensureSponsorBlockUserId()
+    }
+
+    private val sponsorBlockCategoryTypesKey = stringPreferencesKey("sponsor_block_category_types")
+
+    /**
+     * 各分类的处理策略，key 为分类 wire 名，value 为 SbSkipType 序号。
+     * 未配置的分类使用 SbCategory.defaultSkipType。
+     */
+    val sponsorBlockCategoryTypes: Flow<Map<String, Int>> =
+        context.appSettingsDataStore.data.map { prefs ->
+            val raw = prefs[sponsorBlockCategoryTypesKey]?.takeIf(String::isNotBlank)
+                ?: return@map emptyMap()
+            runCatching {
+                val obj = org.json.JSONObject(raw)
+                buildMap {
+                    obj.keys().forEach { key ->
+                        put(key, obj.optInt(key, -1).takeIf { it >= 0 } ?: return@forEach)
+                    }
+                }
+            }.getOrDefault(emptyMap())
+        }
+
+    suspend fun updateSponsorBlockCategoryTypes(types: Map<String, Int>) {
+        val json = org.json.JSONObject().apply {
+            types.forEach { (key, value) -> put(key, value) }
+        }.toString()
+        context.appSettingsDataStore.edit { it[sponsorBlockCategoryTypesKey] = json }
+    }
+
+    private val sponsorBlockToastKey = booleanPreferencesKey("sponsor_block_toast")
+
+    /** 跳过提示 Toast，默认开启。 */
+    val sponsorBlockToast: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[sponsorBlockToastKey] ?: true }
+
+    suspend fun updateSponsorBlockToast(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[sponsorBlockToastKey] = enabled }
+    }
+
+    private val sponsorBlockMarkersKey = booleanPreferencesKey("sponsor_block_markers")
+
+    /** 进度条片段标记，默认开启。 */
+    val sponsorBlockMarkers: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[sponsorBlockMarkersKey] ?: true }
+
+    suspend fun updateSponsorBlockMarkers(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[sponsorBlockMarkersKey] = enabled }
+    }
+
     private val enableHdrAnd8kKey = booleanPreferencesKey("enable_hdr_8k")
     private val defaultVideoQualityKey = intPreferencesKey("default_video_quality")
     private val defaultAudioQualityKey = intPreferencesKey("default_audio_quality")
@@ -221,6 +326,7 @@ class AppSettings @Inject constructor(
     private val inAppMiniPlayerKey = booleanPreferencesKey("in_app_mini_player")
     private val autoRotateFullscreenKey = booleanPreferencesKey("auto_rotate_fullscreen")
     private val gestureSpeedKey = floatPreferencesKey("gesture_speed")
+    private val doubleTapLikeKey = booleanPreferencesKey("double_tap_like")
     private val videoCdnModeKey = stringPreferencesKey("video_cdn_mode")
     private val reportPlaybackKey = booleanPreferencesKey("report_playback")
     private val danmakuEnabledKey = booleanPreferencesKey("danmaku_enabled")
@@ -263,7 +369,8 @@ class AppSettings @Inject constructor(
                 ).coerceIn(0.25f, 3f),
                 videoCdnMode = prefs[videoCdnModeKey]
                     ?.let(VideoCdnMode::valueOf)
-                    ?: defaultPlaybackPrefs.videoCdnMode
+                    ?: defaultPlaybackPrefs.videoCdnMode,
+                doubleTapLike = prefs[doubleTapLikeKey] ?: defaultPlaybackPrefs.doubleTapLike
             ),
             danmaku = DanmakuConfig(
                 enabled = prefs[danmakuEnabledKey] ?: defaultDanmakuConfig.enabled,
@@ -342,6 +449,10 @@ class AppSettings @Inject constructor(
 
     suspend fun setGestureSpeed(speed: Float) {
         context.appSettingsDataStore.edit { it[gestureSpeedKey] = speed.coerceIn(0.25f, 3f) }
+    }
+
+    suspend fun setDoubleTapLike(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[doubleTapLikeKey] = enabled }
     }
 
     suspend fun setVideoCdnMode(mode: VideoCdnMode) {

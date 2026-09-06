@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Singleton
@@ -37,7 +38,7 @@ class AppInitializer @Inject constructor(
     private val buvidFetcher: BuvidFetcher,
     private val guestIdGenerator: GuestIdGenerator,
     private val biliDns: BiliDns,
-    private val okHttpClient: OkHttpClient,
+    @param:Named("image") private val imageOkHttpClient: OkHttpClient,
     private val gaiaReporter: GaiaReporter,
     private val appSettings: AppSettings,
     private val cacheManager: CacheManager,
@@ -53,6 +54,9 @@ class AppInitializer @Inject constructor(
     @Volatile
     private var initialized = false
 
+    @Volatile
+    private var coldStartSucceeded = false
+
     fun initialize() {
         observePlaybackService()
 
@@ -60,6 +64,9 @@ class AppInitializer @Inject constructor(
             val useSystemDns = appSettings.useSystemDns.first()
             biliDns.start(useSystemDns) {
                 if (!initialized) return@start
+                // init 流程内已成功拉取过冷启动数据则不重复请求；
+                // DNS 就绪后的补拉仅用于首次请求失败的恢复场景
+                if (coldStartSucceeded) return@start
                 initScope.launch {
                     cacheManager.clearColdStartCache()
                     coldStartClient.getColdStartData()
@@ -89,6 +96,7 @@ class AppInitializer @Inject constructor(
                     Logger.d(TAG) { "远程 buvid: ${remoteBuvid ?: "获取失败，使用本地 buvid"}" }
 
                     val coldStartData = coldStartClient.getColdStartData()
+                    coldStartSucceeded = coldStartData.ipInfo != null
                     Logger.d(TAG) { "冷启动数据获取完成: IP=${coldStartData.ipInfo?.addr}" }
 
                     val guestId = guestIdGenerator.getOrGenerateGuestId(ticket)
@@ -114,7 +122,8 @@ class AppInitializer @Inject constructor(
         }
     }
 
-    // 预建 TCP+TLS 连接到图片 CDN，避免首批图片等待握手
+    // 预建 TCP+TLS 连接到图片 CDN，避免首批图片等待握手。
+    // 必须使用图片 client：它与 Coil 共享同一连接池，预热连接才能被图片请求复用
     private fun warmupImageConnections() {
         val hosts = listOf("i0.hdslb.com", "i1.hdslb.com", "i2.hdslb.com")
         initScope.launch {
@@ -124,7 +133,7 @@ class AppInitializer @Inject constructor(
                         .url("https://$host")
                         .head()
                         .build()
-                    runCatching { okHttpClient.newCall(req).execute().close() }
+                    runCatching { imageOkHttpClient.newCall(req).execute().close() }
                     Logger.d(TAG) { "连接预热完成: $host" }
                 }
             }.forEach { it.await() }

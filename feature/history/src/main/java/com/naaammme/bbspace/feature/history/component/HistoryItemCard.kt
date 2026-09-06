@@ -21,6 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardCoverAnchor
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessVideoCardState
 import com.naaammme.bbspace.core.designsystem.component.rememberHighlightedTitle
 import com.naaammme.bbspace.core.model.HistoryItem
 
@@ -31,6 +34,10 @@ fun HistoryItemCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 无缝打开（仅视频类历史项）：注册成功由系统接管过渡，失败走 onClick 普通打开
+    val seamless = rememberSeamlessVideoCardState()
+    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = MaterialTheme.shapes.medium).radiusPx
+    val videoTarget = (item.target as? com.naaammme.bbspace.core.model.HistoryTarget.Video)?.target
     val titleText = rememberHighlightedTitle(
         text = item.title,
         highlightColor = MaterialTheme.colorScheme.primary
@@ -60,6 +67,7 @@ fun HistoryItemCard(
                     )
                 }
             ) {
+                SeamlessCardCoverAnchor(seamless, videoTarget, Modifier.matchParentSize())
                 Text(
                     text = item.typeLabel,
                     modifier = Modifier
@@ -120,7 +128,11 @@ fun HistoryItemCard(
 
     if (item.isOpenable) {
         Card(
-            onClick = onClick,
+            onClick = {
+                if (!seamless.tryOpen(videoTarget, item.cover, true, seamlessRadiusPx)) {
+                    onClick()
+                }
+            },
             modifier = modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow

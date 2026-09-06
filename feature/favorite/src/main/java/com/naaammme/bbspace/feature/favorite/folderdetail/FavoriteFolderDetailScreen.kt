@@ -1,18 +1,24 @@
 package com.naaammme.bbspace.feature.favorite.folderdetail
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
@@ -32,25 +38,60 @@ fun FavoriteFolderDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+
+    LaunchedEffect(viewModel) {
+        viewModel.msg.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     CollapsingTopBarScaffold(
         topBar = { scrollBehavior ->
             TopAppBar(
                 title = {
                     Text(
-                        text = if (state.totalCount > 0) {
-                            "收藏夹 ${state.totalCount}"
-                        } else {
-                            "收藏夹"
+                        text = when {
+                            state.selectionMode -> "已选 ${state.selectedKeys.size}"
+                            state.totalCount > 0 -> "收藏夹 ${state.totalCount}"
+                            else -> "收藏夹"
                         }
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (state.selectionMode) {
+                                viewModel.exitSelection()
+                            } else {
+                                onBack()
+                            }
+                        }
+                    ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回"
+                            imageVector = if (state.selectionMode) {
+                                Icons.Default.Close
+                            } else {
+                                Icons.AutoMirrored.Filled.ArrowBack
+                            },
+                            contentDescription = if (state.selectionMode) "退出多选" else "返回"
                         )
+                    }
+                },
+                actions = {
+                    if (state.selectionMode) {
+                        TextButton(onClick = viewModel::selectAll) {
+                            Text("全选")
+                        }
+                        TextButton(
+                            onClick = viewModel::deleteSelected,
+                            enabled = state.selectedKeys.isNotEmpty() && !state.submitting
+                        ) {
+                            Text(
+                                text = if (state.submitting) "移除中…" else "移除",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -96,7 +137,11 @@ fun FavoriteFolderDetailScreen(
                         onLoadMore = viewModel::loadMore,
                         onRetry = if (state.errorOnLoadMore) viewModel::loadMore else viewModel::refresh,
                         onOpenContent = onOpenContent,
-                        listState = listState
+                        listState = listState,
+                        selectionMode = state.selectionMode,
+                        selectedKeys = state.selectedKeys,
+                        onItemLongPress = viewModel::enterSelection,
+                        onToggleSelect = viewModel::toggleSelect
                     )
                 }
             }

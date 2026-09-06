@@ -14,13 +14,10 @@ import coil3.request.crossfade
 import coil3.util.DebugLogger
 import okio.Path.Companion.toOkioPath
 import com.naaammme.bbspace.core.common.log.Logger
-import com.naaammme.bbspace.core.common.UserAgentBuilder
-import com.naaammme.bbspace.infra.crypto.DeviceIdentity
 import dagger.hilt.android.HiltAndroidApp
-import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Named
 
 @HiltAndroidApp
 class BiliApplication : Application(), SingletonImageLoader.Factory {
@@ -29,10 +26,8 @@ class BiliApplication : Application(), SingletonImageLoader.Factory {
     lateinit var appInitializer: AppInitializer
 
     @Inject
-    lateinit var deviceIdentity: DeviceIdentity
-
-    @Inject
-    lateinit var okHttpClient: OkHttpClient
+    @Named("image")
+    lateinit var imageOkHttpClient: OkHttpClient
 
     override fun onCreate() {
         super.onCreate()
@@ -50,23 +45,6 @@ class BiliApplication : Application(), SingletonImageLoader.Factory {
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
-        val grpcUa = UserAgentBuilder.buildGrpcUserAgent(deviceIdentity.model, deviceIdentity.osVer)
-        val imageClient = okHttpClient.newBuilder()
-            .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
-            .addInterceptor { chain ->
-                val req = chain.request()
-                if (req.url.host.endsWith("hdslb.com")) {
-                    chain.proceed(
-                        req.newBuilder()
-                            .header("User-Agent", grpcUa)
-                            .build()
-                    )
-                } else {
-                    chain.proceed(req)
-                }
-            }
-            .build()
-
         return ImageLoader.Builder(context)
             .components {
                 if (SDK_INT >= 28) {
@@ -74,7 +52,7 @@ class BiliApplication : Application(), SingletonImageLoader.Factory {
                 } else {
                     add(GifDecoder.Factory())
                 }
-                add(OkHttpNetworkFetcherFactory(callFactory = imageClient))
+                add(OkHttpNetworkFetcherFactory(callFactory = imageOkHttpClient))
             }
             .memoryCache {
                 MemoryCache.Builder()

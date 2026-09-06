@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.home.listen
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -18,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -29,6 +31,7 @@ import com.naaammme.bbspace.core.model.listen.ListenItem
 @Composable
 fun ListenHomePage(
     isActive: Boolean,
+    topContentPadding: Dp = 0.dp,
     onItemClick: (ListenItem) -> Unit,
     viewModel: ListenHomeViewModel = hiltViewModel()
 ) {
@@ -47,6 +50,12 @@ fun ListenHomePage(
         modifier = Modifier.fillMaxSize(),
         errorMessage = state.errorMessage,
         loadMoreEnabled = state.hasMore,
+        contentPadding = PaddingValues(
+            start = 4.dp,
+            top = topContentPadding,
+            end = 4.dp,
+            bottom = 4.dp
+        ),
         key = { _, item -> item.actionKey() },
         loadingContent = {
             VideoGridCardSkeleton()

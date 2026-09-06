@@ -51,18 +51,18 @@ class BiliGrpcClient @Inject constructor(
         headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
 
         return withContext(Dispatchers.IO) {
-            val response = okHttpClient.newCall(requestBuilder.build()).execute()
+            okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
+                if (response.code != 200) {
+                    throw BiliApiException(response.code, "HTTP ${response.code}: ${response.message}")
+                }
 
-            if (response.code != 200) {
-                throw BiliApiException(response.code, "HTTP ${response.code}: ${response.message}")
+                val responseBytes = response.body?.bytes()
+                    ?: throw BiliApiException(-1, "Empty gRPC response")
+
+                val grpcEncoding = response.header("grpc-encoding")
+                val payload = GrpcFrameCodec.decode(responseBytes, grpcEncoding)
+                parser.parseFrom(payload)
             }
-
-            val responseBytes = response.body?.bytes()
-                ?: throw BiliApiException(-1, "Empty gRPC response")
-
-            val grpcEncoding = response.header("grpc-encoding")
-            val payload = GrpcFrameCodec.decode(responseBytes, grpcEncoding)
-            parser.parseFrom(payload)
         }
     }
 }

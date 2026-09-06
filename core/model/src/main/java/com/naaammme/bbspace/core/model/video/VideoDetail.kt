@@ -14,7 +14,9 @@ data class VideoDetail(
     val staffs: List<VideoStaff> = emptyList(),
     val season: VideoSeason? = null,
     val pages: List<VideoPagePart> = emptyList(),
-    val relates: List<VideoRelate> = emptyList()
+    val relates: List<VideoRelate> = emptyList(),
+    val userState: VideoUserState? = null,
+    val copyright: Int? = null
 )
 
 @Immutable
@@ -41,7 +43,21 @@ data class VideoStat(
     val like: String,
     val coin: String,
     val fav: String,
-    val share: String
+    val share: String,
+    val likeValue: Long = 0,
+    val coinValue: Long = 0,
+    val favValue: Long = 0,
+    val shareValue: Long = 0
+)
+
+/**
+ * 当前登录用户对该视频的互动状态，来自 gRPC 详情响应的 req_user
+ */
+@Immutable
+data class VideoUserState(
+    val liked: Boolean = false,
+    val coinCount: Int = 0,
+    val faved: Boolean = false
 )
 
 @Immutable

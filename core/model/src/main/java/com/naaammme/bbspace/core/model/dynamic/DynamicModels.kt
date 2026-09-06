@@ -56,7 +56,9 @@ data class DynamicItem(
     val spaceRoute: SpaceRoute?,
     val trackId: String?,
     val reportFlowData: String?,
-    val canOpen: Boolean
+    val canOpen: Boolean,
+    /** 源动态类型（ModuleDynamic.dyn_type，视频为 8），转发视频时需要 */
+    val dynType: Long = 0
 )
 
 @Immutable
@@ -72,7 +74,9 @@ data class DynamicAuthor(
 data class DynamicStats(
     val repost: Long,
     val reply: Long,
-    val like: Long
+    val like: Long,
+    /** 当前用户是否已点赞（gRPC like_info.is_like） */
+    val liked: Boolean = false
 )
 
 sealed interface DynamicBody {
@@ -139,6 +143,17 @@ data class DynamicImage(
     val url: String,
     val width: Int,
     val height: Int
+)
+
+/**
+ * 发布图片动态用的已上传图片
+ */
+@Immutable
+data class DynamicPicUpload(
+    val url: String,
+    val width: Int,
+    val height: Int,
+    val sizeBytes: Long
 )
 
 @Immutable

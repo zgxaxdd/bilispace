@@ -38,6 +38,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardCoverAnchor
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessVideoCardState
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
@@ -207,14 +210,25 @@ private fun WatchLaterItemCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 无缝打开：注册成功由系统接管过渡，失败走 onClick 普通打开
+    val seamless = rememberSeamlessVideoCardState()
+    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = MaterialTheme.shapes.medium).radiusPx
     val cardModifier = modifier.fillMaxWidth()
     val colors = CardDefaults.cardColors(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     )
 
     if (item.isOpenable) {
-        Card(onClick = onClick, modifier = cardModifier, colors = colors) {
-            WatchLaterItemContent(item = item)
+        Card(
+            onClick = {
+                if (!seamless.tryOpen(item.target, item.cover, true, seamlessRadiusPx)) {
+                    onClick()
+                }
+            },
+            modifier = cardModifier,
+            colors = colors
+        ) {
+            WatchLaterItemContent(item = item, coverAnchor = { SeamlessCardCoverAnchor(seamless, item.target, Modifier.matchParentSize()) })
         }
     } else {
         Card(modifier = cardModifier, colors = colors) {
@@ -226,7 +240,8 @@ private fun WatchLaterItemCard(
 @Composable
 private fun WatchLaterItemContent(
     item: WatchLaterItem,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    coverAnchor: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null
 ) {
     val infoLine = remember(item) { buildInfoLine(item) }
     val metaLine = remember(item) { buildMetaLine(item) }
@@ -258,6 +273,7 @@ private fun WatchLaterItemContent(
                 .weight(0.38f)
                 .aspectRatio(16f / 10f)
         ) {
+            coverAnchor?.invoke(this)
             duration?.let { text ->
                 Text(
                     text = text,

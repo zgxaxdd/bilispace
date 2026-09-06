@@ -51,6 +51,9 @@ ksp = "2.2.21-2.0.5"
 googleMaterial = "1.12.0"
 danmakuFlameMaster = "1.0.6"
 
+# OPPO system capability SDKs (compileOnly; implementation provided by ColorOS at runtime)
+oplusViewSeamless = "1.0.0"
+
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -136,6 +139,9 @@ kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 
 # QR Code
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+
+# OPPO system capability SDKs (compileOnly, do NOT ship inside APK)
+oplus-viewseamless = { group = "com.oplus.animation", name = "viewseamless", version.ref = "oplusViewSeamless" }
 
 # Gradle Plugins (for build-logic)
 android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }

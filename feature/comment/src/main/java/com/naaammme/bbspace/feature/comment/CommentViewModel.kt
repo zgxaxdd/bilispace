@@ -394,6 +394,106 @@ class CommentViewModel @Inject constructor(
         }
     }
 
+    /** 评论点赞/取消点赞 */
+    fun likeReply(reply: CommentReply) {
+        val wantLike = !reply.liked
+        toggleReplyRate(
+            reply = reply,
+            repoCall = { subject -> repo.likeReply(subject, reply.rpid, wantLike) },
+            successText = if (wantLike) "点赞成功" else "已取消点赞",
+            failureText = "点赞失败",
+            transform = { target ->
+                val delta = when {
+                    wantLike && !target.liked -> 1L
+                    !wantLike && target.liked -> -1L
+                    else -> 0L
+                }
+                target.copy(
+                    liked = wantLike,
+                    disliked = if (wantLike) false else target.disliked,
+                    likeCount = (target.likeCount + delta).coerceAtLeast(0L)
+                )
+            }
+        )
+    }
+
+    /** 评论点踩/取消点踩（与点赞互斥，点踩会取消已点赞） */
+    fun dislikeReply(reply: CommentReply) {
+        val wantHate = !reply.disliked
+        toggleReplyRate(
+            reply = reply,
+            repoCall = { subject -> repo.hateReply(subject, reply.rpid, wantHate) },
+            successText = if (wantHate) "已点踩" else "已取消点踩",
+            failureText = "点踩失败",
+            transform = { target ->
+                val delta = if (wantHate && target.liked) -1L else 0L
+                target.copy(
+                    disliked = wantHate,
+                    liked = if (wantHate) false else target.liked,
+                    likeCount = (target.likeCount + delta).coerceAtLeast(0L)
+                )
+            }
+        )
+    }
+
+    private fun toggleReplyRate(
+        reply: CommentReply,
+        repoCall: suspend (CommentSubject) -> Unit,
+        successText: String,
+        failureText: String,
+        transform: (CommentReply) -> CommentReply
+    ) {
+        val state = _uiState.value
+        val subject = state.subject ?: return
+        if (state.currentMid <= 0L) {
+            _msg.tryEmit("请先登录")
+            return
+        }
+        if (reply.rpid in state.busyReplyIds) return
+        _uiState.update {
+            it.copy(busyReplyIds = it.busyReplyIds + reply.rpid)
+        }
+        viewModelScope.launch {
+            val result = runCatching { repoCall(subject) }
+            if (_uiState.value.subject != subject) return@launch
+            _uiState.update {
+                it.copy(busyReplyIds = it.busyReplyIds - reply.rpid)
+            }
+            result.fold(
+                onSuccess = {
+                    _uiState.update { cur -> updateReplyRate(cur, reply.rpid, transform) }
+                    _msg.tryEmit(successText)
+                },
+                onFailure = { err ->
+                    _msg.tryEmit(err.message ?: failureText)
+                }
+            )
+        }
+    }
+
+    private fun updateReplyRate(
+        state: CommentUiState,
+        rpid: Long,
+        transform: (CommentReply) -> CommentReply
+    ): CommentUiState {
+        val thread = state.threadPane
+        val nextItems = state.items.map { item ->
+            if (item.rpid == rpid) transform(item) else item
+        }
+        if (thread == null) {
+            return state.copy(items = nextItems)
+        }
+        return state.copy(
+            items = nextItems,
+            threadPane = thread.copy(
+                root = if (thread.root.rpid == rpid) transform(thread.root) else thread.root,
+                items = thread.items.map { item ->
+                    if (item.rpid == rpid) transform(item) else item
+                }
+            )
+        )
+    }
+
     fun openEditor() {
         val state = _uiState.value
         if (state.subject == null) return

@@ -39,6 +39,31 @@ class AuthStore @Inject constructor(
     val accessToken: String get() = if (guestMode) "" else prefs.getString("access_token", "") ?: ""
     val refreshToken: String get() = if (guestMode) "" else prefs.getString("refresh_token", "") ?: ""
 
+    /**
+     * 当前账号的 Cookie 请求头（SESSDATA 等），供 Web 端交互接口使用
+     *
+     * 凭证唯一来源是短信登录（loginBySms 解析 cookie_info），扫码只绑定 HD key
+     */
+    fun cookieHeader(): String {
+        if (guestMode) return ""
+        return cookiesFromJson(prefs.getString("cookies_json", null))
+            .joinToString("; ") { "${it.name}=${it.value}" }
+    }
+
+    /**
+     * Web 端 csrf 令牌（bili_jct cookie 值），未登录或缺失时为空串
+     */
+    fun csrfToken(): String {
+        if (guestMode) return ""
+        return cookiesFromJson(prefs.getString("cookies_json", null))
+            .firstOrNull { it.name == "bili_jct" }?.value.orEmpty()
+    }
+
+    /**
+     * 是否具备 Web 端交互所需凭证（cookie + csrf 齐备）
+     */
+    fun hasWebCredential(): Boolean = cookieHeader().isNotEmpty() && csrfToken().isNotEmpty()
+
     fun saveHdAccessKey(mid: Long, key: String, expiresIn: Long) {
         if (mid == 0L || key.isEmpty()) return
         val expiresAt = System.currentTimeMillis() + expiresIn * 1000

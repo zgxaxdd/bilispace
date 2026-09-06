@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,14 +18,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
@@ -53,6 +59,9 @@ fun DynamicFeed(
     onOpenSpace: (SpaceRoute) -> Unit,
     onOpenLive: (LiveRoute) -> Unit,
     onOpenDynamic: (String) -> Unit,
+    onLike: (DynamicItem) -> Unit,
+    onRepost: (DynamicItem) -> Unit,
+    onShare: (DynamicItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -89,7 +98,10 @@ fun DynamicFeed(
                 onOpenVideo = onOpenVideo,
                 onOpenSpace = onOpenSpace,
                 onOpenLive = onOpenLive,
-                onOpenDynamic = onOpenDynamic
+                onOpenDynamic = onOpenDynamic,
+                onLike = onLike,
+                onRepost = onRepost,
+                onShare = onShare
             )
         }
 
@@ -145,7 +157,10 @@ private fun DynamicCard(
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit,
     onOpenLive: (LiveRoute) -> Unit,
-    onOpenDynamic: (String) -> Unit
+    onOpenDynamic: (String) -> Unit,
+    onLike: (DynamicItem) -> Unit,
+    onRepost: (DynamicItem) -> Unit,
+    onShare: (DynamicItem) -> Unit
 ) {
     val liveRoute = item.liveRoute
     val videoTarget = item.videoTarget
@@ -163,14 +178,25 @@ private fun DynamicCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
-        DynamicCardContent(item = item, onOpenSpace = onOpenSpace)
+        DynamicCardContent(
+            item = item,
+            onOpenSpace = onOpenSpace,
+            onLike = onLike,
+            onRepost = onRepost,
+            onOpenDynamic = onOpenDynamic,
+            onShare = onShare
+        )
     }
 }
 
 @Composable
 private fun DynamicCardContent(
     item: DynamicItem,
-    onOpenSpace: (SpaceRoute) -> Unit
+    onOpenSpace: (SpaceRoute) -> Unit,
+    onLike: (DynamicItem) -> Unit,
+    onRepost: (DynamicItem) -> Unit,
+    onOpenDynamic: (String) -> Unit,
+    onShare: (DynamicItem) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -181,13 +207,84 @@ private fun DynamicCardContent(
         DynamicHeader(item = item, onOpenSpace = onOpenSpace)
         DynamicBodyContent(item = item)
         item.stats?.let { stats ->
-            Text(
-                text = "转发 ${stats.repost}  评论 ${stats.reply}  点赞 ${stats.like}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.extraLarge)
+                        .clickable { onLike(item) }
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ThumbUp,
+                        contentDescription = "点赞",
+                        tint = if (stats.liked) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = stats.like.toString(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (stats.liked) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+                RepostStatText(stats.repost, onClick = { onRepost(item) })
+                ReplyStatText(stats.reply, onClick = { onOpenDynamic(item.id) })
+                ShareStatText(onClick = { onShare(item) })
+            }
         }
     }
+}
+
+@Composable
+private fun RepostStatText(count: Long, onClick: () -> Unit) {
+    Text(
+        text = "转发 $count",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.extraLarge)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    )
+}
+
+@Composable
+private fun ShareStatText(onClick: () -> Unit) {
+    Text(
+        text = "分享",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.extraLarge)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    )
+}
+
+@Composable
+private fun ReplyStatText(count: Long, onClick: () -> Unit) {
+    Text(
+        text = "评论 $count",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.extraLarge)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    )
 }
 
 @Composable
@@ -289,7 +386,8 @@ private fun DynamicBodyContent(item: DynamicItem) {
                 DynamicText(text)
             }
             body.origin?.let { origin ->
-                val forwardBgColor = MaterialTheme.colorScheme.surface
+                // 嵌套在 surfaceContainerLow 卡片内的引用块，用 High 表达层级
+            val forwardBgColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 val forwardBgShape = MaterialTheme.shapes.medium
                 Column(
                     modifier = Modifier

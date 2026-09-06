@@ -28,6 +28,7 @@ android {
 dependencies {
     implementation(project(":core:auth"))
     implementation(project(":core:dynamic"))
+    implementation(project(":core:comment"))
     implementation(project(":core:model"))
     implementation(project(":core:common"))
     implementation(project(":core:designsystem"))

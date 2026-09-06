@@ -3,10 +3,13 @@ package com.naaammme.bbspace.infra.network
 import com.naaammme.bbspace.infra.crypto.AppSigner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -86,6 +89,67 @@ class BiliRestClient @Inject constructor(
         val requestBody = signedBody.toRequestBody(null)
         return executeJson(Request.Builder().url(url).post(requestBody).withHeaders(profile).build())
     }
+
+    /**
+     * 发送 Web 端 POST 表单请求（不做 appkey 签名）
+     *
+     * Web 端点鉴权依赖 Cookie（SESSDATA）与 csrf（bili_jct），
+     * 由调用方把 Cookie/UA/Referer 显式放入 headers，这里不做任何隐式注入
+     */
+    suspend fun postWebForm(
+        url: String,
+        form: Map<String, String>,
+        headers: Map<String, String> = emptyMap(),
+        query: Map<String, String> = emptyMap()
+    ): JSONObject {
+        val builder = Request.Builder()
+            .url(buildUrl(url, query))
+            .post(form.toWebFormBody())
+        headers.forEach { (key, value) -> builder.addHeader(key, value) }
+        return requireSuccess(executeJson(builder.build()))
+    }
+
+    /**
+     * 发送 Web 端 POST JSON 请求（不做 appkey 签名），用于动态发布等 JSON body 端点
+     */
+    suspend fun postWebJson(
+        url: String,
+        body: JSONObject,
+        headers: Map<String, String> = emptyMap(),
+        query: Map<String, String> = emptyMap()
+    ): JSONObject {
+        val jsonBody = body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        val builder = Request.Builder()
+            .url(buildUrl(url, query))
+            .post(jsonBody)
+        headers.forEach { (key, value) -> builder.addHeader(key, value) }
+        return requireSuccess(executeJson(builder.build()))
+    }
+
+    /**
+     * 发送 Web 端 GET 请求（不做 appkey 签名）
+     */
+    suspend fun getWeb(
+        url: String,
+        query: Map<String, String> = emptyMap(),
+        headers: Map<String, String> = emptyMap()
+    ): JSONObject {
+        val builder = Request.Builder().url(buildUrl(url, query)).get()
+        headers.forEach { (key, value) -> builder.addHeader(key, value) }
+        return requireSuccess(executeJson(builder.build()))
+    }
+
+    private fun Map<String, String>.toWebFormBody(): RequestBody =
+        entries.joinToString("&") { "${webEncode(it.key)}=${webEncode(it.value)}" }
+            .toRequestBody("application/x-www-form-urlencoded".toMediaType())
+
+    private fun buildUrl(url: String, query: Map<String, String>): String {
+        if (query.isEmpty()) return url
+        val queryString = query.entries.joinToString("&") { "${webEncode(it.key)}=${webEncode(it.value)}" }
+        return "$url?$queryString"
+    }
+
+    private fun webEncode(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     /**
      * 检查 B站标准 JSON 响应的 code 字段

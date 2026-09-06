@@ -36,6 +36,7 @@ import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.VideoPlaybackState
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoCdnMode
+import com.naaammme.bbspace.core.model.mergePlaybackUrls
 import com.naaammme.bbspace.core.model.selectPlaybackCdn
 import com.naaammme.bbspace.core.model.toReportParams
 import com.naaammme.bbspace.core.model.toPlayableParams
@@ -197,7 +198,10 @@ class StreamPlaybackSessionImpl @Inject constructor(
             prepare()
             val source = liveRepository.fetchPlaybackSource(route.roomId, preferredQuality)
             playerEngine.setSource(
-                source = EngineSource.LiveFlv(source.primaryUrl),
+                source = EngineSource.LiveFlv(
+                    url = source.primaryUrl,
+                    backupUrls = source.backupUrls
+                ),
                 playWhenReady = true,
                 metadata = MediaMetadata.Builder()
                     .setTitle(route.title?.takeIf(String::isNotBlank))
@@ -566,17 +570,23 @@ class StreamPlaybackSessionImpl @Inject constructor(
             cdnMode = currentVideoCdnMode,
             durationMs = state.playbackSource?.durationMs
         ) ?: return
+        // 记录调用时的 open token：若期间用户打开了新视频，本次过期的
+        // setSource 不应覆盖新会话（setSource 内含网络 IO，存在挂起窗口）
+        val token = openId.get()
         runtimeScope.launch {
             try {
+                if (openId.get() != token) return@launch
                 playerEngine.setSource(
                     source,
                     currentPlaybackPositionMs(),
                     currentPlayWhenReady()
                 )
+                if (openId.get() != token) return@launch
                 vodSession.value = state
                 refreshVideoState()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
+                if (openId.get() != token) return@launch
                 Logger.e(TAG, t) { "apply video selection failed msg=${t.message}" }
                 refreshVideoState()
             }
@@ -610,7 +620,16 @@ class StreamPlaybackSessionImpl @Inject constructor(
                     audioUrl = cdn.audioUrl,
                     videoSampleMimeType = resolveVideoSampleMimeType(stream.codecId),
                     audioSampleMimeType = audio?.let { resolveAudioSampleMimeType(it.id) },
-                    durationMs = durationMs
+                    durationMs = durationMs,
+                    // 首元素为已选主线路，其后为其余备用线路，打开失败时依次切换
+                    videoBackupUrls = (
+                        listOf(cdn.videoUrl) +
+                            mergePlaybackUrls(stream.videoUrl, stream.videoBackupUrls)
+                        ).distinct(),
+                    audioBackupUrls = cdn.audioUrl?.let { selected ->
+                        (listOf(selected) + mergePlaybackUrls(audio?.url, audio?.backupUrls.orEmpty()))
+                            .distinct()
+                    } ?: emptyList()
                 )
             }
 

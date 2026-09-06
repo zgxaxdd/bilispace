@@ -1,6 +1,9 @@
 package com.naaammme.bbspace.feature.favorite.item
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -46,7 +50,11 @@ fun FavoriteContentList(
     onRetry: () -> Unit,
     onOpenContent: (FavoriteContentTarget) -> Unit,
     listState: LazyListState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectionMode: Boolean = false,
+    selectedKeys: Set<String> = emptySet(),
+    onItemLongPress: ((FavoriteContentItem) -> Unit)? = null,
+    onToggleSelect: ((FavoriteContentItem) -> Unit)? = null
 ) {
     val shouldLoadMore by rememberUpdatedState(canLoadMore)
     val hasLoadMoreError by rememberUpdatedState(errorOnLoadMore)
@@ -82,7 +90,11 @@ fun FavoriteContentList(
         ) { item ->
             FavoriteContentCard(
                 item = item,
-                onOpenContent = onOpenContent
+                onOpenContent = onOpenContent,
+                selectionMode = selectionMode,
+                selected = item.key in selectedKeys,
+                onItemLongPress = onItemLongPress,
+                onToggleSelect = onToggleSelect
             )
         }
 
@@ -112,11 +124,15 @@ fun FavoriteContentList(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun FavoriteContentCard(
     item: FavoriteContentItem,
     onOpenContent: (FavoriteContentTarget) -> Unit,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onItemLongPress: ((FavoriteContentItem) -> Unit)?,
+    onToggleSelect: ((FavoriteContentItem) -> Unit)?,
     modifier: Modifier = Modifier
 ) {
     val cardModifier = modifier.fillMaxWidth()
@@ -124,28 +140,32 @@ private fun FavoriteContentCard(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     )
     val target = item.target
-    if (target != null) {
-        Card(
-            onClick = { onOpenContent(target) },
-            modifier = cardModifier,
-            colors = colors
-        ) {
-            FavoriteContent(item = item)
-        }
-    } else {
-        Card(
-            modifier = cardModifier,
-            colors = colors
-        ) {
-            FavoriteContent(item = item)
-        }
+    val clickModifier = when {
+        selectionMode && onToggleSelect != null -> Modifier.clickable { onToggleSelect(item) }
+        onItemLongPress != null -> Modifier.combinedClickable(
+            onClick = { target?.let(onOpenContent) },
+            onLongClick = { onItemLongPress(item) }
+        )
+
+        target != null -> Modifier.clickable { onOpenContent(target) }
+        else -> Modifier
+    }
+    Card(
+        modifier = cardModifier.then(clickModifier),
+        colors = colors
+    ) {
+        FavoriteContent(
+            item = item,
+            selectionBadge = if (selectionMode) selected else null
+        )
     }
 }
 
 @Composable
 private fun FavoriteContent(
     item: FavoriteContentItem,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectionBadge: Boolean? = null
 ) {
     val meta = buildMetaLine(item)
     val ownerName = item.ownerName?.takeIf { it.isNotBlank() }
@@ -205,6 +225,9 @@ private fun FavoriteContent(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+        selectionBadge?.let { checked ->
+            Checkbox(checked = checked, onCheckedChange = null)
         }
     }
 }

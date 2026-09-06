@@ -18,6 +18,7 @@ import com.google.protobuf.MessageLite
 import com.google.protobuf.Parser
 import com.naaammme.bbspace.core.common.AuthProvider
 import com.naaammme.bbspace.core.common.BiliConstants
+import com.naaammme.bbspace.core.common.BiliWebHeaderTool
 import com.naaammme.bbspace.core.common.media.httpsImageUrl
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.published.PublishedRecordRepository
@@ -80,6 +81,45 @@ class CommentRepository @Inject constructor(
                 "rpid" to rpid.toString()
             ),
             profile = BiliRestProfile.APP
+        )
+    }
+
+    /** 评论点赞/取消点赞（Web 端点） */
+    suspend fun likeReply(
+        subject: CommentSubject,
+        rpid: Long,
+        like: Boolean
+    ) {
+        postReplyAction(LIKE_ENDPOINT, subject, rpid, if (like) 1 else 0)
+    }
+
+    /** 评论点踩/取消点踩（Web 端点，与点赞互斥） */
+    suspend fun hateReply(
+        subject: CommentSubject,
+        rpid: Long,
+        hate: Boolean
+    ) {
+        postReplyAction(HATE_ENDPOINT, subject, rpid, if (hate) 1 else 0)
+    }
+
+    private suspend fun postReplyAction(
+        endpoint: String,
+        subject: CommentSubject,
+        rpid: Long,
+        action: Int
+    ) {
+        val csrf = authProvider.csrfToken()
+        check(csrf.isNotBlank()) { "登录凭证缺少 Web 授权，请重新登录" }
+        restClient.postWebForm(
+            url = "${BiliConstants.BASE_URL_API}$endpoint",
+            form = mapOf(
+                "type" to subject.type.toString(),
+                "oid" to subject.oid.toString(),
+                "rpid" to rpid.toString(),
+                "action" to action.toString(),
+                "csrf" to csrf
+            ),
+            headers = BiliWebHeaderTool.build(authProvider.cookieHeader(), "${BiliConstants.BASE_URL_WEB}/")
         )
     }
 
@@ -425,6 +465,8 @@ class CommentRepository @Inject constructor(
             topLabel = topLabel ?: info.topLabel(),
             replyEntryText = info.replyControl.subReplyEntryText.ifBlank { null },
             parentName = info.parentReplyMember.name.ifBlank { null },
+            liked = info.replyControl.action == 1L,
+            disliked = info.replyControl.action == 2L,
             user = CommentUser(
                 mid = info.mid,
                 name = name,
@@ -705,6 +747,8 @@ class CommentRepository @Inject constructor(
         const val TRANSLATE_ENDPOINT = "bilibili.main.community.reply.v1.Reply/TranslateReply"
         const val ADD_ENDPOINT = "/x/v2/reply/add"
         const val DEL_ENDPOINT = "/x/v2/reply/del"
+        const val LIKE_ENDPOINT = "/x/v2/reply/action"
+        const val HATE_ENDPOINT = "/x/v2/reply/hate"
         const val UPLOAD_ENDPOINT = "/x/dynamic/feed/draw/upload_bfs"
         const val TAG = "CommentRepo"
     }

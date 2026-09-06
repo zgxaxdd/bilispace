@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.dash.manifest.Representation
 import androidx.media3.exoplayer.dash.manifest.RangedUri
 import androidx.media3.exoplayer.dash.manifest.SegmentBase
 import java.io.EOFException
+import java.io.IOException
 import java.net.URI
 import java.util.Collections
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +71,8 @@ internal class SingleFileDashMediaSourceFactory(
         }
         val dataSourceFactory = buildDataSourceFactory(
             source = source,
-            prefetchedRanges = streams.mapNotNull { it.prefetchedRange }.associateBy(PrefetchedRange::url)
+            prefetchedRanges = streams.mapNotNull { it.prefetchedRange }.associateBy(PrefetchedRange::url),
+            candidatesByUrl = buildCdnCandidates(source)
         )
         val manifestDurationMs = source.durationMs
             ?.coerceAtLeast(1L)
@@ -148,7 +150,8 @@ internal class SingleFileDashMediaSourceFactory(
 
     private fun buildDataSourceFactory(
         source: EngineSource.SingleFileDash,
-        prefetchedRanges: Map<String, PrefetchedRange>
+        prefetchedRanges: Map<String, PrefetchedRange>,
+        candidatesByUrl: Map<String, List<String>>
     ): DataSource.Factory {
         val requestSpec = source.toPlaybackRequestSpec()
         val upstreamFactory = OkHttpDataSource.Factory(okHttpClient)
@@ -156,10 +159,23 @@ internal class SingleFileDashMediaSourceFactory(
         if (requestSpec.headers.isNotEmpty()) {
             upstreamFactory.setDefaultRequestProperties(requestSpec.headers)
         }
-        return PrefetchedDataSourceFactory(
-            upstreamFactory = DefaultDataSource.Factory(appContext, upstreamFactory),
-            prefetchedRanges = prefetchedRanges
+        return CdnFailoverDataSourceFactory(
+            PrefetchedDataSourceFactory(
+                upstreamFactory = DefaultDataSource.Factory(appContext, upstreamFactory),
+                prefetchedRanges = prefetchedRanges
+            ),
+            candidatesByUrl
         )
+    }
+
+    /** 主线路 URL -> 打开失败时依次尝试的候选线路（首元素为主线路本身） */
+    private fun buildCdnCandidates(source: EngineSource.SingleFileDash): Map<String, List<String>> {
+        return buildMap {
+            put(source.videoUrl, (listOf(source.videoUrl) + source.videoBackupUrls).distinct())
+            source.audioUrl?.let { audioUrl ->
+                put(audioUrl, (listOf(audioUrl) + source.audioBackupUrls).distinct())
+            }
+        }
     }
 
     private suspend fun readIndex(url: String): SingleFileDashIndexResult? {

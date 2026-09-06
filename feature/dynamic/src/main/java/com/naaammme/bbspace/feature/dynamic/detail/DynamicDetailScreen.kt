@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -22,6 +23,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,17 +34,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
@@ -71,7 +77,14 @@ fun DynamicDetailScreen(
     viewModel: DynamicDetailViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    LaunchedEffect(viewModel) {
+        viewModel.msg.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -88,6 +101,22 @@ fun DynamicDetailScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            ShareUtils.shareText(
+                                context,
+                                "动态",
+                                ShareUtils.dynamicUrl(viewModel.opusId)
+                            )
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "分享动态"
                         )
                     }
                 }
@@ -135,7 +164,7 @@ fun DynamicDetailScreen(
                                 .weight(1f)
                                 .fillMaxHeight()
                         ) {
-                            detailContentItems(detail)
+                            detailContentItems(detail, onLike = viewModel::toggleLike)
                         }
                         CommentPanel(
                             subject = commentSubject,
@@ -161,7 +190,7 @@ fun DynamicDetailScreen(
                             vertical = 12.dp
                         ),
                         header = {
-                            DetailContent(detail)
+                            DetailContent(detail, onLike = viewModel::toggleLike)
                         }
                     )
                 } else {
@@ -171,7 +200,7 @@ fun DynamicDetailScreen(
                             .padding(padding)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        DetailContent(detail)
+                        DetailContent(detail, onLike = viewModel::toggleLike)
                     }
                 }
             }
@@ -180,7 +209,7 @@ fun DynamicDetailScreen(
 }
 
 @Composable
-private fun DetailContent(detail: DynamicDetail) {
+private fun DetailContent(detail: DynamicDetail, onLike: (() -> Unit)?) {
     DynamicDetailHeader(
         author = detail.author,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
@@ -195,7 +224,7 @@ private fun DetailContent(detail: DynamicDetail) {
         )
     }
     detail.stats?.let { stats ->
-        DynamicDetailStats(stats)
+        DynamicDetailStats(stats, onLike)
     }
 }
 
@@ -320,7 +349,7 @@ private fun DynamicForwardOriginCard(
 }
 
 @Composable
-private fun DynamicDetailStats(stats: DynamicStats) {
+private fun DynamicDetailStats(stats: DynamicStats, onLike: (() -> Unit)?) {
     val text = remember(stats) {
         buildString {
             if (stats.repost > 0) append("转发 ${stats.repost}")
@@ -328,23 +357,69 @@ private fun DynamicDetailStats(stats: DynamicStats) {
                 if (isNotEmpty()) append("  ")
                 append("评论 ${stats.reply}")
             }
-            if (stats.like > 0) {
+            if (onLike == null && stats.like > 0) {
                 if (isNotEmpty()) append("  ")
                 append("点赞 ${stats.like}")
             }
         }
     }
-    if (text.isNotEmpty()) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-        )
+    if (onLike == null) {
+        if (text.isNotEmpty()) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+        }
+        return
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (text.isNotEmpty()) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.extraLarge)
+                .clickable(onClick = onLike)
+                .padding(horizontal = 6.dp, vertical = 4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ThumbUp,
+                contentDescription = "点赞",
+                tint = if (stats.liked) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(15.dp)
+            )
+            Text(
+                text = stats.like.toString(),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (stats.liked) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
     }
 }
 
-private fun LazyListScope.detailContentItems(detail: DynamicDetail) {
+private fun LazyListScope.detailContentItems(detail: DynamicDetail, onLike: (() -> Unit)?) {
     item(key = "detail_author", contentType = "author") {
         DynamicDetailHeader(
             author = detail.author,
@@ -371,7 +446,7 @@ private fun LazyListScope.detailContentItems(detail: DynamicDetail) {
 
     detail.stats?.let { stats ->
         item(key = "detail_stats", contentType = "stats") {
-            DynamicDetailStats(stats)
+            DynamicDetailStats(stats, onLike)
         }
     }
 }

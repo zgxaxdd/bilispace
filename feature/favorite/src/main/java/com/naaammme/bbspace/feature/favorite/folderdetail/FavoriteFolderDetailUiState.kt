@@ -14,7 +14,11 @@ data class FavoriteFolderDetailUiState(
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
     val errorMessage: String? = null,
-    val errorOnLoadMore: Boolean = false
+    val errorOnLoadMore: Boolean = false,
+    /** 多选删除模式 */
+    val selectionMode: Boolean = false,
+    val selectedKeys: Set<String> = emptySet(),
+    val submitting: Boolean = false
 ) {
     val canLoadMore: Boolean
         get() = hasMore &&

@@ -36,6 +36,17 @@ data class FavoriteFolderUiState(
     val errorMessage: String? = null
 )
 
+/**
+ * 收藏夹排序弹层状态（仅对用户创建的收藏夹生效）
+ */
+@Immutable
+data class FolderSortUiState(
+    val visible: Boolean = false,
+    val loading: Boolean = false,
+    val submitting: Boolean = false,
+    val entries: List<FavoriteFolder> = emptyList()
+)
+
 @Immutable
 data class FavoriteUiState(
     val tab: FavoriteTab = FavoriteTab.CONTENT,

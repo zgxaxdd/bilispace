@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +45,7 @@ import com.naaammme.bbspace.feature.settings.navigation.AUDIO_VIDEO_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.FEED_SETTINGS_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PRIVACY_ROUTE
+import com.naaammme.bbspace.feature.settings.navigation.SPONSOR_BLOCK_ROUTE
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +55,7 @@ fun SettingsScreen(
     onNavigateToPerformance: () -> Unit,
     onNavigateToFeed: () -> Unit,
     onNavigateToAudioVideo: () -> Unit,
+    onNavigateToSponsorBlock: () -> Unit,
     onNavigateToPrivacy: () -> Unit,
     onNavigateToErrorLog: () -> Unit,
     onNavigateToAbout: () -> Unit,
@@ -67,6 +70,7 @@ fun SettingsScreen(
         PERFORMANCE_ROUTE to onNavigateToPerformance,
         FEED_SETTINGS_ROUTE to onNavigateToFeed,
         AUDIO_VIDEO_ROUTE to onNavigateToAudioVideo,
+        SPONSOR_BLOCK_ROUTE to onNavigateToSponsorBlock,
         PRIVACY_ROUTE to onNavigateToPrivacy,
     )
     val filtered = remember(query) {
@@ -103,6 +107,12 @@ fun SettingsScreen(
                 title = "推荐设置",
                 subtitle = "HD 推荐模式",
                 onClick = onNavigateToFeed
+            ),
+            SettingsHomeItem(
+                icon = Icons.Default.Check,
+                title = "空降助手",
+                subtitle = "自动跳过恰饭与片头片尾",
+                onClick = onNavigateToSponsorBlock
             ),
             SettingsHomeItem(
                 icon = Icons.Default.Lock,

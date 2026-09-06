@@ -32,6 +32,7 @@ import com.naaammme.bbspace.core.model.VideoSeasonSection
 import com.naaammme.bbspace.core.model.VideoSrc
 import com.naaammme.bbspace.core.model.VideoStaff
 import com.naaammme.bbspace.core.model.VideoStat
+import com.naaammme.bbspace.core.model.VideoUserState
 import com.naaammme.bbspace.infra.crypto.BiliSessionId
 import com.naaammme.bbspace.infra.crypto.DeviceIdentity
 import com.naaammme.bbspace.infra.grpc.BiliGrpcClient
@@ -175,7 +176,9 @@ class VideoDetailRepository @Inject constructor(
                 staffs = staffs,
                 season = season,
                 pages = parsePages(reply),
-                relates = relates
+                relates = relates,
+                userState = mapUserState(reply),
+                copyright = reply.arc.copyright.takeIf { it > 0 }
             ),
             ids = ids,
             biz = biz
@@ -205,7 +208,21 @@ class VideoDetailRepository @Inject constructor(
             like = stat.like.toString(),
             coin = stat.coin.toString(),
             fav = stat.fav.toString(),
-            share = stat.share.toString()
+            share = stat.share.toString(),
+            likeValue = stat.like.toLong(),
+            coinValue = stat.coin.toLong(),
+            favValue = stat.fav.toLong(),
+            shareValue = stat.share.toLong()
+        )
+    }
+
+    private fun mapUserState(reply: ViewReply): VideoUserState? {
+        if (!reply.hasReqUser()) return null
+        val reqUser = reply.reqUser
+        return VideoUserState(
+            liked = reqUser.like == 1,
+            coinCount = reqUser.coin,
+            faved = reqUser.favorite == 1
         )
     }
 

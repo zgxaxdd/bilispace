@@ -2,7 +2,10 @@ package com.naaammme.bbspace.feature.video.player
 
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.view.LayoutInflater
+import android.widget.Toast
 import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,17 +14,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +52,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,8 +60,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,6 +88,8 @@ import com.naaammme.bbspace.core.model.PlaybackAudio
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.QualityOption
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.feature.video.R
+import com.naaammme.bbspace.feature.video.SponsorBlockUiState
 import com.naaammme.bbspace.feature.video.detail.QualityOptionItem
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.formatPlaybackTime
@@ -152,11 +174,13 @@ internal fun VideoPlayerPane(
         }
     }
     val playerView = remember(context) {
-        PlayerView(context).apply {
-            useController = false
-            setEnableComposeSurfaceSyncWorkaround(true)
-            setKeepContentOnPlayerReset(true)
-        }
+        // TextureView（而非默认 SurfaceView）：Compose 圆角裁剪才能作用到视频画面
+        (LayoutInflater.from(context).inflate(R.layout.view_bili_player, null, false) as PlayerView)
+            .apply {
+                useController = false
+                setEnableComposeSurfaceSyncWorkaround(true)
+                setKeepContentOnPlayerReset(true)
+            }
     }
     var lastWarmAspect by remember(playerView) { mutableStateOf<Float?>(null) }
 
@@ -184,8 +208,15 @@ internal fun VideoPlayerPane(
     }
 
     CompositionLocalProvider(LocalVideoResizeModeState provides videoResizeMode) {
+        // 非全屏时播放窗口 16dp 圆角；全屏保持全屏无边角
+        val playerCornerShape = if (isFull) {
+            RectangleShape
+        } else {
+            RoundedCornerShape(16.dp)
+        }
         Box(
             modifier = modifier
+                .clip(playerCornerShape)
                 .background(Color.Black)
         ) {
             AndroidView(
@@ -397,6 +428,43 @@ internal fun VideoPlayerPane(
     }
 }
 
+/** 双击点赞爱心动效：在点击位置放大、上浮并淡出 */
+@Composable
+private fun DoubleTapLikeHeart(
+    position: Offset,
+    token: Long,
+    modifier: Modifier = Modifier
+) {
+    if (token == 0L) return
+    var visible by remember(token) { mutableStateOf(true) }
+    val scale = remember(token) { Animatable(0.4f) }
+    val alpha = remember(token) { Animatable(1f) }
+    val rise = remember(token) { Animatable(0f) }
+    LaunchedEffect(token) {
+        scale.animateTo(1.2f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
+        rise.animateTo(1f, tween(durationMillis = 420))
+        alpha.animateTo(0f, tween(durationMillis = 200))
+        visible = false
+    }
+    if (!visible) return
+    Icon(
+        imageVector = Icons.Default.Favorite,
+        contentDescription = "点赞",
+        tint = LikeHeartColor,
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+                this.alpha = alpha.value
+                translationX = position.x - 28.dp.toPx()
+                translationY = position.y - 28.dp.toPx() - rise.value * 56.dp.toPx()
+            }
+            .size(56.dp)
+    )
+}
+
+private val LikeHeartColor = Color(0xFFFF6B8B)
+
 @UnstableApi
 @Composable
 private fun VideoDanmakuLayer(
@@ -445,6 +513,8 @@ private fun VideoPlayerOverlay(
     var speedBeforeGesture by remember { mutableFloatStateOf(1f) }
     var lastGestureBrightness by remember { mutableFloatStateOf(Float.NaN) }
     var lastGestureVolumeFrac by remember { mutableFloatStateOf(Float.NaN) }
+    var heartToken by remember { mutableLongStateOf(0L) }
+    var heartPos by remember { mutableStateOf(Offset.Zero) }
     val audioManager = remember(context) { context.getSystemService(AudioManager::class.java) }
     val act = LocalActivity.current
 
@@ -531,6 +601,13 @@ private fun VideoPlayerOverlay(
                             else -> Unit
                         }
                     },
+                    onDragEnd = { },
+                    doubleTapLike = { settingsState.playback.doubleTapLike },
+                    onDoubleTapLike = { pos ->
+                        heartPos = pos
+                        heartToken++
+                        viewModel.toggleLike()
+                    },
                     isPlaying = { state.isPlaying },
                     positionMs = {
                         val progress = viewModel.playbackProgress.value
@@ -551,6 +628,48 @@ private fun VideoPlayerOverlay(
 
         VideoGestureFeedback(gestureState)
 
+        DoubleTapLikeHeart(
+            position = heartPos,
+            token = heartToken,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // 暂停时显示中央大播放键（现代播放器通用交互）
+        if (!state.isPlaying) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(72.dp)
+                    .background(color = Color.Black.copy(alpha = 0.45f), shape = CircleShape)
+                    .clickable { viewModel.togglePlayPause() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "播放",
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
+
+        // 空降助手：手动跳过 / 精彩时刻按钮与跳过提示
+        val sbState by viewModel.sbState.collectAsStateWithLifecycle()
+        LaunchedEffect(sbState.toastMessage) {
+            sbState.toastMessage?.let { message ->
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                viewModel.consumeSbToast()
+            }
+        }
+        SponsorBlockOverlay(
+            state = sbState,
+            showCtrl = showCtrl,
+            onSkip = viewModel::sbSkipManual,
+            onDismiss = viewModel::sbDismissManual,
+            onJumpPoi = viewModel::sbJumpPoi,
+            modifier = Modifier.align(Alignment.BottomEnd)
+        )
+
         if (showCtrl) {
             PlayerCtrlBarHost(
                 viewModel = viewModel,
@@ -565,9 +684,7 @@ private fun VideoPlayerOverlay(
                 onShowQ = onShowQ,
                 onShowSp = onShowSp,
                 onToggleFull = onToggleFull,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
     }
@@ -602,6 +719,22 @@ private fun PlayerCtrlBarHost(
     } else {
         0f
     }
+    val sbState by viewModel.sbState.collectAsStateWithLifecycle()
+    val sbMarks = remember(sbState, durationMs) {
+        if (!sbState.markersEnabled || durationMs <= 0L) {
+            emptyList()
+        } else {
+            sbState.segments.map { seg ->
+                val start = (seg.startMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                val rawEnd = if (seg.endMs > seg.startMs) {
+                    seg.endMs.toFloat() / durationMs
+                } else {
+                    (seg.startMs + 500L).toFloat() / durationMs
+                }
+                SbMark(start, rawEnd.coerceIn(0f, 1f), Color(seg.category.colorArgb))
+            }
+        }
+    }
 
     PlayerCtrlBar(
         playText = if (state.isPlaying) "暂停" else "播放",
@@ -612,6 +745,7 @@ private fun PlayerCtrlBarHost(
         fullText = if (isFull) "还原" else "全屏",
         sliderVal = sliderVal,
         sliderOn = durationMs > 0L,
+        marks = sbMarks,
         audioOn = (state.playbackSource?.audios?.size ?: 0) > 1,
         qualityOn = (state.playbackSource?.qualityOptions?.size ?: 0) > 1,
         onTogglePlay = viewModel::togglePlayPause,
@@ -632,6 +766,7 @@ private fun PlayerCtrlBarHost(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlayerCtrlBar(
     playText: String,
@@ -642,6 +777,7 @@ private fun PlayerCtrlBar(
     fullText: String,
     sliderVal: Float,
     sliderOn: Boolean,
+    marks: List<SbMark> = emptyList(),
     audioOn: Boolean,
     qualityOn: Boolean,
     onTogglePlay: () -> Unit,
@@ -657,10 +793,12 @@ private fun PlayerCtrlBar(
         modifier = modifier
             .fillMaxWidth()
             .background(
+                // 全出血遮罩：边缘与视频完全对齐，圆角由外层裁剪跟随
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = 0.54f)
+                        Color.Black.copy(alpha = 0.18f),
+                        Color.Black.copy(alpha = 0.62f)
                     )
                 )
             )
@@ -685,6 +823,37 @@ private fun PlayerCtrlBar(
                     disabledActiveTrackColor = Color.White.copy(alpha = 0.16f),
                     disabledInactiveTrackColor = Color.White.copy(alpha = 0.1f)
                 ),
+                track = { sliderState ->
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        if (marks.isNotEmpty()) {
+                            // 空降片段标记：细条叠在视频进度条上（垂直居中）
+                            Canvas(modifier = Modifier.matchParentSize()) {
+                                val markerHeight = 5.dp.toPx()
+                                val radius = CornerRadius(markerHeight / 2f)
+                                marks.forEach { mark ->
+                                    val left = size.width * mark.start
+                                    val right = (size.width * mark.end).coerceAtLeast(left + 2.dp.toPx())
+                                    drawRoundRect(
+                                        color = mark.color,
+                                        topLeft = Offset(left, (size.height - markerHeight) / 2f),
+                                        size = Size(right - left, markerHeight),
+                                        cornerRadius = radius
+                                    )
+                                }
+                            }
+                        }
+                        SliderDefaults.Track(
+                            sliderState = sliderState,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = SliderDefaults.colors(
+                                activeTrackColor = Color.White,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.24f),
+                                disabledActiveTrackColor = Color.White.copy(alpha = 0.16f),
+                                disabledInactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                            )
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
             )
@@ -745,23 +914,23 @@ private fun CtrlBtn(
     modifier: Modifier = Modifier
 ) {
     val bg = if (on) {
-        Color.White.copy(alpha = 0.14f)
+        Color.White.copy(alpha = 0.16f)
     } else {
-        Color.White.copy(alpha = 0.08f)
+        Color.White.copy(alpha = 0.10f)
     }
     val fg = if (on) {
         Color.White
     } else {
-        Color.White.copy(alpha = 0.45f)
+        Color.White.copy(alpha = 0.5f)
     }
 
     Box(
         modifier = modifier
-            .heightIn(min = 28.dp)
-            .clip(MaterialTheme.shapes.small)
+            .heightIn(min = 30.dp)
+            .clip(RoundedCornerShape(15.dp))
             .background(bg)
             .clickable(enabled = on, onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -899,5 +1068,78 @@ private fun readPlayerTopMetaText(
         ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         ?.takeIf { it in 0..100 }
     return if (battery != null) "$time  ${battery}%" else time
+}
+
+/** 空降片段在标记条上的位置与颜色。 */
+private data class SbMark(
+    val start: Float,
+    val end: Float,
+    val color: Color
+)
+
+/**
+ * 空降助手浮层：手动跳过按钮条与「跳到精彩时刻」。
+ */
+@Composable
+private fun SponsorBlockOverlay(
+    state: SponsorBlockUiState,
+    showCtrl: Boolean,
+    onSkip: () -> Unit,
+    onDismiss: () -> Unit,
+    onJumpPoi: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val manual = state.manualSkip
+    val poi = state.poiJump
+    if (manual == null && poi == null) return
+    Column(
+        modifier = modifier
+            .padding(end = 12.dp, bottom = if (showCtrl) 88.dp else 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.End
+    ) {
+        if (manual != null) {
+            Row(
+                modifier = Modifier
+                    .background(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(20.dp)
+                    ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "跳过${manual.category.shortTitle}片段",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .clickable(onClick = onSkip)
+                        .padding(start = 14.dp, end = 6.dp, top = 9.dp, bottom = 9.dp)
+                )
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "关闭提示",
+                    tint = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clickable(onClick = onDismiss)
+                        .padding(5.dp)
+                )
+            }
+        }
+        if (poi != null) {
+            Text(
+                text = "跳到精彩时刻",
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier
+                    .background(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .clickable(onClick = onJumpPoi)
+                    .padding(horizontal = 14.dp, vertical = 9.dp)
+            )
+        }
+    }
 }
 

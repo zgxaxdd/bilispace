@@ -85,15 +85,13 @@ class VideoGestureState {
 
 enum class DragType { None, Seek, Brightness, Volume }
 
-enum class DoubleTapHint(val text: String) {
-    Play("播放"),
-    Pause("暂停"),
-    Rewind("-10s"),
-    Forward("+10s")
+enum class DoubleTapHint {
+    Play,
+    Pause,
+    Like
 }
 
 private const val SEEK_MAX_MS = 60_000L
-private const val DOUBLE_TAP_SEEK_MS = 10_000L
 private const val DRAG_SENSITIVITY = 0.6f
 private const val SIDE_GESTURE_ZONE = 0.2f
 private const val RIGHT_GESTURE_ZONE_START = 1f - SIDE_GESTURE_ZONE
@@ -113,6 +111,8 @@ fun Modifier.videoGestures(
     onVolumeDelta: (Float) -> Float,
     onDragStart: (DragType) -> Unit = {},
     onDragEnd: () -> Unit = {},
+    doubleTapLike: () -> Boolean = { false },
+    onDoubleTapLike: (Offset) -> Unit = {},
     isPlaying: () -> Boolean,
     positionMs: () -> Long,
     durationMs: () -> Long
@@ -126,6 +126,8 @@ fun Modifier.videoGestures(
     val curVolumeDelta by rememberUpdatedState(onVolumeDelta)
     val curDragStart by rememberUpdatedState(onDragStart)
     val curDragEnd by rememberUpdatedState(onDragEnd)
+    val curDoubleTapLike by rememberUpdatedState(doubleTapLike)
+    val curOnDoubleTapLike by rememberUpdatedState(onDoubleTapLike)
     val curIsPlaying by rememberUpdatedState(isPlaying)
     val curPositionMs by rememberUpdatedState(positionMs)
     val curDurationMs by rememberUpdatedState(durationMs)
@@ -184,25 +186,17 @@ fun Modifier.videoGestures(
                                     awaitFirstDown(requireUnconsumed = false)
                                 }
                                 if (second != null) {
-                                    val sndX = second.position.x / w
-                                    when {
-                                        sndX < SIDE_GESTURE_ZONE -> {
-                                            val target = (curPositionMs() - DOUBLE_TAP_SEEK_MS).coerceAtLeast(0L)
-                                            curSeekTo(target)
-                                            state.showDoubleTap(DoubleTapHint.Rewind)
-                                        }
-                                        sndX > RIGHT_GESTURE_ZONE_START -> {
-                                            val target = (curPositionMs() + DOUBLE_TAP_SEEK_MS).coerceAtMost(curDurationMs())
-                                            curSeekTo(target)
-                                            state.showDoubleTap(DoubleTapHint.Forward)
-                                        }
-                                        else -> {
-                                            curTogglePlay()
-                                            state.showDoubleTap(
-                                                if (curIsPlaying()) DoubleTapHint.Play
-                                                else DoubleTapHint.Pause
-                                            )
-                                        }
+                                    if (curDoubleTapLike()) {
+                                        // 双击点赞开启时：双击任意位置 = 点赞 + 爱心动效
+                                        curOnDoubleTapLike(second.position)
+                                        state.showDoubleTap(DoubleTapHint.Like)
+                                    } else {
+                                        // 默认：双击任意位置 = 暂停/播放
+                                        curTogglePlay()
+                                        state.showDoubleTap(
+                                            if (curIsPlaying()) DoubleTapHint.Play
+                                            else DoubleTapHint.Pause
+                                        )
                                     }
                                     waitForAllUp()
                                 } else {
@@ -354,6 +348,7 @@ fun VideoGestureFeedback(
                 state.doubleTapHint = null
             }
             if (visible) {
+                // Like 的视觉反馈由播放面板的爱心动效承担，这里不再叠加文字提示
                 if (hint == DoubleTapHint.Play || hint == DoubleTapHint.Pause) {
                     Box(
                         modifier = Modifier
@@ -370,17 +365,6 @@ fun VideoGestureFeedback(
                             modifier = Modifier.size(32.dp)
                         )
                     }
-                } else {
-                    Text(
-                        text = hint.text,
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.4f))
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    )
                 }
             }
         }

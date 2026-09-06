@@ -1,19 +1,17 @@
 package com.naaammme.bbspace.playback
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.LivePlaybackController
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
 import com.naaammme.bbspace.core.model.LiveRoute
+import com.naaammme.bbspace.navigation.VideoDetailNavBus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,7 +20,9 @@ import javax.inject.Inject
 class PlaybackHostViewModel @Inject constructor(
     private val playbackSession: StreamPlaybackSession,
     private val livePlaybackController: LivePlaybackController,
-    playerSettings: AppSettings
+    playerSettings: AppSettings,
+    private val hostState: PlaybackHostState,
+    val videoDetailNavBus: VideoDetailNavBus
 ) : ViewModel() {
 
     val player = playbackSession.player
@@ -35,46 +35,23 @@ class PlaybackHostViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = false
         )
-    val miniPlayerAvailable = playerSettings.state
-        .combine(playbackSession.currentTarget) { settings, target ->
-            settings.playback.inAppMiniPlayer && target != null
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = false
-        )
 
-    private val _hostMode = mutableStateOf(PlaybackHostMode.Hidden)
+    // hostMode / miniPlayerAvailable / expand / minimize / close 的唯一状态源是
+    // PlaybackHostState（进程级单例）：视频详情迁到独立 Activity 后两窗口共享，
+    // 这里仅做转发，保持原公开属性名与签名，调用方零改动。
     val hostMode: PlaybackHostMode
-        get() = _hostMode.value
+        get() = hostState.hostMode
+    val miniPlayerAvailable: StateFlow<Boolean>
+        get() = hostState.miniPlayerAvailable
+
     private var shouldResumeAfterBackgroundPause = false
 
-    init {
-        viewModelScope.launch {
-            combine(currentTarget, miniPlayerAvailable) { target, enabled ->
-                target to enabled
-            }.collect { (target, enabled) ->
-                if (target == null) {
-                    shouldResumeAfterBackgroundPause = false
-                    _hostMode.value = PlaybackHostMode.Hidden
-                    return@collect
-                }
-                if (_hostMode.value == PlaybackHostMode.Mini && !enabled) {
-                    _hostMode.value = PlaybackHostMode.Hidden
-                }
-            }
-        }
-    }
-
     fun expand() {
-        _hostMode.value = PlaybackHostMode.Expanded
+        hostState.expand()
     }
 
     fun minimize() {
-        if (!miniPlayerAvailable.value) return
-        if (currentTarget.value == null) return
-        _hostMode.value = PlaybackHostMode.Mini
+        hostState.minimize()
     }
 
     fun openLive(route: LiveRoute) {
@@ -111,7 +88,6 @@ class PlaybackHostViewModel @Inject constructor(
 
     fun close() {
         shouldResumeAfterBackgroundPause = false
-        _hostMode.value = PlaybackHostMode.Hidden
-        playbackSession.close()
+        hostState.close()
     }
 }

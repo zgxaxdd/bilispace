@@ -1,10 +1,11 @@
-﻿package com.naaammme.bbspace.feature.settings
+package com.naaammme.bbspace.feature.settings
 
 import com.naaammme.bbspace.feature.settings.navigation.APPEARANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.FEED_SETTINGS_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.AUDIO_VIDEO_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PRIVACY_ROUTE
+import com.naaammme.bbspace.feature.settings.navigation.SPONSOR_BLOCK_ROUTE
 
 data class SettingEntry(val title: String, val subtitle: String, val route: String)
 
@@ -32,6 +33,7 @@ val audioVideoEntries = listOf(
 )
 
 val feedEntries = listOf(
+    SettingEntry("首页布局", "单列大图或双列网格", FEED_SETTINGS_ROUTE),
     SettingEntry("HD 推荐模式", "切换 HD 推荐接口", FEED_SETTINGS_ROUTE),
     SettingEntry("个性化推荐", "基于历史记录推荐内容", FEED_SETTINGS_ROUTE),
     SettingEntry("课堂推荐模式", "只推荐学习相关视频", FEED_SETTINGS_ROUTE),
@@ -42,5 +44,14 @@ val privacyEntries = listOf(
     SettingEntry("禁止 Gaia 上报", "阻止应用列表风控数据上报", PRIVACY_ROUTE),
 )
 
+val sponsorBlockEntries = listOf(
+    SettingEntry("启用空降助手", "自动或手动跳过恰饭 片头片尾片段", SPONSOR_BLOCK_ROUTE),
+    SettingEntry("片段分类管理", "按分类设置跳过策略", SPONSOR_BLOCK_ROUTE),
+    SettingEntry("进度条标记", "在进度条上标注片段区间", SPONSOR_BLOCK_ROUTE),
+    SettingEntry("跳过提示", "跳过后显示提示信息", SPONSOR_BLOCK_ROUTE),
+    SettingEntry("空降助手服务器", "社区片段数据来源地址", SPONSOR_BLOCK_ROUTE),
+)
+
 val allSettingEntries =
-    appearanceEntries + performanceEntries + audioVideoEntries + feedEntries + privacyEntries
+    appearanceEntries + performanceEntries + audioVideoEntries + feedEntries + privacyEntries +
+        sponsorBlockEntries

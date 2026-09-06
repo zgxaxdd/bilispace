@@ -1,8 +1,11 @@
 package com.naaammme.bbspace.feature.video
 
 import android.content.pm.ActivityInfo
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,6 +24,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
@@ -33,9 +39,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,6 +69,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.media3.common.util.UnstableApi
+import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
+import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
 import com.naaammme.bbspace.core.model.PlayerSettingsState
@@ -60,7 +82,9 @@ import com.naaammme.bbspace.core.model.VideoDownloadOptions
 import com.naaammme.bbspace.core.model.VideoDownloadRequest
 import com.naaammme.bbspace.feature.video.detail.VideoDetailPage
 import com.naaammme.bbspace.feature.video.player.VideoPlayerPane
+import kotlinx.coroutines.delay
 import java.util.Locale
+import kotlin.math.roundToInt
 
 internal val speedOps = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
 
@@ -74,11 +98,26 @@ fun VideoScreen(
     onOpenDownloadCache: () -> Unit,
     onStartDownload: (VideoDownloadRequest) -> Unit,
     viewModel: VideoViewModel,
-    hostExpanded: Boolean = true
+    hostExpanded: Boolean = true,
+    // 详情页封面垫底（仅视频详情 Activity 传入；覆盖层路径保持 null 零改动）：
+    // 铺在播放器区域（与播放器容器同边界同圆角），首帧渲染后交叉淡出。
+    // 不做全屏铺底——系统无缝动画的 leash 终态交给真实页面接管，避免长时间"预览图铺屏"。
+    coverBackdropUrl: String? = null,
+    coverBackdropLarge: Boolean = false
 ) {
     val videoState by viewModel.videoState.collectAsStateWithLifecycle()
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle(initialValue = PlayerSettingsState())
     val act = LocalActivity.current
+    val context = LocalContext.current
+    // 播放器容器在窗口坐标系中的矩形与收尾圆角（垫底形变终点），三个布局分支各自上报
+    var coverBackdropFrame by remember { mutableStateOf<BackdropFrame?>(null) }
+
+    // 互动动作（点赞/投币/收藏/三连）结果提示
+    LaunchedEffect(viewModel) {
+        viewModel.msg.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
     val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
     val isExpandedWidth = windowSizeClass.isWidthAtLeastBreakpoint(840)
     val themeUsesDarkSystemBarIcons = MaterialTheme.colorScheme.background.luminance() > 0.5f
@@ -176,7 +215,13 @@ fun VideoScreen(
 
         when {
             !hostExpanded || fullOn -> {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned {
+                            coverBackdropFrame = BackdropFrame(it.boundsInWindow(), RectangleShape)
+                        }
+                ) {
                     VideoPlayerPane(
                         modifier = Modifier.fillMaxSize(),
                         viewModel = viewModel,
@@ -190,6 +235,7 @@ fun VideoScreen(
             }
 
             isExpandedWidth -> {
+                val expandedPlayerShape = MaterialTheme.shapes.extraLarge
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -203,7 +249,13 @@ fun VideoScreen(
                         modifier = Modifier
                             .width(expandedPlayerW)
                             .height(expandedPlayerH)
-                            .clip(MaterialTheme.shapes.extraLarge),
+                            .clip(expandedPlayerShape)
+                            .onGloballyPositioned {
+                                coverBackdropFrame = BackdropFrame(
+                                    it.boundsInWindow(),
+                                    expandedPlayerShape
+                                )
+                            },
                         viewModel = viewModel,
                         videoTitle = videoState.detail?.title,
                         isFull = false,
@@ -213,8 +265,10 @@ fun VideoScreen(
                     )
                     VideoDetailPage(
                         modifier = Modifier.weight(1f),
+                        viewModel = viewModel,
                         detail = videoState.detail,
                         ids = videoState.ids,
+                        biz = videoState.biz,
                         detailLoading = videoState.detailLoading,
                         detailError = videoState.detailError,
                         commentSubject = viewModel.commentSubject,
@@ -229,12 +283,25 @@ fun VideoScreen(
             }
 
             else -> {
-                Column(modifier = Modifier.fillMaxSize()) {
+                val compactPlayerShape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(compactPlayerSpaceH)
+                            // 先裁剪再画背景：底部圆角才能裁到黑色底块本身（垫底形变终点同此形状）
+                            .clip(compactPlayerShape)
                             .background(Color.Black)
+                            .onGloballyPositioned {
+                                coverBackdropFrame = BackdropFrame(
+                                    it.boundsInWindow(),
+                                    compactPlayerShape
+                                )
+                            }
                     ) {
                         VideoPlayerPane(
                             modifier = Modifier
@@ -253,8 +320,10 @@ fun VideoScreen(
                         modifier = Modifier
                             .weight(1f)
                             .background(MaterialTheme.colorScheme.background),
+                        viewModel = viewModel,
                         detail = videoState.detail,
                         ids = videoState.ids,
+                        biz = videoState.biz,
                         detailLoading = videoState.detailLoading,
                         detailError = videoState.detailError,
                         commentSubject = viewModel.commentSubject,
@@ -267,6 +336,17 @@ fun VideoScreen(
                     )
                 }
             }
+        }
+
+        // 封面垫底：绘制在最上层但无点击语义（触摸穿透到下方内容），
+        // 铺在播放器区域内，首帧渲染后淡出露出视频。
+        coverBackdropUrl?.let { url ->
+            CoverSettleBackdrop(
+                coverUrl = url,
+                coverLarge = coverBackdropLarge,
+                frame = coverBackdropFrame,
+                firstFrameRendered = videoState.hasRenderedFirstFrame
+            )
         }
     }
 
@@ -296,6 +376,105 @@ fun VideoScreen(
             }
         )
     }
+}
+
+/** 封面垫底形变的目标帧：播放器容器在窗口坐标系中的矩形与收尾圆角形状。 */
+private data class BackdropFrame(val rect: Rect, val endShape: Shape)
+
+/** [BackdropFrame.endShape] 的四角圆角半径（px），供形变插值。 */
+private data class BackdropCornerPx(
+    val topStart: Float,
+    val topEnd: Float,
+    val bottomEnd: Float,
+    val bottomStart: Float
+)
+
+private fun Shape.cornerPxOrNull(density: Density): BackdropCornerPx? {
+    val corners = this as? CornerBasedShape ?: return null
+    return BackdropCornerPx(
+        topStart = corners.topStart.toPx(Size.Unspecified, density),
+        topEnd = corners.topEnd.toPx(Size.Unspecified, density),
+        bottomEnd = corners.bottomEnd.toPx(Size.Unspecified, density),
+        bottomStart = corners.bottomStart.toPx(Size.Unspecified, density)
+    )
+}
+
+/**
+ * 详情页封面垫底：铺在播放器区域（容器同边界同圆角），视频首帧渲染后交叉淡出；
+ * 流迟迟未就绪时超时兜底淡出（最长驻留 2.5s）。变体与来源卡片一致，直接命中
+ * 内存缓存位图，无占位闪烁。位置经 layout 延迟读取，帧间零重组。
+ */
+@Composable
+private fun CoverSettleBackdrop(
+    coverUrl: String,
+    coverLarge: Boolean,
+    frame: BackdropFrame?,
+    firstFrameRendered: Boolean
+) {
+    var dismissed by remember { mutableStateOf(false) }
+    val alpha = remember { Animatable(1f) }
+
+    LaunchedEffect(firstFrameRendered) {
+        if (firstFrameRendered && !dismissed) {
+            alpha.animateTo(0f, tween(durationMillis = 200))
+            dismissed = true
+        }
+    }
+    LaunchedEffect(Unit) {
+        delay(2500)
+        if (!dismissed) {
+            alpha.animateTo(0f, tween(durationMillis = 200))
+            dismissed = true
+        }
+    }
+
+    if (dismissed || frame == null) return
+    val density = LocalDensity.current
+    val cornerPx = remember(frame, density) { frame.endShape.cornerPxOrNull(density) }
+    if (cornerPx == null) return
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .backdropBounds(frame.rect)
+                .graphicsLayer {
+                    this.alpha = alpha.value
+                    shape = RoundedCornerShape(
+                        topStart = CornerSize(cornerPx.topStart),
+                        topEnd = CornerSize(cornerPx.topEnd),
+                        bottomEnd = CornerSize(cornerPx.bottomEnd),
+                        bottomStart = CornerSize(cornerPx.bottomStart)
+                    )
+                    clip = true
+                }
+                .background(Color.Black)
+        ) {
+            BiliAsyncImage(
+                url = coverUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                variant = if (coverLarge) {
+                    BiliImageVariant.CardCoverLarge
+                } else {
+                    BiliImageVariant.CardCover43
+                },
+                contentScale = ContentScale.Crop
+            )
+        }
+    }
+}
+
+/**
+ * 垫底节点按 [rect]（窗口坐标）测量并摆放自身内容；
+ * 尺寸与位置都在布局阶段读取，不触发重组。
+ */
+private fun Modifier.backdropBounds(rect: Rect): Modifier = layout { measurable, _ ->
+    val w = rect.width.roundToInt().coerceAtLeast(1)
+    val h = rect.height.roundToInt().coerceAtLeast(1)
+    val placeable = measurable.measure(Constraints.fixed(w, h))
+    layout(w, h) { placeable.place(rect.left.roundToInt(), rect.top.roundToInt()) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)

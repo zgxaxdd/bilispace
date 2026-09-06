@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardCoverAnchor
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessVideoCardState
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.LiveRoute
@@ -168,6 +171,9 @@ private fun SpaceVideoCard(
     video: SpaceVideo,
     onClick: () -> Unit
 ) {
+    // 无缝打开：注册成功由系统接管过渡，失败走 onClick 普通打开
+    val seamless = rememberSeamlessVideoCardState()
+    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = MaterialTheme.shapes.medium).radiusPx
     val meta = remember(video.author, video.categoryName, video.publishTimeText) {
         listOfNotNull(video.author, video.categoryName, video.publishTimeText).joinToString(" · ")
     }
@@ -183,7 +189,11 @@ private fun SpaceVideoCard(
     }
 
     Card(
-        onClick = onClick,
+        onClick = {
+            if (!seamless.tryOpen(video.target, video.cover, true, seamlessRadiusPx)) {
+                onClick()
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -202,6 +212,7 @@ private fun SpaceVideoCard(
                     .weight(0.38f)
                     .aspectRatio(16f / 10f)
             ) {
+                SeamlessCardCoverAnchor(seamless, video.target, Modifier.matchParentSize())
                 if (durationText != null) {
                     Text(
                         text = durationText,

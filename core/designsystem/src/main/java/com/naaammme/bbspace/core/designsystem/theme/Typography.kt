@@ -6,6 +6,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+// tnum：表格数字（等宽数字），用于计数/时长等数字文本，避免数值刷新时宽度抖动；
+// 仅作用于承载数字的样式，中文字形不受影响，不引入任何字体资源。
 private val BaseTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.Default,
@@ -68,7 +70,8 @@ private val BaseTypography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.1.sp
+        letterSpacing = 0.1.sp,
+        fontFeatureSettings = "tnum"
     ),
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
@@ -89,28 +92,32 @@ private val BaseTypography = Typography(
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.4.sp
+        letterSpacing = 0.4.sp,
+        fontFeatureSettings = "tnum"
     ),
     labelLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.1.sp
+        letterSpacing = 0.1.sp,
+        fontFeatureSettings = "tnum"
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.5.sp,
+        fontFeatureSettings = "tnum"
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 11.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.5.sp,
+        fontFeatureSettings = "tnum"
     )
 )
 

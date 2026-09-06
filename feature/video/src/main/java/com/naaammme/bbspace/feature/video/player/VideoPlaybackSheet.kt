@@ -63,6 +63,7 @@ import com.naaammme.bbspace.feature.video.getCodecName
 import com.naaammme.bbspace.feature.video.getQualityName
 import com.naaammme.bbspace.feature.video.speedOps
 import kotlin.math.roundToInt
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 private enum class PlaybackSheetSection(
     val title: String
@@ -120,7 +121,7 @@ internal fun VideoPlaybackSheet(
                     }
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.sm)
         )
     }
 }
@@ -159,7 +160,7 @@ internal fun VideoPlaybackSidebar(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .padding(horizontal = 14.dp, vertical = BiliSpacing.md)
                 )
             }
         }
@@ -179,13 +180,13 @@ private fun VideoPlaybackPanelContent(
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             PlaybackSheetSection.entries.forEach { item ->
                 FilterChip(
@@ -224,8 +225,8 @@ private fun PlaybackSettingsSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Text("CDN 偏好", style = MaterialTheme.typography.titleMedium)
             Row(
@@ -319,6 +320,13 @@ private fun PlaybackSettingsSection(
         checked = settingsState.playback.autoRotateFullscreen,
         onCheckedChange = viewModel::updateAutoRotateFullscreen
     )
+
+    SheetSwitchCard(
+        title = "双击画面点赞",
+        subtitle = "开启后双击画面点赞并播放爱心动效；关闭时双击为暂停/播放",
+        checked = settingsState.playback.doubleTapLike,
+        onCheckedChange = viewModel::updateDoubleTapLike
+    )
 }
 
 @Composable
@@ -349,7 +357,7 @@ private fun PlayerInfoSection(
                 text = if (state.isPreparing) "正在加载播放信息" else "暂无播放信息",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(BiliSpacing.lg)
             )
         }
         return
@@ -422,13 +430,13 @@ private fun SheetSwitchCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(BiliSpacing.lg),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
             ) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -455,8 +463,8 @@ private fun SheetChoiceCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
@@ -469,7 +477,7 @@ private fun SheetChoiceCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 options.forEach { option ->
                     FilterChip(
@@ -498,8 +506,8 @@ private fun SheetChoiceCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
@@ -572,7 +580,7 @@ private fun VideoCdnModeDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSelect(mode) }
-                            .padding(vertical = 12.dp),
+                            .padding(vertical = BiliSpacing.md),
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -617,8 +625,8 @@ private fun SheetInfoGroup(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Text(
                 text = title,

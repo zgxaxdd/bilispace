@@ -5,7 +5,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition.Companion.None as EnterNone
 import androidx.compose.animation.ExitTransition.Companion.None as ExitNone
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +25,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.util.UnstableApi
+import kotlinx.coroutines.delay
+import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandGhost
+import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.seamless.sharedContentKey
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.VideoDownloadRequest
@@ -73,14 +81,22 @@ fun PlaybackHost(
     var prevMode by remember { mutableStateOf(mode) }
     LaunchedEffect(mode) { prevMode = mode }
     val skipEnter = mode == PlaybackHostMode.Expanded && prevMode == PlaybackHostMode.Mini
+    val videoTarget = (target as? StreamPlaybackTarget.Video)?.target
+    // 详情本体在封面幽灵下方普通淡入；morph 运动由 CoverExpandGhost 承载（见 CoverExpand.kt），
+    // 避免把整屏详情 UI 放进过渡层逐帧重排。迷你播放器原位再展开保持无进入动画。
+    val videoEnterSpec = if (skipEnter) {
+        EnterNone
+    } else {
+        fadeIn(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing))
+    }
     val enterSpec = if (skipEnter) EnterNone else slideInHorizontally(
         animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
     ) { fullWidth -> fullWidth }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AnimatedVisibility(
-            visible = target is StreamPlaybackTarget.Video && mode == PlaybackHostMode.Expanded,
-            enter = enterSpec,
+            visible = videoTarget != null && mode == PlaybackHostMode.Expanded,
+            enter = videoEnterSpec,
             exit = ExitNone
         ) {
             VideoScreen(
@@ -106,17 +122,57 @@ fun PlaybackHost(
             )
         }
 
+        // 封面展开幽灵：仅当本次展开来自首页卡片点击且与当前视频匹配时出现，
+        // morph 结束后自行淡出并清除来源记录；展开中断（返回/切迷你）时立即清除。
+        val expandRecord = CoverExpandOrigin.pending
+        if (expandRecord != null &&
+            !skipEnter &&
+            mode == PlaybackHostMode.Expanded &&
+            expandRecord.key == videoTarget?.sharedContentKey()
+        ) {
+            CoverExpandGhost(
+                record = expandRecord,
+                onFinished = { CoverExpandOrigin.clear() }
+            )
+        }
+        LaunchedEffect(mode) {
+            if (mode != PlaybackHostMode.Expanded) {
+                CoverExpandOrigin.clear()
+            }
+        }
+
         val curTarget = target
-        if (mode == PlaybackHostMode.Mini &&
-            miniPlayerAvailable &&
-            curTarget != null
+        // 无缝返回动画进行中暂不出现迷你播放器：迷你 PlayerView 此时会从详情
+        // PlayerView 手里抢绑播放器，缩回中的画面立刻变黑；等动画结束再淡入。
+        // 系统回调丢失时 1.6s 兜底放行。
+        val returnAnimRunning = SeamlessTransitionState.returnRunning
+        var miniHold by remember { mutableStateOf(false) }
+        LaunchedEffect(mode == PlaybackHostMode.Mini, returnAnimRunning) {
+            if (mode == PlaybackHostMode.Mini && returnAnimRunning) {
+                miniHold = true
+                delay(1_600)
+                miniHold = false
+            } else {
+                miniHold = false
+            }
+        }
+        AnimatedVisibility(
+            visible = !miniHold &&
+                mode == PlaybackHostMode.Mini &&
+                miniPlayerAvailable &&
+                curTarget != null,
+            enter = fadeIn(animationSpec = tween(durationMillis = 180)) + scaleIn(
+                initialScale = 0.92f,
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 380f)
+            ),
+            exit = ExitNone
         ) {
             DraggableMiniPlayerHost(
                 modifier = modifier
             ) {
                 InAppMiniPlayer(
                     player = player,
-                    target = curTarget,
+                    target = curTarget!!,
                     sessionState = sessionState,
                     onExpand = onExpand,
                     onTogglePlay = onTogglePlay,

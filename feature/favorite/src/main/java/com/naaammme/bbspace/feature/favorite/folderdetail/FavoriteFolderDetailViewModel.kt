@@ -5,11 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
+import com.naaammme.bbspace.core.model.FavoriteContentItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -24,6 +28,9 @@ class FavoriteFolderDetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(FavoriteFolderDetailUiState(isLoading = true))
     val uiState: StateFlow<FavoriteFolderDetailUiState> = _uiState.asStateFlow()
+
+    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     private var loadJob: Job? = null
 
@@ -96,6 +103,73 @@ class FavoriteFolderDetailViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    // ===== 多选删除 =====
+
+    /** 长按内容进入多选模式并选中该项 */
+    fun enterSelection(item: FavoriteContentItem) {
+        if (item.isInvalid) return
+        _uiState.update {
+            it.copy(
+                selectionMode = true,
+                selectedKeys = it.selectedKeys + item.key
+            )
+        }
+    }
+
+    fun toggleSelect(item: FavoriteContentItem) {
+        if (item.isInvalid) return
+        _uiState.update {
+            it.copy(
+                selectedKeys = if (item.key in it.selectedKeys) {
+                    it.selectedKeys - item.key
+                } else {
+                    it.selectedKeys + item.key
+                }
+            )
+        }
+    }
+
+    fun selectAll() {
+        _uiState.update {
+            it.copy(selectedKeys = it.items.filterNot { item -> item.isInvalid }.map { item -> item.key }.toSet())
+        }
+    }
+
+    fun exitSelection() {
+        _uiState.update { it.copy(selectionMode = false, selectedKeys = emptySet()) }
+    }
+
+    /** 从收藏夹移除选中的内容 */
+    fun deleteSelected() {
+        val state = _uiState.value
+        if (state.submitting || state.selectedKeys.isEmpty()) return
+        val resources = state.items
+            .filter { it.key in state.selectedKeys && !it.isInvalid }
+            .map { "${it.oid}:${it.otype}" }
+        if (resources.isEmpty()) return
+        _uiState.update { it.copy(submitting = true) }
+        viewModelScope.launch {
+            runCatching { repo.deleteFolderContents(fid, resources) }.fold(
+                onSuccess = {
+                    _msg.tryEmit("已移除 ${resources.size} 个内容")
+                    _uiState.update {
+                        it.copy(
+                            submitting = false,
+                            selectionMode = false,
+                            selectedKeys = emptySet()
+                        )
+                    }
+                    loadPage(reset = true, refreshing = false)
+                },
+                onFailure = { e ->
+                    Logger.e(TAG, e) { "移除收藏内容失败 fid=$fid count=${resources.size}" }
+                    _uiState.update { it.copy(submitting = false) }
+                    _msg.tryEmit(e.message ?: "移除失败")
+                }
+            )
         }
     }
 
