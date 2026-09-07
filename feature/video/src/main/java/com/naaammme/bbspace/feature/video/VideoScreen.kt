@@ -133,13 +133,16 @@ fun VideoScreen(
     // 再 180ms 淡出遮罩。详情区域 Box 恒占位、遮罩是覆盖层——播放器与布局尺寸
     // 全程不变（修复打开动画结束时的抽搐）；VideoDetailPage 不再被移出组合、
     // 仅延迟到遮罩之后组合（修复简介/详情消失与状态丢失）。
-    var detailMaskOn by remember(coverBackdropUrl) {
+    // 以视频 ids（aid/cid）为键：封面 URL 可能被不同视频复用（占位图/同源封面），
+    // 用 URL 做键会在连续打开同封面视频时错误复用上次的遮罩状态。
+    val seamlessIdsKey = videoState.ids
+    var detailMaskOn by remember(seamlessIdsKey) {
         mutableStateOf(coverBackdropUrl != null && SeamlessTransitionState.openRunning)
     }
-    var detailContentOn by remember(coverBackdropUrl) {
+    var detailContentOn by remember(seamlessIdsKey) {
         mutableStateOf(coverBackdropUrl == null || !SeamlessTransitionState.openRunning)
     }
-    LaunchedEffect(coverBackdropUrl) {
+    LaunchedEffect(seamlessIdsKey) {
         if (coverBackdropUrl == null) return@LaunchedEffect
         if (!SeamlessTransitionState.openRunning) return@LaunchedEffect
         SeamlessTransitionState.awaitOpenEnd(maxWaitMs = 1_200)
