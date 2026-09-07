@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.core.designsystem.seamless
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
@@ -46,7 +47,8 @@ class SeamlessCardOpener(private val route: (VideoTarget, String?, Boolean, Bund
         target: VideoTarget?,
         coverUrl: String?,
         coverLarge: Boolean,
-        anchorRadiusPx: Float
+        anchorRadiusPx: Float,
+        listCover: Pair<Float, Float>? = null
     ): Boolean {
         if (anchor == null || target == null) return false
         if (!OplusViewSeamlessCompat.isVersionSupported()) return false
@@ -66,7 +68,10 @@ class SeamlessCardOpener(private val route: (VideoTarget, String?, Boolean, Bund
             Log.d(TAG, "software cover unavailable (cache miss?), anchor stays zero-draw")
         }
         val bundle = OplusViewSeamlessCompat.createOpenBundle(
-            anchorRadiusPx = anchorRadiusPx
+            anchorRadiusPx = anchorRadiusPx,
+            listCoverTopRatio = listCover?.first,
+            listCoverBottomRatio = listCover?.second,
+            contentRect = anchor.screenRect()
         )
         val registered = OplusViewSeamlessCompat.registerOpenTransition(
             anchor,
@@ -83,6 +88,14 @@ class SeamlessCardOpener(private val route: (VideoTarget, String?, Boolean, Bund
         lastDecorated = anchor
         route(target, coverUrl, coverLarge, bundle)
         return true
+    }
+
+    /** 点击瞬间读取锚点屏幕矩形：系统取景计算失败时的兜底（纯内存读，无 IO）。 */
+    private fun View.screenRect(): Rect? {
+        if (width <= 0 || height <= 0) return null
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        return Rect(loc[0], loc[1], loc[0] + width, loc[1] + height)
     }
 
     private data class SoftwareCover(val drawable: Drawable, val bitmap: Bitmap)

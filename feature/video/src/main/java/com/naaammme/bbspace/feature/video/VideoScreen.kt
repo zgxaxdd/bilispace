@@ -4,6 +4,8 @@ import android.content.pm.ActivityInfo
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -71,6 +73,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.media3.common.util.UnstableApi
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
 import com.naaammme.bbspace.core.model.PlayerSettingsState
@@ -124,6 +127,9 @@ fun VideoScreen(
     var isFull by rememberSaveable { mutableStateOf(false) }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
     val fullOn = hostExpanded && isFull
+    // Activity 无缝路径：系统打开动画结束前，播放器下方详情骨架/评论占位不参与组合
+    // （leash 交回瞬间不再露骨架），动画结束 180ms 淡入；非无缝恒 false 零行为变化
+    val openAnimating = hostExpanded && coverBackdropUrl != null && SeamlessTransitionState.openRunning
     val isPortraitVideo = remember(videoState.currentStream) {
         val stream = videoState.currentStream ?: return@remember false
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
@@ -263,22 +269,28 @@ fun VideoScreen(
                         onBackClick = handleBack,
                         onGoHome = onGoHome
                     )
-                    VideoDetailPage(
-                        modifier = Modifier.weight(1f),
-                        viewModel = viewModel,
-                        detail = videoState.detail,
-                        ids = videoState.ids,
-                        biz = videoState.biz,
-                        detailLoading = videoState.detailLoading,
-                        detailError = videoState.detailError,
-                        commentSubject = viewModel.commentSubject,
-                        contentHorizontalPad = 0.dp,
-                        onOpenVideo = openTarget,
-                        onOpenSpace = onOpenSpace,
-                        onDownloadClick = downloadClick,
-                        onOpenEpisode = switchEpisode,
-                        onSwitchPage = switchPage
-                    )
+                    AnimatedVisibility(
+                        visible = !openAnimating,
+                        enter = fadeIn(tween(durationMillis = 180)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        VideoDetailPage(
+                            modifier = Modifier.fillMaxSize(),
+                            viewModel = viewModel,
+                            detail = videoState.detail,
+                            ids = videoState.ids,
+                            biz = videoState.biz,
+                            detailLoading = videoState.detailLoading,
+                            detailError = videoState.detailError,
+                            commentSubject = viewModel.commentSubject,
+                            contentHorizontalPad = 0.dp,
+                            onOpenVideo = openTarget,
+                            onOpenSpace = onOpenSpace,
+                            onDownloadClick = downloadClick,
+                            onOpenEpisode = switchEpisode,
+                            onSwitchPage = switchPage
+                        )
+                    }
                 }
             }
 
@@ -316,24 +328,30 @@ fun VideoScreen(
                             onGoHome = onGoHome
                         )
                     }
-                    VideoDetailPage(
+                    AnimatedVisibility(
+                        visible = !openAnimating,
+                        enter = fadeIn(tween(durationMillis = 180)),
                         modifier = Modifier
                             .weight(1f)
-                            .background(MaterialTheme.colorScheme.background),
-                        viewModel = viewModel,
-                        detail = videoState.detail,
-                        ids = videoState.ids,
-                        biz = videoState.biz,
-                        detailLoading = videoState.detailLoading,
-                        detailError = videoState.detailError,
-                        commentSubject = viewModel.commentSubject,
-                        contentHorizontalPad = 16.dp,
-                        onOpenVideo = openTarget,
-                        onOpenSpace = onOpenSpace,
-                        onDownloadClick = downloadClick,
-                        onOpenEpisode = switchEpisode,
-                        onSwitchPage = switchPage
-                    )
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        VideoDetailPage(
+                            modifier = Modifier.fillMaxSize(),
+                            viewModel = viewModel,
+                            detail = videoState.detail,
+                            ids = videoState.ids,
+                            biz = videoState.biz,
+                            detailLoading = videoState.detailLoading,
+                            detailError = videoState.detailError,
+                            commentSubject = viewModel.commentSubject,
+                            contentHorizontalPad = 16.dp,
+                            onOpenVideo = openTarget,
+                            onOpenSpace = onOpenSpace,
+                            onDownloadClick = downloadClick,
+                            onOpenEpisode = switchEpisode,
+                            onSwitchPage = switchPage
+                        )
+                    }
                 }
             }
         }

@@ -29,13 +29,15 @@ class SeamlessVideoCardState internal constructor(
         target: VideoTarget?,
         coverUrl: String?,
         coverLarge: Boolean,
-        anchorRadiusPx: Float
+        anchorRadiusPx: Float,
+        listCover: Pair<Float, Float>? = null
     ): Boolean = opener?.tryOpen(
         anchor = anchorState.anchor,
         target = target,
         coverUrl = coverUrl,
         coverLarge = coverLarge,
-        anchorRadiusPx = anchorRadiusPx
+        anchorRadiusPx = anchorRadiusPx,
+        listCover = listCover
     ) == true
 }
 

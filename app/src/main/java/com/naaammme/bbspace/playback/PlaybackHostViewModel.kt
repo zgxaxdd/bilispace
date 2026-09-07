@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.LivePlaybackController
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
+import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.model.LiveRoute
+import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.navigation.VideoDetailNavBus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.combine
@@ -20,6 +22,7 @@ import javax.inject.Inject
 class PlaybackHostViewModel @Inject constructor(
     private val playbackSession: StreamPlaybackSession,
     private val livePlaybackController: LivePlaybackController,
+    private val videoPlaybackController: VideoPlaybackController,
     playerSettings: AppSettings,
     private val hostState: PlaybackHostState,
     val videoDetailNavBus: VideoDetailNavBus
@@ -58,6 +61,18 @@ class PlaybackHostViewModel @Inject constructor(
         viewModelScope.launch {
             livePlaybackController.openLive(route)
         }
+    }
+
+    /**
+     * 无缝/普通过渡打开视频详情 Activity 前的点击预热：立即发起取流与 prepare，
+     * 让网络往返与窗口动画重叠。session.openVideo 对同 target 幂等
+     * （详情侧 openRoot 命中短路并恢复播放），hostMode 保持 Hidden 不弹小窗。
+     * cancelPendingClose 必须在发起前调用：上一段的延迟关停若晚于本 open 落地
+     * 会 invalidate 新会话。
+     */
+    fun warmOpen(target: VideoTarget) {
+        hostState.cancelPendingClose()
+        videoPlaybackController.openVideo(target)
     }
 
     fun togglePlayPause() {

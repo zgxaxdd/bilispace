@@ -39,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -120,6 +122,18 @@ fun HomeVideoPage(
             }
         }
     }
+    // 返回动画末端遮挡渐隐参数：顶栏（含状态栏）遮挡区占屏比；
+    // 底部悬浮栏高度在 app 层不可得，bottom 传 0（不做底部渐隐），口径见接入文档
+    val density = LocalDensity.current
+    val screenHpx = LocalWindowInfo.current.containerSize.height
+    val listCover = remember(topContentPadding, screenHpx) {
+        if (screenHpx <= 0) {
+            null
+        } else {
+            val topRatio = with(density) { topContentPadding.toPx() } / screenHpx
+            topRatio.coerceIn(0f, 1f) to 0f
+        }
+    }
     AdaptiveMediaGrid(
         items = items,
         isRefreshing = isRefreshing,
@@ -146,6 +160,7 @@ fun HomeVideoPage(
         FeedCard(
             item = item,
             singleColumn = singleColumn,
+            listCover = listCover,
             onOpenSpace = onOpenSpace,
             dislikedReason = dislikedReasons[item.actionKey()],
             onDislike = onDislike,
@@ -166,6 +181,7 @@ fun HomeVideoPage(
 private fun FeedCard(
     item: FeedItem,
     singleColumn: Boolean = false,
+    listCover: Pair<Float, Float>? = null,
     onOpenSpace: (SpaceRoute) -> Unit,
     dislikedReason: String?,
     onDislike: (FeedItem, ThreePointReason) -> Unit,
@@ -211,7 +227,8 @@ private fun FeedCard(
                     target = target,
                     coverUrl = item.cover,
                     coverLarge = singleColumn,
-                    anchorRadiusPx = seamlessSpec.radiusPx
+                    anchorRadiusPx = seamlessSpec.radiusPx,
+                    listCover = listCover
                 )
             ) {
                 // 无缝注册成功：起飞矩形即封面，不再快照幽灵来源

@@ -209,6 +209,8 @@ fun AppNavHost(
     val openVideoRoute: (VideoTarget, String?, Boolean, Bundle?) -> Unit =
         { target, coverUrl, coverLarge, bundle ->
             if (OplusViewSeamlessCompat.isVersionSupported()) {
+                // 点击预热：取流与窗口/无缝动画并行，详情侧 openRoot 幂等接管
+                playbackHostViewModel.warmOpen(target)
                 openVideoActivity(target, coverUrl, coverLarge, bundle)
             } else {
                 playbackHostViewModel.expand()
