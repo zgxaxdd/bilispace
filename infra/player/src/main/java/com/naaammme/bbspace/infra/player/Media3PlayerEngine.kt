@@ -184,6 +184,9 @@ class Media3PlayerEngine @Inject constructor(
         exoPlayer = nextPlayer
         _player.value = nextPlayer
         resetPlaybackFlows()
+        // 视图可能仍绑定旧实例（如小窗未及重组摘除），先解绑再释放，
+        // 否则其延迟 dispose 的 unbind 会对已 release 的 player 抛 "Player is released"
+        prev?.let(PlayerViewTargetBinder::unbindAll)
         prev?.release()
     }
 
@@ -274,6 +277,8 @@ class Media3PlayerEngine @Inject constructor(
         _player.value = null
         _currentSource.value = null
         resetPlaybackFlows()
+        // 先解绑仍绑定的视图再释放（同 updateConfig，防 dispose 后对已 release player 解绑崩溃）
+        PlayerViewTargetBinder.unbindAll(player)
         player.release()
     }
 
@@ -331,6 +336,8 @@ class Media3PlayerEngine @Inject constructor(
         _player.value = nextPlayer
         resetRuntimeState()
         resetPlaybackFlows()
+        // 释放旧实例前先解绑仍绑定的视图，避免视图延迟 dispose 时对已 release 的 player 解绑崩溃
+        PlayerViewTargetBinder.unbindAll(player)
         player.release()
         runtimeScope.launch {
             try {
