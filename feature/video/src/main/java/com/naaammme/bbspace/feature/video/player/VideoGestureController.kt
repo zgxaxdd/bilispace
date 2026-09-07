@@ -115,7 +115,8 @@ fun Modifier.videoGestures(
     onDoubleTapLike: (Offset) -> Unit = {},
     isPlaying: () -> Boolean,
     positionMs: () -> Long,
-    durationMs: () -> Long
+    durationMs: () -> Long,
+    zoomActive: () -> Boolean = { false }
 ): Modifier {
     val curToggleControls by rememberUpdatedState(onToggleControls)
     val curTogglePlay by rememberUpdatedState(onTogglePlay)
@@ -131,6 +132,7 @@ fun Modifier.videoGestures(
     val curIsPlaying by rememberUpdatedState(isPlaying)
     val curPositionMs by rememberUpdatedState(positionMs)
     val curDurationMs by rememberUpdatedState(durationMs)
+    val curZoomActive by rememberUpdatedState(zoomActive)
     val visibleStatusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val hiddenStatusBarHeight = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues()
         .calculateTopPadding()
@@ -176,6 +178,16 @@ fun Modifier.videoGestures(
                         state.speedBadgeText = curStartSpeedUp()
                         state.showSpeedBadge = true
                         continue
+                    }
+                    // 双指接管：捏合缩放层处理，单指状态机完全退出（resetDrag 丢弃未提交
+                    // 的 seek；长按倍速需立即恢复原速）。break 后由外层等待全新手势。
+                    if (event.changes.count { it.pressed } > 1) {
+                        if (phase == Phase.LongPress) {
+                            curStopSpeedUp()
+                            state.showSpeedBadge = false
+                        }
+                        state.resetDrag()
+                        break
                     }
                     val change = event.changes.firstOrNull() ?: break
 
@@ -225,6 +237,12 @@ fun Modifier.videoGestures(
                     when (phase) {
                         Phase.Press -> {
                             if (totalDelta.getDistance() >= slop) {
+                                // 已放大（缩放>1）时拖动让位给缩放平移层；单击/双击/长按不受影响
+                                if (curZoomActive()) {
+                                    state.resetDrag()
+                                    waitForAllUp()
+                                    break
+                                }
                                 val isHorizontal = abs(totalDelta.x) > abs(totalDelta.y)
                                 phase = Phase.Drag
                                 val dragType = when {

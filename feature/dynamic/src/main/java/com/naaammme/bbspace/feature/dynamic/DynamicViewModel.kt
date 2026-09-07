@@ -17,6 +17,7 @@ import com.naaammme.bbspace.core.model.DynamicStats
 import com.naaammme.bbspace.core.model.VideoTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -35,7 +36,7 @@ class DynamicViewModel @Inject constructor(
     private val authProvider: AuthProvider
 ) : ViewModel() {
 
-    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     private val likeBusyIds = mutableSetOf<String>()

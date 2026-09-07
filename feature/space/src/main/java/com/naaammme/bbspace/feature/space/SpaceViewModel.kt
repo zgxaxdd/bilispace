@@ -16,8 +16,12 @@ import com.naaammme.bbspace.feature.space.navigation.SPACE_MID_ARG
 import com.naaammme.bbspace.feature.space.navigation.SPACE_NAME_ARG
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -37,6 +41,13 @@ class SpaceViewModel @Inject constructor(
         SpaceUiState(header = route.toInitialHeaderState())
     )
     val uiState: StateFlow<SpaceUiState> = _uiState.asStateFlow()
+
+    // 关注/拉黑请求进行中标志：防止连点重复提交导致关系状态回写错乱
+    @Volatile
+    private var relationBusy = false
+
+    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     init {
         if (!isValidRoute) {
@@ -213,15 +224,20 @@ class SpaceViewModel @Inject constructor(
     fun toggleFollow() {
         val profile = _uiState.value.header?.profile ?: return
         if (profile.mid <= 0L) return
+        if (relationBusy) return
         val isFollow = profile.relation != 1
 
+        relationBusy = true
         viewModelScope.launch {
             try {
                 repo.modifyRelation(profile.mid, isFollow)
                 updateProfileRelationState(if (isFollow) 1 else -999)
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "修改关注状态失败" }
-                // TODO: 可以在这里增加发送 Toast 或 Snackbar 的 SideEffect
+                if (e is CancellationException) throw e
+                _msg.tryEmit(e.message?.takeIf(String::isNotBlank) ?: "操作失败，请稍后重试")
+            } finally {
+                relationBusy = false
             }
         }
     }
@@ -229,15 +245,20 @@ class SpaceViewModel @Inject constructor(
     fun toggleBlock() {
         val profile = _uiState.value.header?.profile ?: return
         if (profile.mid <= 0L) return
+        if (relationBusy) return
         val isBlack = profile.relation != -1
 
+        relationBusy = true
         viewModelScope.launch {
             try {
                 repo.modifyBlacklist(profile.mid, isBlack)
                 updateProfileRelationState(if (isBlack) -1 else -999)
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "修改拉黑状态失败" }
-                // TODO: 可以在这里增加发送 Toast 或 Snackbar 的 SideEffect
+                if (e is CancellationException) throw e
+                _msg.tryEmit(e.message?.takeIf(String::isNotBlank) ?: "操作失败，请稍后重试")
+            } finally {
+                relationBusy = false
             }
         }
     }

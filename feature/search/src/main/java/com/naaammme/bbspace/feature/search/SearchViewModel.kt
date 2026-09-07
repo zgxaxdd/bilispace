@@ -79,6 +79,9 @@ class SearchViewModel @Inject constructor(
         )
 
     private var next = ""
+    // 搜索代际：每次新搜索自增，过期的翻页请求（返回时已被新搜索作废）直接丢弃，
+    // 避免旧关键词第 2 页结果混入新关键词的列表并污染游标
+    private var searchGen = 0
     private var sel by mutableStateOf<Map<String, Set<String>>>(emptyMap())
 
     fun selectedOf(key: String): Set<String> {
@@ -177,11 +180,13 @@ class SearchViewModel @Inject constructor(
 
     fun loadMore() {
         if (keyword.isBlank() || next.isBlank() || isLoading || isLoadingMore) return
+        val gen = searchGen
         viewModelScope.launch {
             try {
                 isLoadingMore = true
                 errorMessage = null
                 val page = repo.search(buildReq(keyword, next))
+                if (gen != searchGen) return@launch
                 next = page.next
                 val newAuthors = page.authors.filter { authorIds.add(it.mid) }
                 val newVideos = page.videos.filter { videoIds.add(it.aid to it.cid) }
@@ -200,6 +205,7 @@ class SearchViewModel @Inject constructor(
     }
 
     private suspend fun search(query: String) {
+        val gen = ++searchGen
         try {
             isLoading = true
             next = ""
@@ -209,6 +215,7 @@ class SearchViewModel @Inject constructor(
             _videos.value = emptyList()
             errorMessage = null
             val page = repo.search(buildReq(query, ""))
+            if (gen != searchGen) return
             keyword = page.keyword
             input = page.keyword
             next = page.next

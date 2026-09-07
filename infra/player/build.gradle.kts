@@ -43,5 +43,7 @@ dependencies {
     implementation(libs.media3.datasource.okhttp)
     api(libs.media3.ui)
     implementation(libs.danmakuFlameMaster)
+
+    testImplementation(libs.junit)
 }
 

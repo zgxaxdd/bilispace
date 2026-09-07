@@ -6,11 +6,13 @@ import com.naaammme.bbspace.core.history.PlaybackHistoryRepository
 import com.naaammme.bbspace.core.model.PlaybackHistory
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -43,27 +45,30 @@ class PlaybackHistoryViewModel @Inject constructor(
         }
     }
 
-    fun export(items: List<PlaybackHistory>): String {
-        return JSONArray().apply {
-            items.forEach { item ->
-                put(
-                    JSONObject().apply {
-                        put("id", item.id)
-                        put("uid", item.uid)
-                        put("key", item.key)
-                        put("biz", item.biz)
-                        put("aid", item.aid)
-                        put("cid", item.cid)
-                        put("epId", item.epId)
-                        put("seasonId", item.seasonId)
-                        put("durationMs", item.durationMs)
-                        put("progressMs", item.progressMs)
-                        put("watchMs", item.watchMs)
-                        put("updatedAt", item.updatedAt)
-                        put("finished", item.finished)
-                    }
-                )
-            }
-        }.toString(2)
+    suspend fun export(items: List<PlaybackHistory>): String {
+        // 记录多时逐条构建 JSON 有可感耗时，切 Default 避免阻塞主线程
+        return withContext(Dispatchers.Default) {
+            JSONArray().apply {
+                items.forEach { item ->
+                    put(
+                        JSONObject().apply {
+                            put("id", item.id)
+                            put("uid", item.uid)
+                            put("key", item.key)
+                            put("biz", item.biz)
+                            put("aid", item.aid)
+                            put("cid", item.cid)
+                            put("epId", item.epId)
+                            put("seasonId", item.seasonId)
+                            put("durationMs", item.durationMs)
+                            put("progressMs", item.progressMs)
+                            put("watchMs", item.watchMs)
+                            put("updatedAt", item.updatedAt)
+                            put("finished", item.finished)
+                        }
+                    )
+                }
+            }.toString(2)
+        }
     }
 }

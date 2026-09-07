@@ -120,15 +120,21 @@ class HistoryViewModel @Inject constructor(
         try {
             val page = repo.fetchPage(tab, if (reset) HistoryCursor() else cursor)
             cursor = page.cursor
+            // 按 key 去重：翻页窗口重叠时服务端可能返回重复条目，重复 key 会让 LazyColumn 崩溃
+            val mergedItems = if (reset) {
+                page.items.distinctBy(HistoryItem::key)
+            } else {
+                (_uiState.value.items + page.items).distinctBy(HistoryItem::key)
+            }
             cache[tab] = HistoryCache(
-                items = if (reset) page.items else _uiState.value.items + page.items,
+                items = mergedItems,
                 cursor = page.cursor,
                 hasMore = page.hasMore
             )
             _uiState.update {
                 if (it.tab != tab) return@update it
                 it.copy(
-                    items = if (reset) page.items else it.items + page.items,
+                    items = mergedItems,
                     isLoading = false,
                     isRefreshing = false,
                     isLoadingMore = false,

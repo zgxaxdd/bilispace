@@ -10,6 +10,7 @@ import com.naaammme.bbspace.feature.dynamic.navigation.DYNAMIC_DETAIL_OPUS_ID_AR
 import com.naaammme.bbspace.feature.dynamic.navigation.DYNAMIC_DETAIL_OPUS_TYPE_ARG
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -32,7 +33,7 @@ class DynamicDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(DynamicDetailUiState())
     val uiState: StateFlow<DynamicDetailUiState> = _uiState.asStateFlow()
 
-    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     private var likeBusy = false

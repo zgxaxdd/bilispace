@@ -7,6 +7,7 @@ import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.auth.CacheManager
 import com.naaammme.bbspace.core.model.LoginCredential
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -87,11 +88,16 @@ class PrivacyViewModel @Inject constructor(
     }
 
     fun clearImageCache() {
-        cacheManager.clearImageCache()
+        // Coil 磁盘缓存在调用线程同步清理，必须切 IO 避免主线程卡顿
+        viewModelScope.launch(Dispatchers.IO) {
+            cacheManager.clearImageCache()
+        }
     }
 
     fun clearAllCache() {
-        cacheManager.clearAllCache()
+        viewModelScope.launch(Dispatchers.IO) {
+            cacheManager.clearAllCache()
+        }
         refresh()
     }
 }

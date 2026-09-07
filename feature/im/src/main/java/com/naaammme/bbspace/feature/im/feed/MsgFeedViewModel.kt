@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.im.feed
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.model.MsgFeedFilter
+import com.naaammme.bbspace.core.model.im.MsgFeedItem
 
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.im.ImRepository
@@ -80,10 +81,11 @@ class MsgFeedViewModel @Inject constructor(
             )
             if (callId != reqId) return
             _uiState.update { it ->
+                // 按 msgId 去重：服务端翻页窗口可能返回重复消息，重复 key 会让 LazyColumn 崩溃
                 val newItems = if (reset) {
-                    page.msgCards
+                    page.msgCards.distinctBy(MsgFeedItem::msgId)
                 } else {
-                    it.items + page.msgCards
+                    (it.items + page.msgCards).distinctBy(MsgFeedItem::msgId)
                 }
                 val newCursor = page.cursor
                 it.copy(

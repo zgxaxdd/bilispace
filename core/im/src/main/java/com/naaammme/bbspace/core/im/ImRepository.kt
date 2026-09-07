@@ -151,7 +151,8 @@ class ImRepository @Inject constructor(
                     .setReceiverId(talkerId)
                     .setCliMsgId(cliMsgId)
                     .setMsgType(ImMsgType.TEXT)
-                    .setContent("""{"content":"$text"}""")
+                    // 用户文本必须经 JSON 转义：直接拼接在含引号/反斜杠/换行时会生成非法 JSON
+                    .setContent(JSONObject().put("content", text).toString())
                     .setNewFaceVersion(1)
                     .build()
             )

@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.PlaybackHistory
 import com.naaammme.bbspace.feature.bbspace.rememberExportJson
+import kotlinx.coroutines.launch
 
 @Composable
 fun PlaybackHistoryPane(
@@ -45,6 +47,7 @@ fun PlaybackHistoryPane(
     val state by vm.uiState.collectAsStateWithLifecycle()
     val exportJson = rememberExportJson()
     val context = LocalContext.current
+    val exportScope = rememberCoroutineScope()
     var pendingDelete by remember { mutableStateOf<PlaybackHistory?>(null) }
     var showClearDialog by remember { mutableStateOf(false) }
 
@@ -60,10 +63,14 @@ fun PlaybackHistoryPane(
                     if (state.items.isEmpty()) {
                         toast(context, "暂无播放历史")
                     } else {
-                        exportJson(
-                            "bbspace_playback_history.json",
-                            vm.export(state.items)
-                        )
+                        // JSON 构建在协程里完成（VM 内切 Default），避免大列表卡主线程
+                        val items = state.items
+                        exportScope.launch {
+                            exportJson(
+                                "bbspace_playback_history.json",
+                                vm.export(items)
+                            )
+                        }
                     }
                 },
                 onClear = {

@@ -14,18 +14,16 @@ import org.json.JSONObject
 @Singleton
 class WebPlayUrlClient @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val dmParamsFactory: WebDmParamsFactory
+    private val dmParamsFactory: WebDmParamsFactory,
+    private val wbiKeyProvider: WbiKeyProvider
 ) {
     @Volatile
     private var buvid3 = ""
 
-    @Volatile
-    private var wbiKeys: WbiKeys? = null
-
     suspend fun fetchPlayback(request: WebPlayUrlRequest): JSONObject = withContext(Dispatchers.IO) {
         val dmParams = dmParamsFactory.create()
         val webBuvid3 = getBuvid3()
-        val keys = getWbiKeys()
+        val keys = wbiKeyProvider.getKeys()
         val signedParams = WbiSigner.sign(
             params = buildParams(request, dmParams),
             imgKey = keys.imgKey,
@@ -95,26 +93,6 @@ class WebPlayUrlClient @Inject constructor(
         return value
     }
 
-    private fun getWbiKeys(): WbiKeys {
-        wbiKeys?.let { return it }
-        val request = Request.Builder()
-            .url("${BiliConstants.BASE_URL_API}$NAV_ENDPOINT")
-            .get()
-            .addHeader("referer", "https://www.bilibili.com/")
-            .addHeader("user-agent", UserAgentBuilder.buildWebUserAgent())
-            .build()
-        val json = executeJson(request)
-        val wbiImg = json.optJSONObject("data")
-            ?.optJSONObject("wbi_img")
-            ?: error("nav 缺少 wbi_img")
-        val keys = WbiKeys(
-            imgKey = wbiImg.optString("img_url").extractWbiKey(),
-            subKey = wbiImg.optString("sub_url").extractWbiKey()
-        )
-        wbiKeys = keys
-        return keys
-    }
-
     private fun executeJson(request: Request): JSONObject {
         return okHttpClient.newCall(request).execute().use { response ->
             val body = response.body?.string() ?: error("empty response")
@@ -129,13 +107,6 @@ class WebPlayUrlClient @Inject constructor(
         error("$api 失败: $msg")
     }
 
-    private fun String.extractWbiKey(): String {
-        return substringAfterLast('/')
-            .substringBefore('.')
-            .takeIf(String::isNotBlank)
-            ?: error("wbi key 为空")
-    }
-
     private fun WebPlayUrlRequest.referer(): String {
         val bvid = bvid?.takeIf(String::isNotBlank)
         return if (bvid != null) {
@@ -147,7 +118,6 @@ class WebPlayUrlClient @Inject constructor(
 
     private companion object {
         const val GET_BUVID_ENDPOINT = "/x/web-frontend/getbuvid"
-        const val NAV_ENDPOINT = "/x/web-interface/nav"
         const val PLAY_URL_ENDPOINT = "/x/player/wbi/playurl"
         const val WEB_QN = "120"
     }
@@ -157,9 +127,4 @@ data class WebPlayUrlRequest(
     val aid: Long,
     val bvid: String? = null,
     val cid: Long
-)
-
-private data class WbiKeys(
-    val imgKey: String,
-    val subKey: String
 )

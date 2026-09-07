@@ -9,6 +9,7 @@ import com.naaammme.bbspace.core.model.FavoriteContentItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -29,7 +30,7 @@ class FavoriteFolderDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FavoriteFolderDetailUiState(isLoading = true))
     val uiState: StateFlow<FavoriteFolderDetailUiState> = _uiState.asStateFlow()
 
-    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     private var loadJob: Job? = null
@@ -77,8 +78,13 @@ class FavoriteFolderDetailViewModel @Inject constructor(
                 repo.fetchFavoriteFolderContents(fid = fid, page = reqPage)
             }.onSuccess { page ->
                 _uiState.update {
+                    // 按 key 去重，避免翻页窗口重叠导致列表重复 key 崩溃
                     it.copy(
-                        items = if (reset) page.items else it.items + page.items,
+                        items = if (reset) {
+                            page.items.distinctBy(FavoriteContentItem::key)
+                        } else {
+                            (it.items + page.items).distinctBy(FavoriteContentItem::key)
+                        },
                         page = reqPage,
                         totalCount = page.totalCount,
                         hasInvalid = page.hasInvalid,

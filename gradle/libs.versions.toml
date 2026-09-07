@@ -57,9 +57,11 @@ oplusViewSeamless = "1.0.0"
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version = "1.4.1" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 
@@ -80,6 +82,7 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime" }
 google-material = { group = "com.google.android.material", name = "material", version.ref = "googleMaterial" }
 danmakuFlameMaster = { group = "com.github.naaammme", name = "DanmakuFlameMaster", version.ref = "danmakuFlameMaster" }
@@ -142,6 +145,9 @@ zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" 
 
 # OPPO system capability SDKs (compileOnly, do NOT ship inside APK)
 oplus-viewseamless = { group = "com.oplus.animation", name = "viewseamless", version.ref = "oplusViewSeamless" }
+
+# Debug-only tooling (Apache-2.0, compatible with GPL-3.0; debugImplementation only)
+leakcanary-android = { group = "com.squareup.leakcanary", name = "leakcanary-android", version = "2.14" }
 
 # Gradle Plugins (for build-logic)
 android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }

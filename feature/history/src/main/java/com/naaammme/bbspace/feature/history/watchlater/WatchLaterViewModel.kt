@@ -174,7 +174,12 @@ class WatchLaterViewModel @Inject constructor(
             val page = repo.fetchPage(tab, asc, reqCursor)
             currentStartKey = page.cursor.startKey
             splitKey = page.cursor.splitKey
-            val items = if (reset) page.items else _uiState.value.items + page.items
+            // 按 key 去重，避免翻页窗口重叠导致 LazyColumn 重复 key 崩溃
+            val items = if (reset) {
+                page.items.distinctBy(WatchLaterItem::key)
+            } else {
+                (_uiState.value.items + page.items).distinctBy(WatchLaterItem::key)
+            }
             cache[WatchLaterCacheKey(tab, asc)] = WatchLaterCache(
                 items = items,
                 nextStartKey = currentStartKey,

@@ -59,10 +59,12 @@ import com.naaammme.bbspace.feature.home.interest.InterestDialog
 import com.naaammme.bbspace.feature.home.listen.ListenHomePage
 import com.naaammme.bbspace.feature.home.live.HomeLivePage
 import com.naaammme.bbspace.feature.home.video.HomeVideoPage
+import com.naaammme.bbspace.feature.rank.RankScreen
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private val homeTabs = listOf("FM", "推荐", "直播", "专栏")
+private val homeTabs = listOf("FM", "推荐", "直播", "排行", "专栏")
+private val homeRankTabPage = 3
 private val homeProfileAvatarSize = 38.dp
 private val homeProfileIconSize = 24.dp
 private const val homeDefaultPage = 1
@@ -185,6 +187,13 @@ fun HomeScreen(
                     isActive = pagerState.currentPage == page,
                     topContentPadding = topBarHeightDp,
                     onOpenLive = onOpenLive,
+                    onOpenSpace = onOpenSpace
+                )
+
+                homeRankTabPage -> RankScreen(
+                    isActive = pagerState.currentPage == page,
+                    topContentPadding = topBarHeightDp,
+                    onOpenVideo = onOpenVideo,
                     onOpenSpace = onOpenSpace
                 )
 

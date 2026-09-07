@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.feature.space
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -53,6 +55,14 @@ fun SpaceScreen(
     val archiveState = rememberUpdatedState(state.archive)
     val dynamicsState = rememberUpdatedState(state.dynamics)
     val selectedSectionState = rememberUpdatedState(state.selectedSection)
+    val context = LocalContext.current
+
+    // 关注/拉黑失败等操作的 Toast 反馈，与详情页互动操作一致
+    LaunchedEffect(viewModel) {
+        viewModel.msg.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(listState, state.selectedSection) {
         snapshotFlow {

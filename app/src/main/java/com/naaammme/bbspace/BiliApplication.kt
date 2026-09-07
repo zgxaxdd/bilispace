@@ -2,6 +2,7 @@ package com.naaammme.bbspace
 
 import android.app.Application
 import android.os.Build.VERSION.SDK_INT
+import android.os.StrictMode
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -32,8 +33,29 @@ class BiliApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         Logger.init(BuildConfig.DEBUG)
+        if (BuildConfig.DEBUG) {
+            setupStrictMode()
+        }
         setupGlobalExceptionHandler()
         appInitializer.initialize()
+    }
+
+    /** debug-only：主线程磁盘/网络访问检测，penaltyLog 不崩溃，避免误伤 */
+    private fun setupStrictMode() {
+        val policy = StrictMode.ThreadPolicy.Builder()
+            .detectDiskReads()
+            .detectDiskWrites()
+            .detectNetwork()
+            .penaltyLog()
+            .build()
+        StrictMode.setThreadPolicy(policy)
+        StrictMode.setVmPolicy(
+            StrictMode.VmPolicy.Builder()
+                .detectLeakedClosableObjects()
+                .detectActivityLeaks()
+                .penaltyLog()
+                .build()
+        )
     }
 
     private fun setupGlobalExceptionHandler() {

@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -90,7 +90,8 @@ fun ErrorLogScreen(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(logs, key = { it.time.toString() + it.tag }) { log ->
+                // key 带上 index：time+tag 在同毫秒同 tag 时会重复，重复 key 会让 LazyColumn 崩溃
+                itemsIndexed(logs, key = { index, log -> "${log.time}-${log.tag}-$index" }) { _, log ->
                     ErrorLogItem(log, fmt)
                 }
             }

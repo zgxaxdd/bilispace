@@ -33,6 +33,7 @@ dependencies {
     implementation(project(":core:settings"))
     implementation(project(":core:common"))
     implementation(project(":core:designsystem"))
+    implementation(project(":feature:rank"))
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

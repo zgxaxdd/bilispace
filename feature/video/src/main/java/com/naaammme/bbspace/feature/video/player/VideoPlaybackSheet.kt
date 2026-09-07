@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.video.player
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
@@ -13,10 +14,13 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.verticalScroll
@@ -29,8 +33,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +51,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
@@ -100,17 +111,20 @@ internal fun VideoPlaybackSheet(
         }
     }
 
+    // 悬浮面板形态：sheet 本体透明，内容为四周留边的圆角卡片（自带投影），
+    // 与屏幕边缘脱开产生"浮起"感；下拉关闭手势仍由 ModalBottomSheet 承接
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        dragHandle = null,
+        shape = RectangleShape,
+        containerColor = Color.Transparent,
+        contentWindowInsets = { WindowInsets(0) }
     ) {
-        VideoPlaybackPanelContent(
-            state = state,
-            ids = state.ids,
-            settingsState = settingsState,
-            viewModel = viewModel,
-            section = section,
-            onSectionChange = { section = it },
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 8.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
@@ -121,8 +135,24 @@ internal fun VideoPlaybackSheet(
                     }
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.sm)
-        )
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 12.dp)
+        ) {
+            Column {
+                SheetDragHandle()
+                VideoPlaybackPanelContent(
+                    state = state,
+                    ids = state.ids,
+                    settingsState = settingsState,
+                    viewModel = viewModel,
+                    section = section,
+                    onSectionChange = { section = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.sm)
+                )
+            }
+        }
     }
 }
 
@@ -139,31 +169,59 @@ internal fun VideoPlaybackSidebar(
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val panelWidth = (maxWidth * 0.42f).coerceIn(240.dp, 360.dp)
         Row(modifier = Modifier.fillMaxWidth()) {
+            // 左侧遮罩：点击关闭，压暗背景突出悬浮面板
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .background(Color.Black.copy(alpha = 0.35f))
                     .clickable(onClick = onDismiss)
             )
-            Card(
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 12.dp,
                 modifier = Modifier
+                    .padding(vertical = 12.dp)
                     .width(panelWidth)
                     .fillMaxHeight()
             ) {
-                VideoPlaybackPanelContent(
-                    state = state,
-                    ids = state.ids,
-                    settingsState = settingsState,
-                    viewModel = viewModel,
-                    section = section,
-                    onSectionChange = { section = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 14.dp, vertical = BiliSpacing.md)
-                )
+                Column {
+                    SheetDragHandle()
+                    VideoPlaybackPanelContent(
+                        state = state,
+                        ids = state.ids,
+                        settingsState = settingsState,
+                        viewModel = viewModel,
+                        section = section,
+                        onSectionChange = { section = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 14.dp, vertical = BiliSpacing.sm)
+                    )
+                }
             }
         }
+    }
+}
+
+/** 悬浮面板顶部的下拉把手 */
+@Composable
+private fun SheetDragHandle() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = BiliSpacing.sm, bottom = BiliSpacing.xs),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .width(36.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.outlineVariant)
+        )
     }
 }
 
@@ -182,18 +240,20 @@ private fun VideoPlaybackPanelContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth()
         ) {
-            PlaybackSheetSection.entries.forEach { item ->
-                FilterChip(
+            PlaybackSheetSection.entries.forEachIndexed { index, item ->
+                SegmentedButton(
                     selected = item == section,
                     onClick = { onSectionChange(item) },
-                    label = { Text(item.title) }
-                )
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = PlaybackSheetSection.entries.size
+                    )
+                ) {
+                    Text(item.title)
+                }
             }
         }
 

@@ -52,11 +52,12 @@ class BiliRestClient @Inject constructor(
         val signedBody = AppSigner.sign(params, profile.appKey, profile.appSec)
         val requestBody = signedBody.toRequestBody(null)
         return withContext(Dispatchers.IO) {
-            val resp = okHttpClient.newCall(
+            okHttpClient.newCall(
                 Request.Builder().url(url).post(requestBody).withHeaders(profile).build()
-            ).execute()
-            val json = JSONObject(resp.body?.string() ?: throw BiliApiException(-1, "Empty response"))
-            requireSuccess(json) to resp.header(headerName).orEmpty()
+            ).execute().use { resp ->
+                val json = JSONObject(resp.body?.string() ?: throw BiliApiException(-1, "Empty response"))
+                requireSuccess(json) to resp.header(headerName).orEmpty()
+            }
         }
     }
 
@@ -167,8 +168,9 @@ class BiliRestClient @Inject constructor(
      */
     private suspend fun executeJson(request: Request): JSONObject {
         return withContext(Dispatchers.IO) {
-            val resp = okHttpClient.newCall(request).execute()
-            JSONObject(resp.body?.string() ?: throw BiliApiException(-1, "Empty response"))
+            okHttpClient.newCall(request).execute().use { resp ->
+                JSONObject(resp.body?.string() ?: throw BiliApiException(-1, "Empty response"))
+            }
         }
     }
 

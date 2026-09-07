@@ -8,6 +8,7 @@ import com.naaammme.bbspace.core.model.FavoriteContentCursor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -32,7 +33,7 @@ class FavoriteViewModel @Inject constructor(
     private val _sortState = MutableStateFlow(FolderSortUiState())
     val sortState: StateFlow<FolderSortUiState> = _sortState.asStateFlow()
 
-    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     private var contentJob: Job? = null

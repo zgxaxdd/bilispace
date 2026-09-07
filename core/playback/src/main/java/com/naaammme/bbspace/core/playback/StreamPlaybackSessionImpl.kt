@@ -314,6 +314,12 @@ class StreamPlaybackSessionImpl @Inject constructor(
             (currentState.playbackSource != null || currentState.isPreparing)
         ) {
             _currentTarget.value = StreamPlaybackTarget.Video(target)
+            // 快速退出再进入：closeAfterReturnAnimation 已 pause（保画面停声），
+            // 同会话短路返回时必须恢复播放，否则画面停留在暂停态
+            if (!playerEngine.playbackState.value.playWhenReady) {
+                nextPlayWhenReady = true
+                playerEngine.play()
+            }
             syncSessionState()
             return
         }

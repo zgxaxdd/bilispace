@@ -82,6 +82,9 @@ class LoginViewModel @Inject constructor(
                         }
                     }
                     .onFailure { error ->
+                        // 协程被取消（退出页面/重启轮询）时 Repo 的 runCatching 会把
+                        // CancellationException 转成 failure，这里不能当作真实轮询失败展示
+                        if (error is kotlinx.coroutines.CancellationException) return@onFailure
                         _loginState.value = LoginState.Error(error.message ?: "轮询失败")
                         pollJob?.cancel()
                     }

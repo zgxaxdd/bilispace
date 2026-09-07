@@ -322,6 +322,8 @@ private fun FontScaleSelector(
         FONT_SCALES.indexOfFirst { kotlin.math.abs(it - scale) < 0.01f }
             .coerceAtLeast(0)
     }
+    // 拖动只更新本地刻度，松手才提交：字体缩放会写 DataStore 并触发全局重组
+    var sliderIdx by remember(scale) { mutableIntStateOf(idx) }
     Card {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -330,15 +332,20 @@ private fun FontScaleSelector(
             ) {
                 Text("字体大小", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "${(FONT_SCALES[idx] * 100).toInt()}%",
+                    "${(FONT_SCALES[sliderIdx] * 100).toInt()}%",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
             Spacer(Modifier.height(8.dp))
             Slider(
-                value = idx.toFloat(),
-                onValueChange = { onScaleChange(FONT_SCALES[sliderIndex(it, FONT_SCALES.lastIndex)]) },
+                value = sliderIdx.toFloat(),
+                onValueChange = { sliderIdx = sliderIndex(it, FONT_SCALES.lastIndex) },
+                onValueChangeFinished = {
+                    val newScale = FONT_SCALES[sliderIdx]
+                    if (kotlin.math.abs(newScale - scale) < 0.01f) return@Slider
+                    onScaleChange(newScale)
+                },
                 valueRange = 0f..(FONT_SCALES.size - 1).toFloat(),
                 steps = FONT_SCALES.size - 2
             )

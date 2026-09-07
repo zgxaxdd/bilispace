@@ -74,7 +74,12 @@ class Media3PlayerEngine @Inject constructor(
     private var lastEventsIsPlaying = false
     private var progressJob: Job? = null
 
-    private val playerListener = object : Player.Listener {
+    // 会话代数：每次系统级错误重建 +1。监听器绑定创建时的代数，
+    // 旧实例的回调（如 release 竞态产生的错误）按代数甄别后丢弃。
+    private var rebuildGen = 0L
+    private val rebuildThrottle = RebuildThrottle()
+
+    private fun newPlayerListener(boundGen: Long): Player.Listener = object : Player.Listener {
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
@@ -87,16 +92,28 @@ class Media3PlayerEngine @Inject constructor(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            if (boundGen != rebuildGen) {
+                // 已被更新的会话接管，本回调来自被替换的旧实例，忽略
+                return
+            }
             Logger.e(TAG, error) {
                 "player error code=${error.errorCodeName} msg=${error.message} " +
                         "videoDec=$videoDecoderName audioDec=$audioDecoderName"
             }
-            // TODO: 出现 decoder reclaimed 等 system-level 错误时重建 player session，当前只记日志不恢复
-            updatePlaybackState { it.copy(errorMessage = error.message) }
+            // 解码器/AudioTrack/帧处理等系统级故障：重建会话自动恢复；
+            // IO/解析/能力类错误是确定性的，重建无益，维持只报错现状
+            if (PlayerErrorPolicy.isRecoverable(error.errorCode)) {
+                recoverSession(error.errorCodeName, error.message)
+            } else {
+                updatePlaybackState { it.copy(errorMessage = error.message) }
+            }
         }
 
         override fun onRenderedFirstFrame() {
+            if (boundGen != rebuildGen) return
             firstFrameSeq += 1L
+            // 新会话出画面即认定恢复成功，清空重建防抖窗口
+            rebuildThrottle.reset()
             updatePlaybackState()
         }
 
@@ -280,9 +297,50 @@ class Media3PlayerEngine @Inject constructor(
                     true
                 )
                 setHandleAudioBecomingNoisy(true)
-                addListener(playerListener)
+                addListener(newPlayerListener(rebuildGen))
                 addAnalyticsListener(analyticsListener)
             }
+    }
+
+    /**
+     * 系统级错误后的会话重建：记录当前源与播放进度/意图 → 建新 ExoPlayer 替换旧实例
+     * （PlaybackService 经 playerEngine.player.collect 自动重绑 MediaSession）→
+     * 复用现有 [setSource] 从原位置恢复。防抖 [RebuildThrottle] 限 60s 内 3 次，
+     * 超限落回普通错误态（UI 已有展示）。仅由 playerListener（主线程）调用。
+     */
+    private fun recoverSession(errorCodeName: String, detail: String?) {
+        val source = _currentSource.value
+        val player = exoPlayer
+        if (source == null || player == null) {
+            updatePlaybackState { it.copy(errorMessage = detail) }
+            return
+        }
+        val positionMs = player.currentPosition.coerceAtLeast(0L)
+        val playWhenReady = player.playWhenReady
+        if (!rebuildThrottle.tryAcquire(android.os.SystemClock.elapsedRealtime())) {
+            Logger.w(TAG) { "recover abandoned: rebuild limit hit code=$errorCodeName pos=$positionMs" }
+            updatePlaybackState { it.copy(errorMessage = detail) }
+            return
+        }
+        Logger.w(TAG) { "recovering from system error code=$errorCodeName pos=$positionMs" }
+        stopProgressPolling()
+        // 先推进代数再建新实例：新 listener 绑定新代数，旧实例 release 竞态的回调被甄别丢弃
+        rebuildGen += 1L
+        val nextPlayer = buildPlayer(appContext, playerConfig)
+        exoPlayer = nextPlayer
+        _player.value = nextPlayer
+        resetRuntimeState()
+        resetPlaybackFlows()
+        player.release()
+        runtimeScope.launch {
+            try {
+                setSource(source, positionMs, playWhenReady)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                Logger.e(TAG, t) { "session recovery failed code=$errorCodeName msg=${t.message}" }
+                updatePlaybackState { it.copy(errorMessage = t.message ?: detail) }
+            }
+        }
     }
 
     private fun buildCodecSelector(config: PlayerConfig): MediaCodecSelector {

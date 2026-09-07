@@ -1,0 +1,69 @@
+# BBSpace 手工 Baseline Profile
+# 覆盖启动 + 首屏 + 进入播放的关键路径。规则以源码/产物中真实存在的类为准；
+# 三方库统一使用包级通配（AGP 会解析为运行时命中的方法）。
+# 目标：冷启动与首屏滚动 JIT 预编译/AOT，减少启动期解释执行。
+
+# ---- 应用入口与启动链路 ----
+HSPLcom/naaammme/bbspace/BiliApplication;->*()V
+HSPLcom/naaammme/bbspace/AppInitializer;->*()V
+HSPLcom/naaammme/bbspace/MainActivity;->*()V
+HSPLcom/naaammme/bbspace/navigation/AppNavHostKt;->*()V
+HSPLcom/naaammme/bbspace/navigation/TopLevelRoute;->*()V
+HSPLcom/naaammme/bbspace/playback/PlaybackHostKt;->*()V
+HSPLcom/naaammme/bbspace/playback/PlaybackHostState;->*()V
+HSPLcom/naaammme/bbspace/di/ImageClientModule;->*()V
+
+# ---- 主题与设计系统（首屏组合前必加载）----
+HSPLcom/naaammme/bbspace/core/designsystem/theme/ThemeKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/theme/ThemeConfig;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/theme/TypographyKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/theme/ShapeKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/theme/SpacingKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/component/BiliAsyncImageKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/component/CoverImageKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/component/AdaptiveMediaGridKt;->*()V
+HSPLcom/naaammme/bbspace/core/designsystem/component/BiliCardSurfaceKt;->*()V
+
+# ---- 首页首屏组合 ----
+HSPLcom/naaammme/bbspace/feature/home/HomeScreenKt;->*()V
+HSPLcom/naaammme/bbspace/feature/home/HomeViewModel;->*()V
+HSPLcom/naaammme/bbspace/feature/home/HomeUiState;->*()V
+HSPLcom/naaammme/bbspace/feature/home/video/HomeVideoPageKt;->*()V
+HSPLcom/naaammme/bbspace/feature/home/DampedFlingBehaviorKt;->*()V
+
+# ---- 设置/鉴权（启动即读取 DataStore）----
+HSPLcom/naaammme/bbspace/core/settings/AppSettings;->*()V
+HSPLcom/naaammme/bbspace/core/settings/AppSettingsKt;->*()V
+HSPLcom/naaammme/bbspace/core/auth/AuthStore;->*()V
+
+# ---- 网络与图片栈（首屏取流）----
+HSPLcom/naaammme/bbspace/infra/network/di/NetworkModule;->*()V
+HSPLcom/naaammme/bbspace/infra/network/dns/BiliDns;->*()V
+
+# ---- 播放器预热（AppInitializer 启动即 prepare）----
+HSPLcom/naaammme/bbspace/core/playback/StreamPlaybackSessionImpl;->*()V
+HSPLcom/naaammme/bbspace/infra/player/Media3PlayerEngine;->*()V
+
+# ---- 三方库：包级通配（类名可确认为库真实包名）----
+Lcoil3/**;
+HSPLcoil3/**;->*()V
+Lokhttp3/**;
+HSPLokhttp3/**;->*()V
+Lokio/**;
+HSPLokio/**;->*()V
+Landroidx/compose/runtime/**;
+HSPLandroidx/compose/runtime/**;->*()V
+Landroidx/compose/ui/**;
+HSPLandroidx/compose/ui/**;->*()V
+Landroidx/compose/material3/**;
+HSPLandroidx/compose/material3/**;->*()V
+Landroidx/activity/**;
+HSPLandroidx/activity/**;->*()V
+Landroidx/lifecycle/**;
+HSPLandroidx/lifecycle/**;->*()V
+Ldagger/**;
+HPLdagger/**;->*()V
+Landroidx/media3/exoplayer/**;
+HSPLandroidx/media3/exoplayer/**;->*()V
+Landroidx/media3/common/**;
+HSPLandroidx/media3/common/**;->*()V

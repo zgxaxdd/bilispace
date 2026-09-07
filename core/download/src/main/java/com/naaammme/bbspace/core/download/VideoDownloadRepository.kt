@@ -107,13 +107,21 @@ suspend fun pause(taskId: Long) {
         val task = dao.find(taskId) ?: return
         when (VideoDownloadTaskStatus.valueOf(task.status)) {
             VideoDownloadTaskStatus.WAITING -> {
-                dao.update(task.pause())
+                // 重检最新状态：任务可能已被 drain 抢占为 RUNNING，直接覆写会状态错乱
+                val latest = dao.find(taskId) ?: return
+                if (VideoDownloadTaskStatus.valueOf(latest.status) == VideoDownloadTaskStatus.WAITING) {
+                    dao.update(latest.pause())
+                }
             }
 
             VideoDownloadTaskStatus.RUNNING -> {
                 stopRunningTask(taskId)
                 val latest = dao.find(taskId) ?: return
-                dao.update(latest.pause())
+                // stopRunningTask 未命中说明任务已自然完成或被 drain 切走；
+                // 终态（DONE/FAILED）不能被覆写成 PAUSED（会清空 videoPath 导致重新整段下载）
+                if (VideoDownloadTaskStatus.valueOf(latest.status) == VideoDownloadTaskStatus.RUNNING) {
+                    dao.update(latest.pause())
+                }
                 ensureDrain()
             }
 
@@ -134,7 +142,10 @@ suspend fun delete(taskId: Long) {
             stopRunningTask(taskId)
         }
         dao.delete(taskId)
-        deleteTaskFiles(taskId)
+        // 目录里可能有数百 MB 的视频/音频分片，递归删除必须切 IO，主线程删除会 ANR
+        withContext(Dispatchers.IO) {
+            deleteTaskFiles(taskId)
+        }
         ensureDrain()
     }
 

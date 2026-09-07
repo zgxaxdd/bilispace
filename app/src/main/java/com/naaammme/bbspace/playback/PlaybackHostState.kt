@@ -93,9 +93,14 @@ class PlaybackHostState @Inject constructor(
      * 返回动画结束后——close 会释放播放 surface，提前调用会让缩回动画中的画面变黑。
      * 回调丢失时由 [SeamlessTransitionState.awaitReturnEnd] 的超时兜底；期间重新打开
      * 视频由 [cancelPendingClose] 取消，避免误杀新会话。
+     *
+     * 声音修复：进入本方法时立即 [StreamPlaybackSession.pause]——pause 不释放
+     * surface，TextureView 保留最后一帧供缩回动画使用，画面不黑；而声音即刻停止，
+     * 消除"退出后还响最长 1.5s"的延迟。
      */
     fun closeAfterReturnAnimation() {
         _hostMode.value = PlaybackHostMode.Hidden
+        playbackSession.pause()
         pendingCloseJob?.cancel()
         pendingCloseJob = scope.launch {
             SeamlessTransitionState.awaitReturnEnd(maxWaitMs = 1_500)

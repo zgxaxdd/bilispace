@@ -138,6 +138,7 @@ internal fun VideoPlayerPane(
     var activeDialog by remember { mutableStateOf<PlayerDialog?>(null) }
     var showPlaybackSheet by remember { mutableStateOf(false) }
     var showCtrl by remember { mutableStateOf(false) }
+    val zoomState = remember { PlayerZoomState() }
     val videoResizeMode = rememberSaveable { mutableStateOf(PlayerVideoResizeMode.Fit) }
     val topMetaText = remember(showCtrl, isFull) {
         if (showCtrl && isFull) {
@@ -188,6 +189,14 @@ internal fun VideoPlayerPane(
         playerView.keepScreenOn = state.playWhenReady
     }
 
+    // 捏合缩放重置时机：退出全屏、切换视频（ids 变化）、切换清晰度/分P/剧集（currentStream 变化）
+    LaunchedEffect(isFull) {
+        if (!isFull) zoomState.reset()
+    }
+    LaunchedEffect(state.ids, state.currentStream) {
+        zoomState.reset()
+    }
+
     DisposableEffect(owner, playerView, player) {
         val lifecycle = owner.lifecycle
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
@@ -219,6 +228,9 @@ internal fun VideoPlayerPane(
                 .clip(playerCornerShape)
                 .background(Color.Black)
         ) {
+            // 捏合缩放只作用于视频画面本体：graphicsLayer 挂在 AndroidView 上，
+            // 播放器控件（顶栏/控制条/中央按钮）与弹幕层不跟随缩放；
+            // Box 的 clip 在外层保证放大内容裁剪在播放视口内
             AndroidView(
                 factory = { playerView },
                 update = { view ->
@@ -231,7 +243,14 @@ internal fun VideoPlayerPane(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = zoomState.scale
+                        scaleY = zoomState.scale
+                        translationX = zoomState.offsetX
+                        translationY = zoomState.offsetY
+                    }
             )
 
             if (danmakuOverlayState != null) {
@@ -250,6 +269,7 @@ internal fun VideoPlayerPane(
                 player = player,
                 settingsState = settingsState,
                 isFull = isFull,
+                zoomState = zoomState,
                 showCtrl = showCtrl,
                 activeDialog = activeDialog,
                 showPlaybackSheet = showPlaybackSheet,
@@ -335,6 +355,17 @@ internal fun VideoPlayerPane(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 全屏捏合放大后的快捷还原入口
+                        if (isFull && zoomState.isZoomed) {
+                            Text(
+                                text = "还原",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .clickable { zoomState.reset() }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
                         Text(
                             text = if (danmakuOn) "弹幕" else "弹幕关",
                             style = MaterialTheme.typography.labelMedium,
@@ -496,6 +527,7 @@ private fun VideoPlayerOverlay(
     player: Player?,
     settingsState: PlayerSettingsState,
     isFull: Boolean,
+    zoomState: PlayerZoomState,
     showCtrl: Boolean,
     activeDialog: PlayerDialog?,
     showPlaybackSheet: Boolean,
@@ -622,8 +654,11 @@ private fun VideoPlayerOverlay(
                             ?: progress.durationMs.takeIf { it > 0L }
                             ?: state.playbackSource?.durationMs?.coerceAtLeast(0L)
                             ?: 0L
-                    }
+                    },
+                    zoomActive = { zoomState.isZoomed }
                 )
+                // 链内側：Main pass 先于 videoGestures；双指/已放大时接管，其余放行
+                .playerPinchZoom(enabled = isFull, state = zoomState)
         )
 
         VideoGestureFeedback(gestureState)
