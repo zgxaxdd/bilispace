@@ -32,9 +32,12 @@ import com.naaammme.bbspace.core.designsystem.component.AppUpdateDialogState
 import com.naaammme.bbspace.core.designsystem.theme.BiliTheme
 import com.naaammme.bbspace.core.designsystem.theme.FrameRateMode
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
+import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.WebLinkParser
 import com.naaammme.bbspace.core.model.WebLinkTarget
 import com.naaammme.bbspace.navigation.AppNavHost
+import com.naaammme.bbspace.navigation.videoDetailIntent
+import com.naaammme.bbspace.playback.PlaybackHostState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -50,11 +53,24 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var updateChecker: AppUpdateChecker
 
+    @Inject
+    lateinit var hostState: PlaybackHostState
+
     private var updateDialog by mutableStateOf<AppUpdateDialogState?>(null)
 
     private var cachedDisplayModes: Array<Display.Mode>? = null
 
     private var pendingAppLink by mutableStateOf<WebLinkTarget?>(null)
+
+    override fun onResume() {
+        super.onResume()
+        // 自愈：详情 Activity 被系统以任何方式移出（singleTask 清栈/后台回收）后，
+        // 只要播放目标仍活跃且非用户主动关闭，回到前台即重新拉起视频页。
+        val videoTarget = hostState.currentTarget.value as? StreamPlaybackTarget.Video
+        if (videoTarget != null && hostState.shouldRestoreVideoPage()) {
+            startActivity(videoDetailIntent(this, videoTarget.target, null))
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

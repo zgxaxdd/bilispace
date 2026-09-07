@@ -354,6 +354,13 @@ private fun PlaybackSettingsSection(
     )
 
     SheetSwitchCard(
+        title = "无缝过渡动画（ColorOS）",
+        subtitle = "首页卡片封面丝滑展开到全屏；个别机型效果异常时可关闭，退回应用内过渡",
+        checked = settingsState.playback.seamlessTransition,
+        onCheckedChange = viewModel::updateSeamlessTransition
+    )
+
+    SheetSwitchCard(
         title = "播放行为上报",
         subtitle = "向服务端上报播放心跳和历史，关闭影响个性化推荐和历史记录",
         checked = settingsState.playback.reportPlayback,

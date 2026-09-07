@@ -114,5 +114,27 @@ class PlaybackHostState @Inject constructor(
         pendingCloseJob = null
     }
 
+    /**
+     * 用户主动收起视频（返回/页内导航）时标记，供 [shouldRestoreVideoPage] 区分
+     * 「用户关闭」与「系统清栈销毁详情 Activity」。
+     */
+    fun markVideoClosedByUser() {
+        userClosedVideoAt = android.os.SystemClock.elapsedRealtime()
+    }
+
+    /**
+     * 自愈判定：MainActivity 回到前台时，若仍有活动视频目标、宿主处于 Hidden
+     * （详情 Activity 路径）且用户并未主动关闭（最近 3s 内无收起操作），
+     * 说明详情 Activity 被系统以任何方式移出（如 singleTask 清栈/后台回收），
+     * 应重新拉起视频页。覆盖层路径（mode==Expanded/Mini）恒返回 false。
+     */
+    fun shouldRestoreVideoPage(): Boolean {
+        val target = playbackSession.currentTarget.value as? StreamPlaybackTarget.Video ?: return false
+        if (_hostMode.value != PlaybackHostMode.Hidden) return false
+        if (android.os.SystemClock.elapsedRealtime() - userClosedVideoAt < 3_000L) return false
+        return true
+    }
+
     private var pendingCloseJob: Job? = null
+    private var userClosedVideoAt = 0L
 }

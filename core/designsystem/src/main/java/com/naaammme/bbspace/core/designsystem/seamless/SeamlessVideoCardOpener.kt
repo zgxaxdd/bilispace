@@ -37,7 +37,10 @@ import com.oplus.animation.OplusViewSeamless
  * 另在打开动画结束后把同一软件位图补进 bundle 的 BUNDLE_BITMAP——打开已结束
  * 不影响开画面面，若框架在返回开始时重新读取 bundle，则多一层内容兜底。
  */
-class SeamlessCardOpener(private val route: (VideoTarget, String?, Boolean, Bundle) -> Unit) {
+class SeamlessCardOpener(
+    private val route: (VideoTarget, String?, Boolean, Bundle) -> Unit,
+    private val enabled: () -> Boolean = { true }
+) {
 
     /** 上一张被画了过渡内容的卡片；新打开时清理，避免软件位图副本累积。 */
     private var lastDecorated: View? = null
@@ -51,6 +54,7 @@ class SeamlessCardOpener(private val route: (VideoTarget, String?, Boolean, Bund
         listCover: Pair<Float, Float>? = null
     ): Boolean {
         if (anchor == null || target == null) return false
+        if (!enabled()) return false
         if (!OplusViewSeamlessCompat.isVersionSupported()) return false
         lastDecorated?.let { last ->
             if (last !== anchor) {

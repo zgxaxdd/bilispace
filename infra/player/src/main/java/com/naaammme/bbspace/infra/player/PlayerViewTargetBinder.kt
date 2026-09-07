@@ -19,11 +19,13 @@ object PlayerViewTargetBinder {
         val oldView = boundViews[player]
         if (oldView === view) {
             if (view.player !== player) {
-                view.player = player
+                // 旧 player 可能已被 release：setter 内部 removeListener 会抛，解绑语义下吞掉
+                runCatching { view.player = player }
             }
             return
         }
-        PlayerView.switchTargetView(player, oldView, view)
+        // player 可能已是释放后的陈旧引用（竞态），switchTargetView 会抛，解绑语义下吞掉
+        runCatching { PlayerView.switchTargetView(player, oldView, view) }
         boundViews[player] = view
     }
 
@@ -37,7 +39,8 @@ object PlayerViewTargetBinder {
             return
         }
         removeViewEntry(view, keepPlayer = null)
-        view.player = null
+        // view.player 可能指向已 release 的 player：setter 内部 removeListener 会抛，吞掉
+        runCatching { view.player = null }
     }
 
     /**
@@ -51,7 +54,7 @@ object PlayerViewTargetBinder {
         views.forEach { view ->
             runCatching { PlayerView.switchTargetView(player, view, null) }
             if (view.player === player) {
-                view.player = null
+                runCatching { view.player = null }
             }
         }
     }

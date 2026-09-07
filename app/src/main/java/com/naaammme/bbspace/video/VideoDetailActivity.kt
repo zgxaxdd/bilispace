@@ -146,6 +146,8 @@ class VideoDetailActivity : ComponentActivity() {
      * 保证返回动画期间缩回的画面仍是活的播放器。
      */
     private fun finishWithHostState() {
+        // 用户主动返回：标记收起（MainActivity 自愈逻辑据此不再重拉视频页）
+        hostState.markVideoClosedByUser()
         if (pendingSeamlessLaunch) {
             // 官方成对返回：框架按锚点实时位置把窗口缩回卡片（缩回画面 = 框架绘制的
             // 锚点内容，共享执行器已在打开结束时把封面画进锚点）。这里仅预判返回
@@ -165,6 +167,8 @@ class VideoDetailActivity : ComponentActivity() {
      * 重组销毁，成对返回动画会飞向失效锚点——改系统默认过渡，收起立即生效。
      */
     private fun finishWithDefaultTransition() {
+        // 用户页内导航收起（回首页/空间/缓存）：标记收起，避免自愈逻辑重拉视频页
+        hostState.markVideoClosedByUser()
         if (pendingSeamlessLaunch) {
             OplusViewSeamlessCompat.useDefaultTransitionOnFinish(this)
             SeamlessTransitionState.endReturn()

@@ -343,6 +343,12 @@ class VideoViewModel @Inject constructor(
         }
     }
 
+    fun updateSeamlessTransition(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setSeamlessTransition(enabled)
+        }
+    }
+
     fun updateReportPlayback(enabled: Boolean) {
         viewModelScope.launch {
             playerSettings.setReportPlayback(enabled)

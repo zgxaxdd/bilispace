@@ -104,7 +104,9 @@ data class PlayerPlaybackPrefs(
     val gestureSpeed: Float = 2f,
     val videoCdnMode: VideoCdnMode = VideoCdnMode.Backup2,
     /** 双击画面点赞：关闭时双击为暂停（默认） */
-    val doubleTapLike: Boolean = false
+    val doubleTapLike: Boolean = false,
+    /** ColorOS 系统级无缝过渡动画（首页卡片 → 全屏详情）：关闭则退回应用内覆盖层路径 */
+    val seamlessTransition: Boolean = true
 )
 
 @Immutable

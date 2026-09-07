@@ -202,13 +202,17 @@ fun AppNavHost(
             }
         }
 
-    // 统一路由：支持无缝动画的设备（ColorOS 16.1+）一律走视频详情 Activity——
-    // 有锚点（首页卡片）时 bundle 非空、封面矩形无缝展开；无锚点（深链/搜索/历史等）
-    // 用系统普通过渡；不支持设备维持覆盖层路径，行为与接入前一致。能力判定与
-    // FeedCard 侧同源（系统版本），同一会话内结果恒定，路径不会漂移。
+    // 统一路由：支持无缝动画的设备（ColorOS 16.1+）且开关开启时一律走视频详情
+    // Activity——有锚点（首页卡片）时 bundle 非空、封面矩形无缝展开；无锚点
+    // （深链/搜索/历史等）用系统普通过渡；开关关闭或设备不支持时维持覆盖层路径。
+    // 开关值经进程内 State 同步（设置面板改动即时生效，无需重启）。
+    val seamlessEnabledState = remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        playbackHostViewModel.seamlessTransitionEnabled.collect { seamlessEnabledState.value = it }
+    }
     val openVideoRoute: (VideoTarget, String?, Boolean, Bundle?) -> Unit =
         { target, coverUrl, coverLarge, bundle ->
-            if (OplusViewSeamlessCompat.isVersionSupported()) {
+            if (OplusViewSeamlessCompat.isVersionSupported() && seamlessEnabledState.value) {
                 // 点击预热：取流与窗口/无缝动画并行，详情侧 openRoot 幂等接管
                 playbackHostViewModel.warmOpen(target)
                 openVideoActivity(target, coverUrl, coverLarge, bundle)
@@ -224,11 +228,15 @@ fun AppNavHost(
         { target, coverUrl, coverLarge, bundle ->
             openVideoRoute(target, coverUrl, coverLarge, bundle)
         }
-    // 共享无缝卡片执行器：任意页面的视频卡片经 LocalSeamlessCardOpener 接入
+    // 共享无缝卡片执行器：任意页面的视频卡片经 LocalSeamlessCardOpener 接入；
+    // 开关关闭时 tryOpen 直接返回 false，卡片侧自动退回普通打开。
     val seamlessCardOpener = remember {
-        SeamlessCardOpener { target, coverUrl, coverLarge, bundle ->
-            openVideoSeamless(target, coverUrl ?: "", coverLarge, bundle)
-        }
+        SeamlessCardOpener(
+            route = { target, coverUrl, coverLarge, bundle ->
+                openVideoSeamless(target, coverUrl ?: "", coverLarge, bundle)
+            },
+            enabled = { seamlessEnabledState.value }
+        )
     }
     val openLive: (LiveRoute) -> Unit = { route ->
         liveViewModel.openRoute(route)

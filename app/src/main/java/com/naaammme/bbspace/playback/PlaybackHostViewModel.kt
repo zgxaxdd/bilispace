@@ -39,6 +39,15 @@ class PlaybackHostViewModel @Inject constructor(
             initialValue = false
         )
 
+    /** ColorOS 无缝过渡动画开关（进程内即时值，供路由与卡片执行器同步门控）。 */
+    val seamlessTransitionEnabled = playerSettings.state
+        .map { it.playback.seamlessTransition }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = true
+        )
+
     // hostMode / miniPlayerAvailable / expand / minimize / close 的唯一状态源是
     // PlaybackHostState（进程级单例）：视频详情迁到独立 Activity 后两窗口共享，
     // 这里仅做转发，保持原公开属性名与签名，调用方零改动。
