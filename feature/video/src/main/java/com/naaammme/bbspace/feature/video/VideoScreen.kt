@@ -5,7 +5,8 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -127,9 +128,25 @@ fun VideoScreen(
     var isFull by rememberSaveable { mutableStateOf(false) }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
     val fullOn = hostExpanded && isFull
-    // Activity 无缝路径：系统打开动画结束前，播放器下方详情骨架/评论占位不参与组合
-    // （leash 交回瞬间不再露骨架），动画结束 180ms 淡入；非无缝恒 false 零行为变化
-    val openAnimating = hostExpanded && coverBackdropUrl != null && SeamlessTransitionState.openRunning
+    // Activity 无缝路径：系统打开动画期间详情区域用封面遮罩覆盖（不露骨架），
+    // 动画结束（或 1.2s 超时兜底，防止系统回调丢失导致永久隐藏）后先组合详情、
+    // 再 180ms 淡出遮罩。详情区域 Box 恒占位、遮罩是覆盖层——播放器与布局尺寸
+    // 全程不变（修复打开动画结束时的抽搐）；VideoDetailPage 不再被移出组合、
+    // 仅延迟到遮罩之后组合（修复简介/详情消失与状态丢失）。
+    var detailMaskOn by remember(coverBackdropUrl) {
+        mutableStateOf(coverBackdropUrl != null && SeamlessTransitionState.openRunning)
+    }
+    var detailContentOn by remember(coverBackdropUrl) {
+        mutableStateOf(coverBackdropUrl == null || !SeamlessTransitionState.openRunning)
+    }
+    LaunchedEffect(coverBackdropUrl) {
+        if (coverBackdropUrl == null) return@LaunchedEffect
+        if (!SeamlessTransitionState.openRunning) return@LaunchedEffect
+        SeamlessTransitionState.awaitOpenEnd(maxWaitMs = 1_200)
+        detailContentOn = true
+        delay(80) // 详情组合落定数帧后再开始淡出，可能的组合掉帧被遮罩掩护
+        detailMaskOn = false
+    }
     val isPortraitVideo = remember(videoState.currentStream) {
         val stream = videoState.currentStream ?: return@remember false
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
@@ -269,26 +286,29 @@ fun VideoScreen(
                         onBackClick = handleBack,
                         onGoHome = onGoHome
                     )
-                    AnimatedVisibility(
-                        visible = !openAnimating,
-                        enter = fadeIn(tween(durationMillis = 180)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        VideoDetailPage(
-                            modifier = Modifier.fillMaxSize(),
-                            viewModel = viewModel,
-                            detail = videoState.detail,
-                            ids = videoState.ids,
-                            biz = videoState.biz,
-                            detailLoading = videoState.detailLoading,
-                            detailError = videoState.detailError,
-                            commentSubject = viewModel.commentSubject,
-                            contentHorizontalPad = 0.dp,
-                            onOpenVideo = openTarget,
-                            onOpenSpace = onOpenSpace,
-                            onDownloadClick = downloadClick,
-                            onOpenEpisode = switchEpisode,
-                            onSwitchPage = switchPage
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (detailContentOn) {
+                            VideoDetailPage(
+                                modifier = Modifier.fillMaxSize(),
+                                viewModel = viewModel,
+                                detail = videoState.detail,
+                                ids = videoState.ids,
+                                biz = videoState.biz,
+                                detailLoading = videoState.detailLoading,
+                                detailError = videoState.detailError,
+                                commentSubject = viewModel.commentSubject,
+                                contentHorizontalPad = 0.dp,
+                                onOpenVideo = openTarget,
+                                onOpenSpace = onOpenSpace,
+                                onDownloadClick = downloadClick,
+                                onOpenEpisode = switchEpisode,
+                                onSwitchPage = switchPage
+                            )
+                        }
+                        SeamlessDetailMask(
+                            visible = detailMaskOn,
+                            coverUrl = coverBackdropUrl,
+                            coverLarge = coverBackdropLarge
                         )
                     }
                 }
@@ -328,28 +348,33 @@ fun VideoScreen(
                             onGoHome = onGoHome
                         )
                     }
-                    AnimatedVisibility(
-                        visible = !openAnimating,
-                        enter = fadeIn(tween(durationMillis = 180)),
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .background(MaterialTheme.colorScheme.background)
                     ) {
-                        VideoDetailPage(
-                            modifier = Modifier.fillMaxSize(),
-                            viewModel = viewModel,
-                            detail = videoState.detail,
-                            ids = videoState.ids,
-                            biz = videoState.biz,
-                            detailLoading = videoState.detailLoading,
-                            detailError = videoState.detailError,
-                            commentSubject = viewModel.commentSubject,
-                            contentHorizontalPad = 16.dp,
-                            onOpenVideo = openTarget,
-                            onOpenSpace = onOpenSpace,
-                            onDownloadClick = downloadClick,
-                            onOpenEpisode = switchEpisode,
-                            onSwitchPage = switchPage
+                        if (detailContentOn) {
+                            VideoDetailPage(
+                                modifier = Modifier.fillMaxSize(),
+                                viewModel = viewModel,
+                                detail = videoState.detail,
+                                ids = videoState.ids,
+                                biz = videoState.biz,
+                                detailLoading = videoState.detailLoading,
+                                detailError = videoState.detailError,
+                                commentSubject = viewModel.commentSubject,
+                                contentHorizontalPad = 16.dp,
+                                onOpenVideo = openTarget,
+                                onOpenSpace = onOpenSpace,
+                                onDownloadClick = downloadClick,
+                                onOpenEpisode = switchEpisode,
+                                onSwitchPage = switchPage
+                            )
+                        }
+                        SeamlessDetailMask(
+                            visible = detailMaskOn,
+                            coverUrl = coverBackdropUrl,
+                            coverLarge = coverBackdropLarge
                         )
                     }
                 }
@@ -415,6 +440,40 @@ private fun Shape.cornerPxOrNull(density: Density): BackdropCornerPx? {
         bottomEnd = corners.bottomEnd.toPx(Size.Unspecified, density),
         bottomStart = corners.bottomStart.toPx(Size.Unspecified, density)
     )
+}
+
+/**
+ * 详情区打开遮罩：系统无缝打开动画期间盖住详情区域（不露骨架/占位闪变），
+ * 动画结束后 180ms 淡出。覆盖层不参与外层布局——播放器与详情区尺寸全程不变；
+ * 无缝不可用（coverUrl 为 null）时不绘制任何内容。
+ */
+@Composable
+private fun SeamlessDetailMask(
+    visible: Boolean,
+    coverUrl: String?,
+    coverLarge: Boolean
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = EnterTransition.None,
+        exit = fadeOut(tween(durationMillis = 180))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            coverUrl?.let { url ->
+                BiliAsyncImage(
+                    url = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    variant = if (coverLarge) BiliImageVariant.Banner else BiliImageVariant.CardCoverLarge
+                )
+            }
+        }
+    }
 }
 
 /**
