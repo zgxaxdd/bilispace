@@ -184,6 +184,10 @@ internal fun VideoPlayerPane(
             }
     }
     var lastWarmAspect by remember(playerView) { mutableStateOf<Float?>(null) }
+    // 内容帧引用一次性解析（此前每次 AndroidView.update 都 findViewById）
+    val contentFrame = remember(playerView) {
+        playerView.findViewById<AspectRatioFrameLayout>(Media3UiR.id.exo_content_frame)
+    }
 
     LaunchedEffect(state.playWhenReady) {
         playerView.keepScreenOn = state.playWhenReady
@@ -233,12 +237,11 @@ internal fun VideoPlayerPane(
             // Box 的 clip 在外层保证放大内容裁剪在播放视口内
             AndroidView(
                 factory = { playerView },
-                update = { view ->
-                    val content = view.findViewById<AspectRatioFrameLayout>(Media3UiR.id.exo_content_frame)
-                    if (content != null) {
-                        content.resizeMode = resizeMode
+                update = { _ ->
+                    contentFrame?.let { frame ->
+                        frame.resizeMode = resizeMode
                         if (lastWarmAspect != videoAspect) {
-                            content.setAspectRatio(videoAspect ?: 0f)
+                            frame.setAspectRatio(videoAspect ?: 0f)
                             lastWarmAspect = videoAspect
                         }
                     }

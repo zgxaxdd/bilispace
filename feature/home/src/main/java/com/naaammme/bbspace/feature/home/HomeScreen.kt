@@ -206,11 +206,13 @@ fun HomeScreen(
             }
         }
 
-        // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏
+        // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏。
+        // 偏移量以 provider 延迟读取：滚动期间 offset 块只触发布局，
+        // 不再按每个滚动 tick 重组 HomeScreen 整个 scope（此前在组合期读值）
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
             singleColumn = singleColumn,
-            topBarOffsetPx = topBarOffsetPx,
+            topBarOffsetPxProvider = { topBarOffsetPx },
             onToggleSingleColumn = viewModel::toggleHomeSingleColumn,
             onNavigateToSearch = onNavigateToSearch,
             onNavigateToProfile = onNavigateToProfile,
@@ -233,7 +235,8 @@ fun HomeScreen(
 private fun HomeTopBar(
     selectedIndex: Int,
     singleColumn: Boolean,
-    topBarOffsetPx: Float,
+    // 偏移量延迟读取：offset 块内取值，滚动时只重布局顶栏、不重组上游 scope
+    topBarOffsetPxProvider: () -> Float,
     onToggleSingleColumn: () -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToProfile: () -> Unit,
@@ -246,7 +249,7 @@ private fun HomeTopBar(
             .fillMaxWidth()
             .statusBarsPadding()
             .clipToBounds()
-            .offset { IntOffset(0, -topBarOffsetPx.roundToInt()) }
+            .offset { IntOffset(0, -topBarOffsetPxProvider().roundToInt()) }
             .padding(top = 4.dp)
     ) {
         Row(
