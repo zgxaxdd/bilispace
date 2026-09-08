@@ -32,19 +32,19 @@ object OplusViewSeamlessCompat {
 
     private const val TAG = "OplusViewSeamless"
 
-    /** 系统侧 SDK 版本号；0 表示当前设备不提供该系统类（非 ColorOS 或版本过旧）。 */
-    val systemVersion: Int
-        get() = runGuarded(fallback = 0) { OplusViewSeamless.getVersion() }
+    /**
+     * 系统侧 SDK 版本号；0 表示当前设备不提供该系统类（非 ColorOS 或版本过旧）。
+     * 运行期不变，进程内缓存一次：isVersionSupported 会被高频调用（卡片组合/点击），
+     * 不允许每次都跨入框架 SDK 查询。
+     */
+    val systemVersion: Int by lazy { runGuarded(fallback = 0) { OplusViewSeamless.getVersion() } }
 
     /**
      * 廉价前置门禁：系统版本是否达到官方示例使用的门槛（`version > OS_16_0_BASE`，
      * 即 37001+，覆盖 16.0 起对未适配 EdgeToEdge 页面的支持）。
      * 仅用于减少无效调用，最终能否生效以 [registerOpenTransition] 返回值为准。
      */
-    fun isVersionSupported(): Boolean =
-        runGuarded(fallback = false) {
-            OplusViewSeamless.getVersion() > OplusViewSeamless.OS_16_0_BASE
-        }
+    fun isVersionSupported(): Boolean = systemVersion > OplusViewSeamless.OS_16_0_BASE
 
     /**
      * 构造打开动画的过渡参数。契约：该 bundle 会同时传给 [registerOpenTransition]

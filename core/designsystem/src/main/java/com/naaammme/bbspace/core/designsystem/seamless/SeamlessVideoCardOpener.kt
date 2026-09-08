@@ -45,6 +45,9 @@ class SeamlessCardOpener(
     /** 上一张被画了过渡内容的卡片；新打开时清理，避免软件位图副本累积。 */
     private var lastDecorated: View? = null
 
+    /** 软件位图单条缓存：点击路径避免重复做整张位图 copy（主线程上可感知的停顿）。 */
+    private var coverMemo: Pair<String, SoftwareCover>? = null
+
     fun tryOpen(
         anchor: View?,
         target: VideoTarget?,
@@ -75,7 +78,10 @@ class SeamlessCardOpener(
             anchorRadiusPx = anchorRadiusPx,
             listCoverTopRatio = listCover?.first,
             listCoverBottomRatio = listCover?.second,
-            contentRect = anchor.screenRect()
+            contentRect = anchor.screenRect(),
+            // 卡片都在列表里：返回时 view 位置相较打开时几乎必然变化，按官方文档
+            // 改为 alpha 淡出（无回弹），避免 leash 回弹到已滚走的旧位置
+            alphaOutOnPositionChange = true
         )
         val registered = OplusViewSeamlessCompat.registerOpenTransition(
             anchor,
@@ -116,6 +122,9 @@ class SeamlessCardOpener(
         } else {
             coverUrlFor(coverUrl, BiliCoverSize.Small43)
         } ?: return null
+        coverMemo?.let { (memoUrl, memoCover) ->
+            if (memoUrl == resolved) return memoCover
+        }
         val image = SingletonImageLoader.get(anchor.context)
             .memoryCache
             ?.get(MemoryCache.Key(resolved))
@@ -141,7 +150,7 @@ class SeamlessCardOpener(
             cornerRadius = radiusPx
             setAntiAlias(true)
         }
-        return SoftwareCover(drawable, safeBitmap)
+        return SoftwareCover(drawable, safeBitmap).also { coverMemo = resolved to it }
     }
 
     /**

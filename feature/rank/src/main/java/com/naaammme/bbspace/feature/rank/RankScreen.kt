@@ -36,6 +36,7 @@ import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
+import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
@@ -249,18 +250,20 @@ private fun RankVideoCard(
     val spaceRoute = remember(item.ownerMid) {
         item.ownerMid.takeIf { it > 0L }?.let { SpaceRoute(mid = it, name = item.ownerName) }
     }
-    // 与首页 FeedCard 相同的无缝动画接入：注册成功走共享执行器，失败降级幽灵
+    // 与首页 FeedCard 相同的无缝动画接入：注册成功走共享执行器，失败降级幽灵。
+    // 版本门禁前置到组合期：不支持的设备不为每张卡实例化锚点 View
     val anchorState = rememberSeamlessAnchorState()
     val seamlessSpec = rememberSeamlessCardSpec(
         shape = RoundedCornerShape(12.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
     val seamlessOpener = LocalSeamlessCardOpener.current
+    val canSeamless = seamlessOpener != null && OplusViewSeamlessCompat.isVersionSupported()
 
     BiliCardSurface(
         onClick = {
             if (
-                seamlessOpener != null &&
+                canSeamless &&
                 seamlessOpener.tryOpen(
                     anchor = anchorState.anchor,
                     target = target,
@@ -301,7 +304,7 @@ private fun RankVideoCard(
                     )
                 }
             }
-            if (seamlessOpener != null) {
+            if (canSeamless) {
                 SeamlessAnchor(anchorState, Modifier.matchParentSize())
             }
         }

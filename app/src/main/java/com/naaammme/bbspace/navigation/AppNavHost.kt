@@ -54,6 +54,7 @@ import com.naaammme.bbspace.core.designsystem.component.roundScreenSafePadding
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.buildNavTransitions
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
@@ -123,7 +124,6 @@ private const val MAIN_ROUTE = "main"
 private val topLevelNavEdgePadding = 16.dp
 private val topLevelNavGap = 8.dp
 private val topLevelNavScrollThreshold = 72.dp
-private const val topLevelNavAnimationDurationMillis = 220
 @Composable
 fun AppNavHost(
     themeConfig: ThemeConfig = ThemeConfig(),
@@ -619,11 +619,12 @@ private fun TopLevelFloatingNavigation(
     onNavigateToSearch: () -> Unit
 ) {
     val toolbarShape = MaterialTheme.shapes.extraLarge
+    val anim = LocalAnimations.current
     val edgePaddingPx = with(LocalDensity.current) { topLevelNavEdgePadding.toPx() }
     var hiddenDistancePx by remember { mutableFloatStateOf(0f) }
     val animatedOffsetPx by animateFloatAsState(
         targetValue = if (visibilityController.hidden) hiddenDistancePx + edgePaddingPx else 0f,
-        animationSpec = tween(durationMillis = topLevelNavAnimationDurationMillis),
+        animationSpec = tween(durationMillis = anim.medium, easing = anim.standard),
         label = "top level nav offset"
     )
     val animatedModifier = modifier

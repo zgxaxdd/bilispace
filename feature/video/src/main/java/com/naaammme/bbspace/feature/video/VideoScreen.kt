@@ -75,6 +75,7 @@ import androidx.media3.common.util.UnstableApi
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
 import com.naaammme.bbspace.core.model.PlayerSettingsState
@@ -128,26 +129,22 @@ fun VideoScreen(
     var isFull by rememberSaveable { mutableStateOf(false) }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
     val fullOn = hostExpanded && isFull
-    // Activity 无缝路径：系统打开动画期间详情区域用纯背景色遮罩盖住（不露骨架、
-    // 也不画封面——封面只属于播放器区域的垫底，详情区再画一份会露出重复预览图），
-    // 动画结束（或 1.2s 超时兜底，防止系统回调丢失导致永久隐藏）后先组合详情、
-    // 再 180ms 淡出遮罩。详情区域 Box 恒占位、遮罩是覆盖层——播放器与布局尺寸
-    // 全程不变（修复打开动画结束时的抽搐）；VideoDetailPage 不再被移出组合、
-    // 仅延迟到遮罩之后组合（修复简介/详情消失与状态丢失）。
-    // 以视频 ids（aid/cid）为键：避免连续打开同源封面视频时错误复用上次的遮罩状态。
+    // Activity 无缝路径：详情本体**立即组合**（打开动画期间被纯背景色遮罩盖住，
+    // 首帧组合在动画内完成），动画结束（或 1.2s 超时兜底）后遮罩直接淡出——
+    // 简介与详情随视频画面同步出现，不再有「动画结束→组合→再淡入」的串行等待。
+    // 遮罩只铺主题背景色，不画封面：封面连续性由播放器区域的 CoverSettleBackdrop
+    // 负责，详情区再画一份会露出重复的预览图。详情区域 Box 恒占位、遮罩是覆盖层
+    // ——播放器与布局尺寸全程不变。以视频 ids（aid/cid）为键，避免连续打开
+    // 同源封面视频时错误复用上次的遮罩状态。
+    val anim = LocalAnimations.current
     val seamlessIdsKey = videoState.ids
     var detailMaskOn by remember(seamlessIdsKey) {
         mutableStateOf(coverBackdropUrl != null && SeamlessTransitionState.openRunning)
-    }
-    var detailContentOn by remember(seamlessIdsKey) {
-        mutableStateOf(coverBackdropUrl == null || !SeamlessTransitionState.openRunning)
     }
     LaunchedEffect(seamlessIdsKey) {
         if (coverBackdropUrl == null) return@LaunchedEffect
         if (!SeamlessTransitionState.openRunning) return@LaunchedEffect
         SeamlessTransitionState.awaitOpenEnd(maxWaitMs = 1_200)
-        detailContentOn = true
-        delay(80) // 详情组合落定数帧后再开始淡出，可能的组合掉帧被遮罩掩护
         detailMaskOn = false
     }
     val isPortraitVideo = remember(videoState.currentStream) {
@@ -290,25 +287,23 @@ fun VideoScreen(
                         onGoHome = onGoHome
                     )
                     Box(modifier = Modifier.weight(1f)) {
-                        if (detailContentOn) {
-                            VideoDetailPage(
-                                modifier = Modifier.fillMaxSize(),
-                                viewModel = viewModel,
-                                detail = videoState.detail,
-                                ids = videoState.ids,
-                                biz = videoState.biz,
-                                detailLoading = videoState.detailLoading,
-                                detailError = videoState.detailError,
-                                commentSubject = viewModel.commentSubject,
-                                contentHorizontalPad = 0.dp,
-                                onOpenVideo = openTarget,
-                                onOpenSpace = onOpenSpace,
-                                onDownloadClick = downloadClick,
-                                onOpenEpisode = switchEpisode,
-                                onSwitchPage = switchPage
-                            )
-                        }
-                        SeamlessDetailMask(visible = detailMaskOn)
+                        VideoDetailPage(
+                            modifier = Modifier.fillMaxSize(),
+                            viewModel = viewModel,
+                            detail = videoState.detail,
+                            ids = videoState.ids,
+                            biz = videoState.biz,
+                            detailLoading = videoState.detailLoading,
+                            detailError = videoState.detailError,
+                            commentSubject = viewModel.commentSubject,
+                            contentHorizontalPad = 0.dp,
+                            onOpenVideo = openTarget,
+                            onOpenSpace = onOpenSpace,
+                            onDownloadClick = downloadClick,
+                            onOpenEpisode = switchEpisode,
+                            onSwitchPage = switchPage
+                        )
+                        SeamlessDetailMask(visible = detailMaskOn, fadeMillis = anim.short)
                     }
                 }
             }
@@ -347,30 +342,27 @@ fun VideoScreen(
                             onGoHome = onGoHome
                         )
                     }
+                    // 竖排布局背景由外层 Column 统一绘制，详情区不再重复铺一层（减一层全屏 overdraw）
                     Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(MaterialTheme.colorScheme.background)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        if (detailContentOn) {
-                            VideoDetailPage(
-                                modifier = Modifier.fillMaxSize(),
-                                viewModel = viewModel,
-                                detail = videoState.detail,
-                                ids = videoState.ids,
-                                biz = videoState.biz,
-                                detailLoading = videoState.detailLoading,
-                                detailError = videoState.detailError,
-                                commentSubject = viewModel.commentSubject,
-                                contentHorizontalPad = 16.dp,
-                                onOpenVideo = openTarget,
-                                onOpenSpace = onOpenSpace,
-                                onDownloadClick = downloadClick,
-                                onOpenEpisode = switchEpisode,
-                                onSwitchPage = switchPage
-                            )
-                        }
-                        SeamlessDetailMask(visible = detailMaskOn)
+                        VideoDetailPage(
+                            modifier = Modifier.fillMaxSize(),
+                            viewModel = viewModel,
+                            detail = videoState.detail,
+                            ids = videoState.ids,
+                            biz = videoState.biz,
+                            detailLoading = videoState.detailLoading,
+                            detailError = videoState.detailError,
+                            commentSubject = viewModel.commentSubject,
+                            contentHorizontalPad = 16.dp,
+                            onOpenVideo = openTarget,
+                            onOpenSpace = onOpenSpace,
+                            onDownloadClick = downloadClick,
+                            onOpenEpisode = switchEpisode,
+                            onSwitchPage = switchPage
+                        )
+                        SeamlessDetailMask(visible = detailMaskOn, fadeMillis = anim.short)
                     }
                 }
             }
@@ -439,16 +431,19 @@ private fun Shape.cornerPxOrNull(density: Density): BackdropCornerPx? {
 
 /**
  * 详情区打开遮罩：系统无缝打开动画期间盖住详情区域（不露骨架/占位闪变），
- * 动画结束后 180ms 淡出。遮罩只铺主题背景色——系统无缝动画把封面展开到**播放器
- * 区域**，详情区若再绘制一份同图封面，就会在播放器下方露出一块重复的预览图
- * （打开动画期的 UI 缺陷）；封面连续性仅由播放器区域的 CoverSettleBackdrop 负责。
+ * 动画结束后按主题 token 时长淡出。遮罩只铺主题背景色——系统无缝动画把封面
+ * 展开到**播放器区域**，详情区若再绘制一份同图封面，就会在播放器下方露出一块
+ * 重复的预览图；封面连续性仅由播放器区域的 CoverSettleBackdrop 负责。
  */
 @Composable
-private fun SeamlessDetailMask(visible: Boolean) {
+private fun SeamlessDetailMask(
+    visible: Boolean,
+    fadeMillis: Int
+) {
     AnimatedVisibility(
         visible = visible,
         enter = EnterTransition.None,
-        exit = fadeOut(tween(durationMillis = 180))
+        exit = fadeOut(tween(durationMillis = fadeMillis))
     ) {
         Box(
             modifier = Modifier
@@ -472,17 +467,18 @@ private fun CoverSettleBackdrop(
 ) {
     var dismissed by remember { mutableStateOf(false) }
     val alpha = remember { Animatable(1f) }
+    val fadeSpec = tween<Float>(durationMillis = LocalAnimations.current.short)
 
     LaunchedEffect(firstFrameRendered) {
         if (firstFrameRendered && !dismissed) {
-            alpha.animateTo(0f, tween(durationMillis = 200))
+            alpha.animateTo(0f, fadeSpec)
             dismissed = true
         }
     }
     LaunchedEffect(Unit) {
         delay(2500)
         if (!dismissed) {
-            alpha.animateTo(0f, tween(durationMillis = 200))
+            alpha.animateTo(0f, fadeSpec)
             dismissed = true
         }
     }

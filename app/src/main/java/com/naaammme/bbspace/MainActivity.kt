@@ -29,6 +29,7 @@ import com.naaammme.bbspace.core.settings.update.AppUpdateChecker
 import com.naaammme.bbspace.core.settings.update.toDialogState
 import com.naaammme.bbspace.core.designsystem.component.AppUpdateDialog
 import com.naaammme.bbspace.core.designsystem.component.AppUpdateDialogState
+import com.naaammme.bbspace.core.designsystem.component.ForegroundEnterBox
 import com.naaammme.bbspace.core.designsystem.theme.BiliTheme
 import com.naaammme.bbspace.core.designsystem.theme.FrameRateMode
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
@@ -104,11 +105,13 @@ class MainActivity : ComponentActivity() {
             }
             BiliTheme(config = themeConfig) {
                 ApplySystemBarAppearance()
-                AppNavHost(
-                    themeConfig = themeConfig,
-                    appLink = pendingAppLink,
-                    onAppLinkConsumed = { pendingAppLink = null }
-                )
+                ForegroundEnterBox {
+                    AppNavHost(
+                        themeConfig = themeConfig,
+                        appLink = pendingAppLink,
+                        onAppLinkConsumed = { pendingAppLink = null }
+                    )
+                }
                 updateDialog?.let { release ->
                     AppUpdateDialog(
                         state = release,

@@ -68,21 +68,30 @@ fun VideoTarget.sharedContentKey(): String? = when (this) {
 }
 
 /**
- * 卡片窗口坐标登记表：onGloballyPositioned 在滚动期间高频回调，刻意使用普通 Map
- * （LRU 截断）而非状态容器，避免写入触发重组；仅在点击瞬间读取一次。
+ * 卡片窗口坐标登记表：onGloballyPositioned 在滚动期间高频回调。读写都只发生在
+ * UI 线程（布局回调与点击处理器），因此不加锁；按 4px 粒度取整去重，静止时
+ * （列表无滚动、无重排）零写入，滚动帧只有坐标真正跨过粒度才写。仅点击瞬间读取。
  */
 private object CoverExpandBoundsStore {
     private const val MAX_ENTRIES = 96
+    private const val QUANTUM_PX = 4f
     private val map = object : LinkedHashMap<String, Rect>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Rect>): Boolean =
             size > MAX_ENTRIES
     }
 
     fun put(key: String, bounds: Rect) {
-        synchronized(map) { map[key] = bounds }
+        val quantized = Rect(
+            (bounds.left / QUANTUM_PX).toInt() * QUANTUM_PX,
+            (bounds.top / QUANTUM_PX).toInt() * QUANTUM_PX,
+            (bounds.right / QUANTUM_PX).toInt() * QUANTUM_PX,
+            (bounds.bottom / QUANTUM_PX).toInt() * QUANTUM_PX
+        )
+        if (map[key] == quantized) return
+        map[key] = quantized
     }
 
-    fun get(key: String): Rect? = synchronized(map) { map[key] }
+    fun get(key: String): Rect? = map[key]
 }
 
 /** 最近一次「从卡片发起打开」的来源快照；仅 UI 线程读写。 */

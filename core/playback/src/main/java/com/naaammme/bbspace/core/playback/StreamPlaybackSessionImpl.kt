@@ -359,6 +359,21 @@ class StreamPlaybackSessionImpl @Inject constructor(
             coroutineScope {
                 val prepareJob = async { prepare() }
                 val sourceJob = async { videoRepository.fetchPlaybackSource(request) }
+                // 详情（标题/简介/UP主）与取流并行请求：此前串行在 setSource 之后，
+                // 简介要多等一整个网络往返才出现（详情区明显延迟的主因之一）。
+                // 应用时序不变——仍等 setSource 完成后落地（setMediaMetadata 需要媒体项就绪）。
+                val detailJob = if (reuseDetail == null) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            detailRepository.fetchVideoDetail(
+                                ids = request.ids,
+                                src = target.src
+                            )
+                        }
+                    }
+                } else {
+                    null
+                }
                 val localResumeJob = async(Dispatchers.IO) { readLocalResumeIfResolvable(request) }
                 val qualityJob = async {
                     request.preferredQuality ?: appSettings.defaultVideoQuality.first()
@@ -411,14 +426,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
                     return@coroutineScope
                 }
 
-                val detailResult = runCatching {
-                    withContext(Dispatchers.IO) {
-                        detailRepository.fetchVideoDetail(
-                            ids = request.ids,
-                            src = target.src
-                        )
-                    }
-                }.getOrElse { error ->
+                val detailResult = detailJob?.await()?.getOrElse { error ->
                     if (error is CancellationException) throw error
                     if (openId.get() != token) return@coroutineScope
                     val currentTarget = (_currentTarget.value as? StreamPlaybackTarget.Video)?.target
@@ -430,7 +438,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
                     )
                     refreshVideoState()
                     return@coroutineScope
-                }
+                } ?: return@coroutineScope
                 if (openId.get() != token) return@coroutineScope
                 val currentTarget = (_currentTarget.value as? StreamPlaybackTarget.Video)?.target
                 if (currentTarget != target) return@coroutineScope

@@ -4,7 +4,6 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition.Companion.None as EnterNone
 import androidx.compose.animation.ExitTransition.Companion.None as ExitNone
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -30,6 +29,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandGhost
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.designsystem.seamless.sharedContentKey
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.VideoDownloadRequest
@@ -82,16 +82,22 @@ fun PlaybackHost(
     LaunchedEffect(mode) { prevMode = mode }
     val skipEnter = mode == PlaybackHostMode.Expanded && prevMode == PlaybackHostMode.Mini
     val videoTarget = (target as? StreamPlaybackTarget.Video)?.target
-    // 详情本体在封面幽灵下方普通淡入；morph 运动由 CoverExpandGhost 承载（见 CoverExpand.kt），
-    // 避免把整屏详情 UI 放进过渡层逐帧重排。迷你播放器原位再展开保持无进入动画。
+    // 动效统一走主题 token（OPPO 动效规范：页面级入场 = 长时长 + 强调曲线；
+    // 迷你播放器 = 短时长淡入 + spring 缩放，可被打断）。迷你播放器原位再展开
+    // 保持无进入动画。详情本体在封面幽灵下方普通淡入；morph 运动由 CoverExpandGhost 承载。
+    val anim = LocalAnimations.current
     val videoEnterSpec = if (skipEnter) {
         EnterNone
     } else {
-        fadeIn(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing))
+        fadeIn(animationSpec = tween(durationMillis = anim.long, easing = anim.emphasized))
     }
-    val enterSpec = if (skipEnter) EnterNone else slideInHorizontally(
-        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
-    ) { fullWidth -> fullWidth }
+    val enterSpec = if (skipEnter) {
+        EnterNone
+    } else {
+        slideInHorizontally(
+            animationSpec = tween(durationMillis = anim.long, easing = anim.emphasized)
+        ) { fullWidth -> fullWidth }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AnimatedVisibility(
@@ -161,9 +167,9 @@ fun PlaybackHost(
                 mode == PlaybackHostMode.Mini &&
                 miniPlayerAvailable &&
                 curTarget != null,
-            enter = fadeIn(animationSpec = tween(durationMillis = 180)) + scaleIn(
+            enter = fadeIn(animationSpec = tween(durationMillis = anim.short)) + scaleIn(
                 initialScale = 0.92f,
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = 380f)
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f)
             ),
             exit = ExitNone
         ) {

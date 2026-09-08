@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.component.ForegroundEnterBox
 import com.naaammme.bbspace.core.designsystem.theme.BiliTheme
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.model.VideoTarget
@@ -99,29 +100,31 @@ class VideoDetailActivity : ComponentActivity() {
                 LaunchedEffect(pendingTarget) {
                     pendingTarget?.let(videoViewModel::openRoot)
                 }
-                VideoScreen(
-                    onBack = ::finishWithHostState,
-                    onGoHome = {
-                        navBus.post(VideoDetailNavBus.NavRequest.GoHome)
-                        finishWithDefaultTransition()
-                    },
-                    onOpenSpace = { route ->
-                        navBus.post(VideoDetailNavBus.NavRequest.OpenSpace(route))
-                        finishWithDefaultTransition()
-                    },
-                    onOpenDownloadCache = {
-                        navBus.post(VideoDetailNavBus.NavRequest.OpenDownloadCache)
-                        finishWithDefaultTransition()
-                    },
-                    onStartDownload = { request ->
-                        // 下载交给 MainActivity 侧的 DownloadViewModel 执行（总线排队不丢）
-                        navBus.post(VideoDetailNavBus.NavRequest.StartDownload(request))
-                    },
-                    viewModel = videoViewModel,
-                    hostExpanded = true,
-                    coverBackdropUrl = pendingCoverUrl,
-                    coverBackdropLarge = pendingCoverLarge
-                )
+                ForegroundEnterBox {
+                    VideoScreen(
+                        onBack = ::finishWithHostState,
+                        onGoHome = {
+                            navBus.post(VideoDetailNavBus.NavRequest.GoHome)
+                            finishWithDefaultTransition()
+                        },
+                        onOpenSpace = { route ->
+                            navBus.post(VideoDetailNavBus.NavRequest.OpenSpace(route))
+                            finishWithDefaultTransition()
+                        },
+                        onOpenDownloadCache = {
+                            navBus.post(VideoDetailNavBus.NavRequest.OpenDownloadCache)
+                            finishWithDefaultTransition()
+                        },
+                        onStartDownload = { request ->
+                            // 下载交给 MainActivity 侧的 DownloadViewModel 执行（总线排队不丢）
+                            navBus.post(VideoDetailNavBus.NavRequest.StartDownload(request))
+                        },
+                        viewModel = videoViewModel,
+                        hostExpanded = true,
+                        coverBackdropUrl = pendingCoverUrl,
+                        coverBackdropLarge = pendingCoverLarge
+                    )
+                }
             }
         }
     }

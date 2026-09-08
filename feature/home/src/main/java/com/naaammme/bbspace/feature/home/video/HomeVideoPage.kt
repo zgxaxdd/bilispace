@@ -210,7 +210,10 @@ private fun FeedCard(
     }
     val anchorState = rememberSeamlessAnchorState()
     val seamlessOpener = LocalSeamlessCardOpener.current
+    // 版本门禁前置到组合期：不支持的设备不为每张卡片实例化锚点 View（省一个真实
+    // FrameLayout 节点/卡）；isVersionSupported 进程内缓存，读取零成本
     val canSeamless = seamlessOpener != null &&
+        OplusViewSeamlessCompat.isVersionSupported() &&
         item.target != null &&
         item.liveRoute == null
 
