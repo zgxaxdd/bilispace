@@ -39,6 +39,7 @@ class AppInitializer @Inject constructor(
     private val guestIdGenerator: GuestIdGenerator,
     private val biliDns: BiliDns,
     @param:Named("image") private val imageOkHttpClient: OkHttpClient,
+    private val okHttpClient: OkHttpClient,
     private val gaiaReporter: GaiaReporter,
     private val appSettings: AppSettings,
     private val cacheManager: CacheManager,
@@ -73,6 +74,7 @@ class AppInitializer @Inject constructor(
                 }
             }
             warmupImageConnections()
+            warmupApiConnection()
             launch {
                 runCatching {
                     playbackSession.prepare()
@@ -137,6 +139,19 @@ class AppInitializer @Inject constructor(
                     Logger.d(TAG) { "连接预热完成: $host" }
                 }
             }.forEach { it.await() }
+        }
+    }
+
+    // 预建 API 宿主（gRPC 同走该 OkHttpClient 连接池）的连接：首次「取流 + 详情」
+    // 请求不再独付 DNS+TCP+TLS（移动网络下数百毫秒），详情/起播同步提速
+    private fun warmupApiConnection() {
+        initScope.launch {
+            val req = Request.Builder()
+                .url(com.naaammme.bbspace.core.common.BiliConstants.BASE_URL_APP)
+                .head()
+                .build()
+            runCatching { okHttpClient.newCall(req).execute().close() }
+            Logger.d(TAG) { "API 连接预热完成: ${com.naaammme.bbspace.core.common.BiliConstants.BASE_URL_APP}" }
         }
     }
 

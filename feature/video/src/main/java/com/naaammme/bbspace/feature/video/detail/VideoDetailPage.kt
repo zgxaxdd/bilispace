@@ -369,35 +369,8 @@ private fun LazyListScope.detailItems(
 ) {
     val curCid = ids.cid.takeIf { it > 0L }
     when {
-        detailLoading -> {
-            item(
-                key = "detail_loading_summary",
-                contentType = "skeleton"
-            ) {
-                VideoDetailInfoSkeleton(modifier = itemMod)
-            }
-            items(
-                count = DETAIL_RELATE_SKELETON_COUNT,
-                key = { index -> "detail_loading_relate_$index" },
-                contentType = { "skeleton" }
-            ) {
-                VideoRelateCardSkeleton(modifier = itemMod)
-            }
-        }
-
-        !detailError.isNullOrBlank() -> {
-            item(
-                key = "detail_error",
-                contentType = "state"
-            ) {
-                StateMessageCard(
-                    text = detailError,
-                    modifier = itemMod,
-                    isError = true
-                )
-            }
-        }
-
+        // 有详情就渲染（可能是上次缓存的先上屏版本，网络详情到达后原地刷新）；
+        // 骨架屏只在完全没有数据时出现——消除"已有数据仍整块骨架"的空转
         detail != null -> {
             item(
                 key = "summary",
@@ -459,6 +432,35 @@ private fun LazyListScope.detailItems(
                         modifier = itemMod
                     )
                 }
+            }
+        }
+
+        detailLoading -> {
+            item(
+                key = "detail_loading_summary",
+                contentType = "skeleton"
+            ) {
+                VideoDetailInfoSkeleton(modifier = itemMod)
+            }
+            items(
+                count = DETAIL_RELATE_SKELETON_COUNT,
+                key = { index -> "detail_loading_relate_$index" },
+                contentType = { "skeleton" }
+            ) {
+                VideoRelateCardSkeleton(modifier = itemMod)
+            }
+        }
+
+        !detailError.isNullOrBlank() -> {
+            item(
+                key = "detail_error",
+                contentType = "state"
+            ) {
+                StateMessageCard(
+                    text = detailError,
+                    modifier = itemMod,
+                    isError = true
+                )
             }
         }
 

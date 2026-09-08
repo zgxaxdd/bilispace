@@ -144,7 +144,8 @@ fun VideoScreen(
     LaunchedEffect(seamlessIdsKey) {
         if (coverBackdropUrl == null) return@LaunchedEffect
         if (!SeamlessTransitionState.openRunning) return@LaunchedEffect
-        SeamlessTransitionState.awaitOpenEnd(maxWaitMs = 1_200)
+        // 截止时刻以 beginOpen 起算：系统 onEnd 回调丢失时也不多盖一秒
+        SeamlessTransitionState.awaitOpenEnd()
         detailMaskOn = false
     }
     val isPortraitVideo = remember(videoState.currentStream) {

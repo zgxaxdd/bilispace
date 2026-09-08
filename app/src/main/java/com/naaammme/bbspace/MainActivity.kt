@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.settings.update.AppUpdateCheckResult
 import com.naaammme.bbspace.core.settings.update.AppUpdateChecker
@@ -37,7 +38,6 @@ import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.WebLinkParser
 import com.naaammme.bbspace.core.model.WebLinkTarget
 import com.naaammme.bbspace.navigation.AppNavHost
-import com.naaammme.bbspace.navigation.videoDetailIntent
 import com.naaammme.bbspace.playback.PlaybackHostState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -47,6 +47,10 @@ import kotlin.math.abs
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    private companion object {
+        const val TAG = "MainActivity"
+    }
 
     @Inject
     lateinit var appSettings: AppSettings
@@ -65,19 +69,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 视频页恢复：详情 Activity 实例被系统以任何方式移出（OEM 清栈/后台回收/
-        // 通知 CLEAR_TOP）而播放会话仍持有视频目标、且非用户主动关闭时，重新拉起
-        // 视频页。判定基于 VideoDetailActivity 上报的真实存活性（见 PlaybackHostState）。
-        // 传入会话封面作垫底图：恢复瞬间播放器区域先显示封面，首帧渲染后交叉淡出。
+        tryRestoreVideoPage("onResume")
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            // 双触发兜底：OEM 清栈时详情页 onDestroy（alive 标志复位）可能晚于
+            // onResume 落地，focus 时刻重查一次。展开后 hostMode!=Hidden，
+            // shouldRestoreVideoPage 自身即去重，不会重复恢复。
+            tryRestoreVideoPage("onWindowFocus")
+        }
+    }
+
+    /**
+     * 视频页恢复：切后台前在看的视频页，回前台后原样恢复。
+     *
+     * 恢复动作是**就地展开播放宿主覆盖层**（hostState.expand），而不是重新
+     * startActivity——理由：
+     * 1. 播放会话/进度/详情/弹幕全是进程级状态，覆盖层 VideoScreen 渲染的即是
+     *    切出前的现场，展开即恢复，零等待；
+     * 2. 不发起任何跨 Activity 启动：onResume 时刻窗口尚未持有焦点，ColorOS 的
+     *    后台启动拦截可能静默丢弃 startActivity（此前三轮"自愈恢复"均失败于此）；
+     * 3. 判定基于 VideoDetailActivity 上报的真实存活性（videoDetailAlive），
+     *    与 onResume/onWindowFocusChanged 双触发配合，覆盖销毁回调晚落地的时序。
+     */
+    private fun tryRestoreVideoPage(from: String) {
         val videoTarget = hostState.currentTarget.value as? StreamPlaybackTarget.Video
-        if (videoTarget != null && hostState.shouldRestoreVideoPage()) {
-            startActivity(
-                videoDetailIntent(
-                    context = this,
-                    target = videoTarget.target,
-                    coverUrl = hostState.sessionCoverUrl
-                )
-            )
+        val should = videoTarget != null && hostState.shouldRestoreVideoPage()
+        Logger.d(TAG) {
+            "restore-check from=$from target=${videoTarget != null} " +
+                "alive=${hostState.videoDetailAlive} mode=${hostState.hostMode} " +
+                "userClosed=${hostState.isUserClosedVideo} -> $should"
+        }
+        if (should && videoTarget != null) {
+            hostState.expand()
         }
     }
 

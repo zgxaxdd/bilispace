@@ -48,6 +48,38 @@ class VideoDetailRepository @Inject constructor(
     private val grpcClient: BiliGrpcClient,
     private val deviceIdentity: DeviceIdentity
 ) {
+    /**
+     * 详情进程内 LRU（仅 UI 线程读写：fetch 在 IO 取数后回主线程 put，peek 在主线程）。
+     * 用途：打开视频瞬间用上次取到的详情先渲染（标题/简介/UP 主即时可见），
+     * 网络详情到达后原地刷新。容量 12 条足够覆盖最近浏览的视频。
+     */
+    private val cache = object : LinkedHashMap<String, VideoDetailResult>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, VideoDetailResult>): Boolean =
+            size > CACHE_MAX_ENTRIES
+    }
+
+    /** 取缓存的上次详情（可能为 null；内容可能过期，仅作首帧渲染用）。 */
+    fun peekCached(ids: VideoRequestIds): VideoDetailResult? =
+        synchronized(cache) { cache[cacheKeyOf(ids.aid, ids.epId, ids.seasonId, ids.bvid)] }
+
+    private fun putCached(result: VideoDetailResult) {
+        val key = cacheKeyOf(
+            aid = result.ids.aid,
+            epId = result.ids.epId,
+            seasonId = result.ids.seasonId,
+            bvid = result.ids.bvid
+        ) ?: return
+        synchronized(cache) { cache[key] = result }
+    }
+
+    private fun cacheKeyOf(aid: Long, epId: Long, seasonId: Long, bvid: String?): String? = when {
+        epId > 0L -> "ep$epId"
+        seasonId > 0L -> "ss$seasonId"
+        aid > 0L -> "av$aid"
+        !bvid.isNullOrBlank() -> "bv$bvid"
+        else -> null
+    }
+
     suspend fun fetchVideoDetail(
         ids: VideoRequestIds,
         src: VideoSrc
@@ -61,7 +93,7 @@ class VideoDetailRepository @Inject constructor(
         }
         return withContext(Dispatchers.Default) {
             mapReply(ids, reply)
-        }
+        }.also(::putCached)
     }
 
     private fun buildRequest(
@@ -519,6 +551,7 @@ class VideoDetailRepository @Inject constructor(
     private companion object {
         const val ENDPOINT = "bilibili.app.viewunite.v1.View/View"
         const val FROM_SCENE = "normal"
+        const val CACHE_MAX_ENTRIES = 12
         const val DEFAULT_QN = 64L
         const val DEFAULT_FNVER = 0L
         const val DEFAULT_FNVAL = 272L

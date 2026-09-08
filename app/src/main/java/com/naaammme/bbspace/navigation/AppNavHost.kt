@@ -279,13 +279,17 @@ fun AppNavHost(
     }
 
     // 进程存活但 MainActivity 被系统重建（后台活动实例回收等）时，覆盖层路径的本地
-    // 目标栈随 ViewModel 清空；以会话当前目标重建（openVideoInternal 对同一 target
-    // 短路返回，不会打断播放）。Activity 化路径的恢复由 MainActivity.onResume 负责。
+    // 覆盖层展开时以会话目标校正本地页内导航栈：MainActivity 被系统重建后栈为空、
+    // 恢复路径展开覆盖层时栈可能停留在旧视频——两者都重建为会话当前目标
+    // （openVideoInternal 对同一 target 短路返回，不会打断播放）。
+    // Activity 化路径的恢复由 MainActivity.tryRestoreVideoPage 负责。
     LaunchedEffect(hostMode) {
         if (hostMode == PlaybackHostMode.Expanded) {
-            (playbackHostViewModel.currentTarget.value as? StreamPlaybackTarget.Video)
-                ?.takeIf { videoViewModel.activeTarget == null }
-                ?.let { videoViewModel.openRoot(it.target) }
+            val sessionTarget =
+                (playbackHostViewModel.currentTarget.value as? StreamPlaybackTarget.Video)?.target
+            if (sessionTarget != null && videoViewModel.activeTarget != sessionTarget) {
+                videoViewModel.openRoot(sessionTarget)
+            }
         }
     }
 

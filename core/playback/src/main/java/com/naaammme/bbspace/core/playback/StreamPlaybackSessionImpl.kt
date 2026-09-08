@@ -333,6 +333,13 @@ class StreamPlaybackSessionImpl @Inject constructor(
         val token = openId.incrementAndGet()
         nextPlayWhenReady = true
         reporter.bindOwner(token)
+        // 上次取到的详情先上屏（标题/简介/UP 主/相关视频即时可见），网络详情到达后
+        // 原地刷新——消除"整个简介区先骨架屏再等一个网络往返"的感知延迟
+        val cachedDetail = if (reuseDetail == null) {
+            detailRepository.peekCached(request.ids)?.detail
+        } else {
+            null
+        }
         val initState = PlayerSessionState(
             request = request,
             biz = reuseDetail?.biz ?: request.playable.biz.biz,
@@ -343,7 +350,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
                 seasonId = request.ids.seasonId,
                 bvid = request.ids.bvid
             ),
-            detail = reuseDetail?.detail,
+            detail = reuseDetail?.detail ?: cachedDetail,
             detailLoading = reuseDetail == null,
             isPreparing = true
         )

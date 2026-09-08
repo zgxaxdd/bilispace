@@ -28,6 +28,12 @@ import kotlinx.coroutines.delay
  */
 object SeamlessTransitionState {
 
+    /** 打开阶段硬上限：超过即视为系统 onEnd 回调丢失，强制复位，遮罩不被多盖一秒。 */
+    private const val OPEN_DEADLINE_MS = 1_200L
+
+    /** 返回阶段硬上限（与既有 1.6s 兜底口径一致）。 */
+    private const val RETURN_DEADLINE_MS = 1_600L
+
     /** 系统无缝打开动画进行中（注册成功即置位，onEnd(isOpen=true) 复位）。 */
     var openRunning by mutableStateOf(false)
         private set
@@ -36,9 +42,16 @@ object SeamlessTransitionState {
     var returnRunning by mutableStateOf(false)
         private set
 
+    /** 打开阶段的绝对截止时刻：awaitOpenEnd 以此为准，与等待者何时调用无关。 */
+    private var openDeadline = 0L
+
+    /** 返回阶段的绝对截止时刻。 */
+    private var returnDeadline = 0L
+
     /** 注册成功 / 打开动画开始：置位打开阶段。 */
     fun beginOpen() {
         openRunning = true
+        openDeadline = System.currentTimeMillis() + OPEN_DEADLINE_MS
     }
 
     /** 打开动画结束。 */
@@ -49,6 +62,7 @@ object SeamlessTransitionState {
     /** 预期即将开始（或已开始）返回动画：置位返回阶段。 */
     fun beginReturn() {
         returnRunning = true
+        returnDeadline = System.currentTimeMillis() + RETURN_DEADLINE_MS
     }
 
     /** 返回动画结束（或确认不会发生）。 */
@@ -56,19 +70,21 @@ object SeamlessTransitionState {
         returnRunning = false
     }
 
-    /** 挂起等待打开动画结束（垫底收拢以此为启动信号）；超时 [maxWaitMs] 兜底放行。 */
-    suspend fun awaitOpenEnd(maxWaitMs: Long) {
-        val start = System.currentTimeMillis()
-        while (openRunning && System.currentTimeMillis() - start < maxWaitMs) {
+    /**
+     * 挂起等待打开动画结束（垫底收拢以此为启动信号）。
+     * 截止时刻以 [beginOpen] 起算（绝对时间）——回调丢失时也不会把详情区多盖一秒，
+     * 修复此前"每次打开都等满 1.2s 本地超时"的简介延迟。
+     */
+    suspend fun awaitOpenEnd() {
+        while (openRunning && System.currentTimeMillis() < openDeadline) {
             delay(32)
         }
         openRunning = false
     }
 
     /** 挂起等待返回动画结束（迷你显隐/延迟关停以此为放行信号）；超时兜底。 */
-    suspend fun awaitReturnEnd(maxWaitMs: Long) {
-        val start = System.currentTimeMillis()
-        while (returnRunning && System.currentTimeMillis() - start < maxWaitMs) {
+    suspend fun awaitReturnEnd() {
+        while (returnRunning && System.currentTimeMillis() < returnDeadline) {
             delay(32)
         }
         returnRunning = false

@@ -64,9 +64,10 @@ class PlaybackHostState @Inject constructor(
     var videoDetailAlive: Boolean = false
         private set
 
-    /** 用户主动收起视频后置位（返回/页内导航/关闭）；重新打开视频时复位。 */
+    /** 用户主动收起视频后置位（返回/页内导航/关闭）；重新打开视频时复位。诊断日志读取。 */
     @Volatile
-    private var userClosedVideo = false
+    var isUserClosedVideo: Boolean = false
+        private set
 
     init {
         // 目标消失即收起；迷你不可用（设置关闭）时不得停留在 Mini。
@@ -87,7 +88,7 @@ class PlaybackHostState @Inject constructor(
 
     fun expand() {
         cancelPendingClose()
-        userClosedVideo = false
+        isUserClosedVideo = false
         _hostMode.value = PlaybackHostMode.Expanded
     }
 
@@ -99,7 +100,7 @@ class PlaybackHostState @Inject constructor(
 
     fun close() {
         cancelPendingClose()
-        userClosedVideo = true
+        isUserClosedVideo = true
         _hostMode.value = PlaybackHostMode.Hidden
         playbackSession.close()
     }
@@ -115,12 +116,12 @@ class PlaybackHostState @Inject constructor(
      * 消除"退出后还响最长 1.5s"的延迟。
      */
     fun closeAfterReturnAnimation() {
-        userClosedVideo = true
+        isUserClosedVideo = true
         _hostMode.value = PlaybackHostMode.Hidden
         playbackSession.pause()
         pendingCloseJob?.cancel()
         pendingCloseJob = scope.launch {
-            SeamlessTransitionState.awaitReturnEnd(maxWaitMs = 1_500)
+            SeamlessTransitionState.awaitReturnEnd()
             playbackSession.close()
         }
     }
@@ -133,7 +134,7 @@ class PlaybackHostState @Inject constructor(
 
     /** 用户主动收起视频（返回键/页内导航）时由 VideoDetailActivity 调用。 */
     fun markVideoClosedByUser() {
-        userClosedVideo = true
+        isUserClosedVideo = true
     }
 
     /** 详情 Activity 生命周期上报：实例创建（onCreate）。 */
@@ -148,7 +149,7 @@ class PlaybackHostState @Inject constructor(
 
     /** 无缝打开路径的点击预热：视为「用户正在打开视频」，复位关闭标记。 */
     fun markVideoOpened() {
-        userClosedVideo = false
+        isUserClosedVideo = false
     }
 
     /**
@@ -160,13 +161,9 @@ class PlaybackHostState @Inject constructor(
         if (videoDetailAlive) return false
         if (currentTarget.value !is StreamPlaybackTarget.Video) return false
         if (_hostMode.value != PlaybackHostMode.Hidden) return false
-        if (userClosedVideo) return false
+        if (isUserClosedVideo) return false
         return true
     }
-
-    /** 会话当前标题栏/通知使用的封面（恢复视频页时作为垫底图传入，避免黑屏闪变）。 */
-    val sessionCoverUrl: String?
-        get() = playbackSession.sessionState.value.cover
 
     private var pendingCloseJob: Job? = null
 }
