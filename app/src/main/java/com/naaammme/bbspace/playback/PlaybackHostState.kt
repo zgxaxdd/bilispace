@@ -20,13 +20,19 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 播放宿主（视频详情覆盖层 / 迷你播放器）的进程级状态源。
+ * 播放宿主（视频详情覆盖层 / 迷你播放器）的进程级状态源，同时是「视频页恢复」
+ * 契约的唯一裁决者。
  *
- * 视频详情在支持的设备上迁移到独立 [com.naaammme.bbspace.video.VideoDetailActivity] 后，
- * MainActivity 与详情 Activity 必须共享同一份 hostMode / miniPlayerAvailable：
- * 详情页收起时写 Mini/Hidden，返回 MainActivity 后由 [com.naaammme.bbspace.playback.PlaybackHost]
- * 据此决定迷你播放器是否出现。Compose snapshot state 可跨 Activity 组合读取，
- * 流派生状态用进程级协程作用域维持（语义与原 PlaybackHostViewModel 完全一致）。
+ * 视频详情在支持无缝动画的设备上运行在独立 [com.naaammme.bbspace.video.VideoDetailActivity]
+ * 中（压在 MainActivity 上方）。该实例随时可能被系统移出：OEM 清栈、后台活动实例
+ * 回收、通知点击的 CLEAR_TOP、长时后台后的任务重置……移出后用户只应看到
+ * MainActivity 的主页，而播放会话仍在（进程级单例 + 前台服务）。
+ *
+ * 恢复判定使用**真实存活性**而非猜测：VideoDetailActivity 在 onCreate/onDestroy
+ * 上报 [onVideoDetailStarted] / [onVideoDetailStopped]，「详情页是否还在」由此
+ * 标志回答；「是否用户主动关闭」由显式的 [markVideoClosedByUser]（返回/页内导航/
+ * 关闭）回答。此前基于 hostMode 推断 + 3 秒时间窗的启发式在多种系统行为下失效，
+ * 全部废弃。
  */
 @Singleton
 class PlaybackHostState @Inject constructor(
@@ -53,9 +59,17 @@ class PlaybackHostState @Inject constructor(
             initialValue = false
         )
 
+    /** VideoDetailActivity 实例是否存在于返回栈中（onCreate → onDestroy 的真实存活性）。 */
+    @Volatile
+    var videoDetailAlive: Boolean = false
+        private set
+
+    /** 用户主动收起视频后置位（返回/页内导航/关闭）；重新打开视频时复位。 */
+    @Volatile
+    private var userClosedVideo = false
+
     init {
-        // 与原 PlaybackHostViewModel.init 一致：目标消失即收起；
-        // 迷你不可用（设置关闭）时不得停留在 Mini。
+        // 目标消失即收起；迷你不可用（设置关闭）时不得停留在 Mini。
         scope.launch {
             combine(currentTarget, miniPlayerAvailable) { target, enabled ->
                 target to enabled
@@ -73,6 +87,7 @@ class PlaybackHostState @Inject constructor(
 
     fun expand() {
         cancelPendingClose()
+        userClosedVideo = false
         _hostMode.value = PlaybackHostMode.Expanded
     }
 
@@ -84,6 +99,7 @@ class PlaybackHostState @Inject constructor(
 
     fun close() {
         cancelPendingClose()
+        userClosedVideo = true
         _hostMode.value = PlaybackHostMode.Hidden
         playbackSession.close()
     }
@@ -99,6 +115,7 @@ class PlaybackHostState @Inject constructor(
      * 消除"退出后还响最长 1.5s"的延迟。
      */
     fun closeAfterReturnAnimation() {
+        userClosedVideo = true
         _hostMode.value = PlaybackHostMode.Hidden
         playbackSession.pause()
         pendingCloseJob?.cancel()
@@ -114,27 +131,42 @@ class PlaybackHostState @Inject constructor(
         pendingCloseJob = null
     }
 
-    /**
-     * 用户主动收起视频（返回/页内导航）时标记，供 [shouldRestoreVideoPage] 区分
-     * 「用户关闭」与「系统清栈销毁详情 Activity」。
-     */
+    /** 用户主动收起视频（返回键/页内导航）时由 VideoDetailActivity 调用。 */
     fun markVideoClosedByUser() {
-        userClosedVideoAt = android.os.SystemClock.elapsedRealtime()
+        userClosedVideo = true
+    }
+
+    /** 详情 Activity 生命周期上报：实例创建（onCreate）。 */
+    fun onVideoDetailStarted() {
+        videoDetailAlive = true
+    }
+
+    /** 详情 Activity 生命周期上报：实例销毁（onDestroy）。 */
+    fun onVideoDetailStopped() {
+        videoDetailAlive = false
+    }
+
+    /** 无缝打开路径的点击预热：视为「用户正在打开视频」，复位关闭标记。 */
+    fun markVideoOpened() {
+        userClosedVideo = false
     }
 
     /**
-     * 自愈判定：MainActivity 回到前台时，若仍有活动视频目标、宿主处于 Hidden
-     * （详情 Activity 路径）且用户并未主动关闭（最近 3s 内无收起操作），
-     * 说明详情 Activity 被系统以任何方式移出（如 singleTask 清栈/后台回收），
-     * 应重新拉起视频页。覆盖层路径（mode==Expanded/Mini）恒返回 false。
+     * 视频页恢复判定（MainActivity 回到前台时评估）：播放会话仍持有视频目标、
+     * 详情 Activity 实例确已不存在、宿主处于 Hidden（Activity 路径；覆盖层/迷你
+     * 路径由自身组合恢复）且并非用户主动关闭 → 系统移出了详情页，应重新拉起。
      */
     fun shouldRestoreVideoPage(): Boolean {
-        val target = playbackSession.currentTarget.value as? StreamPlaybackTarget.Video ?: return false
+        if (videoDetailAlive) return false
+        if (currentTarget.value !is StreamPlaybackTarget.Video) return false
         if (_hostMode.value != PlaybackHostMode.Hidden) return false
-        if (android.os.SystemClock.elapsedRealtime() - userClosedVideoAt < 3_000L) return false
+        if (userClosedVideo) return false
         return true
     }
 
+    /** 会话当前标题栏/通知使用的封面（恢复视频页时作为垫底图传入，避免黑屏闪变）。 */
+    val sessionCoverUrl: String?
+        get() = playbackSession.sessionState.value.cover
+
     private var pendingCloseJob: Job? = null
-    private var userClosedVideoAt = 0L
 }

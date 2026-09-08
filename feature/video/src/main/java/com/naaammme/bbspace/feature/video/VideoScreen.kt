@@ -128,13 +128,13 @@ fun VideoScreen(
     var isFull by rememberSaveable { mutableStateOf(false) }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
     val fullOn = hostExpanded && isFull
-    // Activity 无缝路径：系统打开动画期间详情区域用封面遮罩覆盖（不露骨架），
+    // Activity 无缝路径：系统打开动画期间详情区域用纯背景色遮罩盖住（不露骨架、
+    // 也不画封面——封面只属于播放器区域的垫底，详情区再画一份会露出重复预览图），
     // 动画结束（或 1.2s 超时兜底，防止系统回调丢失导致永久隐藏）后先组合详情、
     // 再 180ms 淡出遮罩。详情区域 Box 恒占位、遮罩是覆盖层——播放器与布局尺寸
     // 全程不变（修复打开动画结束时的抽搐）；VideoDetailPage 不再被移出组合、
     // 仅延迟到遮罩之后组合（修复简介/详情消失与状态丢失）。
-    // 以视频 ids（aid/cid）为键：封面 URL 可能被不同视频复用（占位图/同源封面），
-    // 用 URL 做键会在连续打开同封面视频时错误复用上次的遮罩状态。
+    // 以视频 ids（aid/cid）为键：避免连续打开同源封面视频时错误复用上次的遮罩状态。
     val seamlessIdsKey = videoState.ids
     var detailMaskOn by remember(seamlessIdsKey) {
         mutableStateOf(coverBackdropUrl != null && SeamlessTransitionState.openRunning)
@@ -308,11 +308,7 @@ fun VideoScreen(
                                 onSwitchPage = switchPage
                             )
                         }
-                        SeamlessDetailMask(
-                            visible = detailMaskOn,
-                            coverUrl = coverBackdropUrl,
-                            coverLarge = coverBackdropLarge
-                        )
+                        SeamlessDetailMask(visible = detailMaskOn)
                     }
                 }
             }
@@ -374,11 +370,7 @@ fun VideoScreen(
                                 onSwitchPage = switchPage
                             )
                         }
-                        SeamlessDetailMask(
-                            visible = detailMaskOn,
-                            coverUrl = coverBackdropUrl,
-                            coverLarge = coverBackdropLarge
-                        )
+                        SeamlessDetailMask(visible = detailMaskOn)
                     }
                 }
             }
@@ -447,15 +439,12 @@ private fun Shape.cornerPxOrNull(density: Density): BackdropCornerPx? {
 
 /**
  * 详情区打开遮罩：系统无缝打开动画期间盖住详情区域（不露骨架/占位闪变），
- * 动画结束后 180ms 淡出。覆盖层不参与外层布局——播放器与详情区尺寸全程不变；
- * 无缝不可用（coverUrl 为 null）时不绘制任何内容。
+ * 动画结束后 180ms 淡出。遮罩只铺主题背景色——系统无缝动画把封面展开到**播放器
+ * 区域**，详情区若再绘制一份同图封面，就会在播放器下方露出一块重复的预览图
+ * （打开动画期的 UI 缺陷）；封面连续性仅由播放器区域的 CoverSettleBackdrop 负责。
  */
 @Composable
-private fun SeamlessDetailMask(
-    visible: Boolean,
-    coverUrl: String?,
-    coverLarge: Boolean
-) {
+private fun SeamlessDetailMask(visible: Boolean) {
     AnimatedVisibility(
         visible = visible,
         enter = EnterTransition.None,
@@ -465,17 +454,7 @@ private fun SeamlessDetailMask(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-        ) {
-            coverUrl?.let { url ->
-                BiliAsyncImage(
-                    url = url,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    variant = if (coverLarge) BiliImageVariant.Banner else BiliImageVariant.CardCoverLarge
-                )
-            }
-        }
+        )
     }
 }
 

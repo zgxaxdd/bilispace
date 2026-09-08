@@ -280,6 +280,10 @@ class VideoViewModel @Inject constructor(
         playbackController.openVideo(target)
     }
 
+    /** 当前页内导航栈顶目标；null 表示本 ViewModel 尚未打开过视频（如 Activity 重建后）。 */
+    val activeTarget: VideoTarget?
+        get() = _targetStack.value.lastOrNull()
+
     fun openTarget(target: VideoTarget) {
         val current = currentTarget()
         if (current == target) return

@@ -167,17 +167,22 @@ fun PlaybackHost(
             ),
             exit = ExitNone
         ) {
-            DraggableMiniPlayerHost(
-                modifier = modifier
-            ) {
-                InAppMiniPlayer(
-                    player = player,
-                    target = curTarget!!,
-                    sessionState = sessionState,
-                    onExpand = onExpand,
-                    onTogglePlay = onTogglePlay,
-                    onClose = onClose
-                )
+            // visible 判定与内容组合之间快照可能更新，禁止非空断言（关闭瞬间 currentTarget
+            // 置空 + 视图摘除同帧落地），以安全检查兜底
+            val miniTarget = curTarget
+            if (miniTarget != null) {
+                DraggableMiniPlayerHost(
+                    modifier = modifier
+                ) {
+                    InAppMiniPlayer(
+                        player = player,
+                        target = miniTarget,
+                        sessionState = sessionState,
+                        onExpand = onExpand,
+                        onTogglePlay = onTogglePlay,
+                        onClose = onClose
+                    )
+                }
             }
         }
     }

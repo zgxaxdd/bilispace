@@ -151,10 +151,15 @@ class AppInitializer @Inject constructor(
                 .distinctUntilChanged()
                 .collect { shouldStart ->
                     val intent = Intent(context, PlaybackService::class.java)
-                    if (shouldStart) {
-                        context.startService(intent)
-                    } else {
-                        context.stopService(intent)
+                    // 该回调正常只随用户操作（打开/关闭播放）在前台触发；后台状态下的
+                    // 竞态重放会被系统拒绝 startService（Android 12+ 后台服务限制），
+                    // 属于无影响边缘——静默跳过，回到前台的下一次状态变化自会纠正
+                    runCatching {
+                        if (shouldStart) {
+                            context.startService(intent)
+                        } else {
+                            context.stopService(intent)
+                        }
                     }
                 }
         }

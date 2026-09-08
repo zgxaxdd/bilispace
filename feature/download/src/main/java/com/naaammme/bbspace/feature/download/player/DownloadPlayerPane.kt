@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.naaammme.bbspace.core.designsystem.component.DanmakuSettingsSection
+import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.infra.player.danmaku.DanmakuLayer
 import com.naaammme.bbspace.infra.player.danmaku.rememberDanmakuOverlayState
 import com.naaammme.bbspace.core.model.DanmakuConfig
@@ -117,7 +118,9 @@ internal fun DownloadPlayerPane(
 
     DisposableEffect(playerView) {
         onDispose {
-            playerView.player = null
+            // 经 binder 摘除：引擎 release（onCleared 路径）可能早于本 dispose，
+            // 直接 view.player = null 会触碰已释放实例（与主播放小窗同类崩溃）
+            PlayerViewTargetBinder.unbind(playerView)
         }
     }
 
@@ -125,9 +128,7 @@ internal fun DownloadPlayerPane(
         AndroidView(
             factory = { playerView },
             update = { view ->
-                if (view.player !== player) {
-                    view.player = player
-                }
+                PlayerViewTargetBinder.bind(view, player)
                 view.keepScreenOn = state.playWhenReady
             },
             modifier = Modifier.fillMaxSize()

@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.infra.player
+package com.naaammme.bbspace.infra.player
 
 import android.content.Context
 import androidx.media3.common.AudioAttributes
@@ -184,10 +184,12 @@ class Media3PlayerEngine @Inject constructor(
         exoPlayer = nextPlayer
         _player.value = nextPlayer
         resetPlaybackFlows()
-        // 视图可能仍绑定旧实例（如小窗未及重组摘除），先解绑再释放，
-        // 否则其延迟 dispose 的 unbind 会对已 release 的 player 抛 "Player is released"
-        prev?.let(PlayerViewTargetBinder::unbindAll)
-        prev?.release()
+        // 视图可能仍绑定旧实例（如小窗未及重组摘除）：先标记释放并摘除全部绑定，
+        // 再 release。此后视图层对旧实例的任何迟到 bind 请求都是 no-op（见 binder 所有权规则）
+        prev?.let { player ->
+            PlayerViewTargetBinder.onPlayerReleased(player)
+            player.release()
+        }
     }
 
     override suspend fun setSource(
@@ -277,8 +279,9 @@ class Media3PlayerEngine @Inject constructor(
         _player.value = null
         _currentSource.value = null
         resetPlaybackFlows()
-        // 先解绑仍绑定的视图再释放（同 updateConfig，防 dispose 后对已 release player 解绑崩溃）
-        PlayerViewTargetBinder.unbindAll(player)
+        // StateFlow 先置空（UI/服务的后续快照不再指向该实例），再标记释放并摘除
+        // 仍绑定的视图，最后 release：视图层永远只会见到存活实例或 null
+        PlayerViewTargetBinder.onPlayerReleased(player)
         player.release()
     }
 
@@ -336,8 +339,8 @@ class Media3PlayerEngine @Inject constructor(
         _player.value = nextPlayer
         resetRuntimeState()
         resetPlaybackFlows()
-        // 释放旧实例前先解绑仍绑定的视图，避免视图延迟 dispose 时对已 release 的 player 解绑崩溃
-        PlayerViewTargetBinder.unbindAll(player)
+        // 释放旧实例前先标记释放并摘除仍绑定的视图（同 release() 的所有权顺序）
+        PlayerViewTargetBinder.onPlayerReleased(player)
         player.release()
         runtimeScope.launch {
             try {

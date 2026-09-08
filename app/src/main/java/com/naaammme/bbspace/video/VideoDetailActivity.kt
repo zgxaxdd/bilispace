@@ -71,6 +71,8 @@ class VideoDetailActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 上报真实存活性：MainActivity 的视频页恢复判定以此为准（见 PlaybackHostState）
+        hostState.onVideoDetailStarted()
         if (!consumeIntent(intent)) {
             finish()
             return
@@ -128,6 +130,12 @@ class VideoDetailActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         consumeIntent(intent)
+    }
+
+    override fun onDestroy() {
+        // 实例确已离开返回栈：恢复判定随之解除（含系统清栈/后台回收等一切移出方式）
+        hostState.onVideoDetailStopped()
+        super.onDestroy()
     }
 
     /** 解析并登记 Intent 中的目标视频；无有效目标返回 false（直接退出）。 */

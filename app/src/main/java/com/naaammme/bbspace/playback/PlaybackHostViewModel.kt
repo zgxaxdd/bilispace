@@ -81,6 +81,7 @@ class PlaybackHostViewModel @Inject constructor(
      */
     fun warmOpen(target: VideoTarget) {
         hostState.cancelPendingClose()
+        hostState.markVideoOpened()
         videoPlaybackController.openVideo(target)
     }
 

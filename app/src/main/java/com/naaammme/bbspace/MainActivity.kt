@@ -64,11 +64,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 自愈：详情 Activity 被系统以任何方式移出（singleTask 清栈/后台回收）后，
-        // 只要播放目标仍活跃且非用户主动关闭，回到前台即重新拉起视频页。
+        // 视频页恢复：详情 Activity 实例被系统以任何方式移出（OEM 清栈/后台回收/
+        // 通知 CLEAR_TOP）而播放会话仍持有视频目标、且非用户主动关闭时，重新拉起
+        // 视频页。判定基于 VideoDetailActivity 上报的真实存活性（见 PlaybackHostState）。
+        // 传入会话封面作垫底图：恢复瞬间播放器区域先显示封面，首帧渲染后交叉淡出。
         val videoTarget = hostState.currentTarget.value as? StreamPlaybackTarget.Video
         if (videoTarget != null && hostState.shouldRestoreVideoPage()) {
-            startActivity(videoDetailIntent(this, videoTarget.target, null))
+            startActivity(
+                videoDetailIntent(
+                    context = this,
+                    target = videoTarget.target,
+                    coverUrl = hostState.sessionCoverUrl
+                )
+            )
         }
     }
 
