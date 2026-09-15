@@ -8,14 +8,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridItemScope
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -27,7 +25,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -270,14 +267,25 @@ private fun DefaultGridError(message: String, onRetry: (() -> Unit)? = null) {
     )
 }
 
+/**
+ * 翻页加载指示器（骨架卡 + 微光）。
+ *
+ * 原先是一个居中的小号转圈。改为骨架卡的好处：
+ * - 加载中"预演"即将出现的卡片形状，而不是凭空冒出一个 spinner，观感更连贯；
+ * - 骨架自带微光（VideoGridCardSkeleton 内部有 ProvideSkeletonShimmer），
+ *   与首屏骨架的加载语言统一。
+ *
+ * 注意：首页开启提前预取（LOAD_MORE_THRESHOLD=6），网络正常时下一页常在用户滑到
+ * 底之前就回来了，此处来不及显示——这是**预期**的（没有等待就不该有加载动画）。
+ * 网络较慢时才会看到这段骨架微光。
+ */
 @Composable
 private fun DefaultGridLoadMore() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
+            .padding(vertical = 8.dp)
     ) {
-        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+        VideoGridCardSkeleton()
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 
 /**
@@ -180,7 +182,10 @@ fun VideoGridCardSkeleton(modifier: Modifier = Modifier) {
         SkeletonBlock(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 10f)
+                .aspectRatio(16f / 10f),
+            // 封面块与真实卡片封面共用同一个 token：骨架要"预演"最终形状，
+            // 否则加载完成时形状会突变（此前这里是默认直角，而真实卡片是圆角）。
+            shape = RoundedCornerShape(BiliRadius.card)
         )
         Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             SkeletonBlock(
@@ -233,7 +238,7 @@ fun VideoListCardSkeleton(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .weight(0.38f)
                 .aspectRatio(16f / 10f),
-            shape = MaterialTheme.shapes.medium
+            shape = RoundedCornerShape(BiliRadius.card)
         )
         Column(
             modifier = Modifier.weight(0.62f),
@@ -496,7 +501,7 @@ fun VideoRelateCardSkeleton(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .weight(0.38f)
                 .aspectRatio(16f / 10f),
-            shape = MaterialTheme.shapes.large
+            shape = RoundedCornerShape(BiliRadius.card)
         )
         Column(
             modifier = Modifier.weight(0.62f),
