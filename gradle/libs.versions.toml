@@ -20,7 +20,7 @@ kotlinxSerializationJson = "1.7.3"
 
 # Protobuf
 protobuf = "4.29.2"
-protobufPlugin = "0.9.6"
+protobufPlugin = "0.10.0"
 
 # Database & Storage
 room = "2.8.4"

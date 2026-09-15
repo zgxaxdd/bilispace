@@ -1,6 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    // AGP 9 built-in Kotlin: kotlin.android removed
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
