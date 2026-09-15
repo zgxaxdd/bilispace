@@ -160,11 +160,23 @@ class VideoDetailActivity : ComponentActivity() {
         // 用户主动返回：标记收起（MainActivity 自愈逻辑据此不再重拉视频页）
         hostState.markVideoClosedByUser()
         if (pendingSeamlessLaunch) {
-            // 官方成对返回：框架按锚点实时位置把窗口缩回卡片（缩回画面 = 框架绘制的
-            // 锚点内容，共享执行器已在打开结束时把封面画进锚点）。这里仅预判返回
-            // 阶段开始，源侧 onStart/onEnd(isOpen=false) 会再次确认。
+            // 这里**刻意不调用** OplusViewSeamlessCompat.finishCurrentAnimation()。
+            //
+            // 真机对比实验（同一台 PLC110 / ColorOS 16.0，同样的「快速开关 5 轮」脚本）：
+            // - 官方哔哩哔哩客户端：startAnimation×1、SpringAnimation×1、
+            //   finishCurrentAnimation×0、"can't reverse"×0 → 系统把连续的开/收
+            //   合并成**同一个**动画实例并自然反向，全程平滑；
+            // - 本应用（原先每个返回都中断）：startAnimation×4、SpringAnimation×4、
+            //   finishCurrentAnimation×3、"can't reverse"×4 → 每轮都把系统刚合并好的
+            //   过渡打断成 "can't reverse, finish now"，动画只能停在合并中途重新起一段，
+            //   这正是"快速打开关闭时动画不稳定"的来源。
+            //
+            // 官方文档把 finishCurrentAnimation 定位为「一般无需调用」，适用场景是
+            // 「页面返回时立即滑动列表」（见 HomeVideoPage 的滚动中断逻辑，那里保留）。
+            // 返回键路径交给系统成对动画自行 merge/reverse 即可。
             SeamlessTransitionState.beginReturn()
         }
+        SeamlessTransitionState.markClosing()
         if (hostState.miniPlayerAvailable.value) {
             hostState.minimize()
         } else {
@@ -184,6 +196,7 @@ class VideoDetailActivity : ComponentActivity() {
             OplusViewSeamlessCompat.useDefaultTransitionOnFinish(this)
             SeamlessTransitionState.endReturn()
         }
+        SeamlessTransitionState.markClosing()
         if (hostState.miniPlayerAvailable.value) {
             hostState.minimize()
         } else {

@@ -84,7 +84,9 @@ class BiliApplication : Application(), SingletonImageLoader.Factory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(100 * 1024 * 1024)
+                    // 256MB：首页/排行/搜索是全图卡片流，100MB 在浏览几十屏后就被挤满，
+                    // 回看时封面要走网络重新解码（列表滚动时肉眼可见的空白闪动）。
+                    .maxSizeBytes(256L * 1024 * 1024)
                     .build()
             }
             .crossfade(150)

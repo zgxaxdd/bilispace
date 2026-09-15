@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,15 +100,23 @@ fun HomeScreen(
         )
     }
 
-    var topBarHeightPx by remember { mutableStateOf(0) }
-    val topBarHeightDp = with(LocalDensity.current) { topBarHeightPx.toDp() }
+    // 顶栏占据的最大高度（px）。用 State 持有两处读取都拿到最新值：
+    // - 滚动回调（组合之外）用它做隐藏上限；
+    // - derivedStateOf 把它折算成内容顶距 Dp。
+    // 此前是组合期局部变量，被 remember 的连接器闭包捕获成首帧的 0，顶栏隐藏上限
+    // 长期为 0（顶部滚动时顶栏无法完整隐藏）。
+    val topBarHeightState = remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    val topBarHeightDp by remember(density) {
+        derivedStateOf { with(density) { topBarHeightState.value.toDp() } }
+    }
 
     // 顶栏随内容滚动 1:1 同步上滑。
     // Compose 嵌套滚动约定：手指上滑（内容上移、浏览下方内容）时滚动位移 delta.y 为负
     // （与 M3 EnterAlwaysScrollBehavior 的 heightOffset += available.y 同一符号体系）。
     // 因此用 -delta 累加：上滑 → offset 增大 → 顶栏上移隐藏；下滑 → offset 减小 → 顶栏滑回。
     var topBarOffsetPx by remember { mutableStateOf(0f) }
-    val topBarScrollConnection = remember {
+    val topBarScrollConnection = remember(topBarHeightState) {
         object : NestedScrollConnection {
             override fun onPostScroll(
                 consumed: Offset,
@@ -120,13 +129,23 @@ fun HomeScreen(
                 // 又保证列表到顶后继续下拉仍能把顶栏拉回来。
                 val delta = consumed.y + available.y
                 if (delta != 0f) {
-                    topBarOffsetPx = (topBarOffsetPx - delta)
-                        .coerceIn(0f, topBarHeightPx.toFloat())
+                    // 取整到像素再写：offset 本身按 IntOffset 消费，亚像素变化不产生任何可见差异，
+                    // 却会让每个滚动 tick 都触发一次状态写入与 offset 块重布局。取整后大部分
+                    // tick 的值与上一次相同，mutableStateOf 的结构相等判断直接短路。
+                    val next = (topBarOffsetPx - delta)
+                        .coerceIn(0f, topBarHeightState.value.toFloat())
+                        .let { kotlin.math.round(it) }
+                    if (next != topBarOffsetPx) {
+                        topBarOffsetPx = next
+                    }
                 }
                 return Offset.Zero
             }
         }
     }
+    // 顶栏偏移经 provider 延迟读取（见 HomeTopBar 注释）；
+    // 内容顶距经 derivedStateOf 读取高度：高度只在测量后写一次，不构成滚动期重组。
+    val topBarOffsetProvider = remember { { topBarOffsetPx } }
 
     // 切 Tab 后新页面内容从顶部开始，顶栏必须复位显示
     LaunchedEffect(pagerState.settledPage) {
@@ -206,11 +225,13 @@ fun HomeScreen(
             }
         }
 
-        // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏
+        // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏。
+        // 偏移量以 provider 延迟读取：滚动期间每个滚动 tick 只触发顶栏 offset 块重布局，
+        // 不再重组 HomeScreen 整个 scope（含 HorizontalPager 分支与全部子项参数比对）。
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
             singleColumn = singleColumn,
-            topBarOffsetPx = topBarOffsetPx,
+            topBarOffsetPxProvider = topBarOffsetProvider,
             onToggleSingleColumn = viewModel::toggleHomeSingleColumn,
             onNavigateToSearch = onNavigateToSearch,
             onNavigateToProfile = onNavigateToProfile,
@@ -222,7 +243,9 @@ fun HomeScreen(
                 .align(Alignment.TopCenter)
                 .onSizeChanged { size ->
                     // 只取最大高度：折叠时高度变小不回缩内容顶距
-                    if (size.height > topBarHeightPx) topBarHeightPx = size.height
+                    if (size.height > topBarHeightState.value) {
+                        topBarHeightState.value = size.height
+                    }
                 }
         )
     }
@@ -233,7 +256,8 @@ fun HomeScreen(
 private fun HomeTopBar(
     selectedIndex: Int,
     singleColumn: Boolean,
-    topBarOffsetPx: Float,
+    // 偏移量延迟读取：offset 块内取值，滚动时只重布局顶栏、不重组上游 scope
+    topBarOffsetPxProvider: () -> Float,
     onToggleSingleColumn: () -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToProfile: () -> Unit,
@@ -246,7 +270,7 @@ private fun HomeTopBar(
             .fillMaxWidth()
             .statusBarsPadding()
             .clipToBounds()
-            .offset { IntOffset(0, -topBarOffsetPx.roundToInt()) }
+            .offset { IntOffset(0, -topBarOffsetPxProvider().roundToInt()) }
             .padding(top = 4.dp)
     ) {
         Row(

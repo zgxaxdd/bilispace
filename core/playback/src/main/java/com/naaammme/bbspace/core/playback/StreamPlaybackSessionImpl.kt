@@ -767,10 +767,19 @@ class StreamPlaybackSessionImpl @Inject constructor(
     }
 
     private suspend fun syncDanmakuSource(state: PlayerSessionState) {
+        android.util.Log.i(
+            "BbDanmaku",
+            "syncDanmakuSource detail=${state.detail != null} idsReady=${state.ids.danmakuReady} " +
+                "source=${state.playbackSource != null}"
+        )
         if (state.detail == null) return
         val ids = state.ids.takeIf { it.danmakuReady } ?: return
         val source = state.playbackSource ?: return
         if (!playerSettings.state.first().danmaku.enabled) return
+        android.util.Log.i(
+            "BbDanmaku",
+            "syncDanmakuSource -> setSource aid=${ids.aid} cid=${ids.cid} durationMs=${source.durationMs}"
+        )
         danmakuSession.setSource(ids, source.durationMs)
     }
 

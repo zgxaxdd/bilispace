@@ -17,6 +17,10 @@ import com.naaammme.bbspace.core.common.media.BiliCoverSize
 import com.naaammme.bbspace.core.common.media.coverUrlFor
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.oplus.animation.OplusViewSeamless
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 「视频卡片 → 详情」系统无缝打开的共享执行器（按官方接入指引实现）。
@@ -39,14 +43,40 @@ import com.oplus.animation.OplusViewSeamless
  */
 class SeamlessCardOpener(
     private val route: (VideoTarget, String?, Boolean, Bundle) -> Unit,
+    private val cleanupScope: CoroutineScope? = null,
     private val enabled: () -> Boolean = { true }
 ) {
 
     /** 上一张被画了过渡内容的卡片；新打开时清理，避免软件位图副本累积。 */
     private var lastDecorated: View? = null
 
-    /** 软件位图单条缓存：点击路径避免重复做整张位图 copy（主线程上可感知的停顿）。 */
-    private var coverMemo: Pair<String, SoftwareCover>? = null
+    /** 待执行的锚点清理协程；新打开时取消，防止误清正在使用的过渡位图。 */
+    private var cleanupJob: Job? = null
+
+    /**
+     * 软件位图的小容量 LRU（最多 [COVER_MEMO_CAPACITY] 条）。
+     *
+     * 为什么不是单条：硬件位图转软件位图（`Bitmap.copy(ARGB_8888)`）是**主线程同步拷贝**，
+     * 960×540 约 2MB、实测 5~20ms，而且发生在**点击那一帧**——正是系统要准备 Activity
+     * 窗口 + 启动无缝动画的时刻，两者争主线程会让动画起步顿一下。单条缓存时用户在两张
+     * 卡片之间来回点，每次切换都要重算；扩到多条即可覆盖"来回看同一批卡/连续开退"的真实场景。
+     */
+    private val coverMemo = LinkedHashMap<String, SoftwareCover>()
+
+    private fun memoGet(key: String): SoftwareCover? {
+        val hit = coverMemo.remove(key) ?: return null
+        coverMemo[key] = hit // 重新插入 = 标记为最近使用
+        return hit
+    }
+
+    private fun memoPut(key: String, cover: SoftwareCover) {
+        coverMemo.remove(key)
+        coverMemo[key] = cover
+        while (coverMemo.size > COVER_MEMO_CAPACITY) {
+            val eldest = coverMemo.keys.firstOrNull() ?: break
+            coverMemo.remove(eldest)
+        }
+    }
 
     fun tryOpen(
         anchor: View?,
@@ -59,12 +89,22 @@ class SeamlessCardOpener(
         if (anchor == null || target == null) return false
         if (!enabled()) return false
         if (!OplusViewSeamlessCompat.isVersionSupported()) return false
+        // 快速连开时上一轮清理可能还没跑：先取消，否则它会把本次正在使用的
+        // 过渡位图清掉，打开动画中途丢内容（表现为打开动画闪变）
+        cleanupJob?.cancel()
+        cleanupJob = null
         lastDecorated?.let { last ->
             if (last !== anchor) {
                 last.foreground = null
                 last.background = null
             }
         }
+        // 离开上一次会话时留下的 closing 标记必须在这里清掉（而不是等注册成功之后）：
+        // 若上一次以 finishWithDefaultTransition 收起后又立刻打开新卡片，closing 会残留为 true，
+        // 本函数启动的清理协程会在第一个 64ms 轮询就通过 closing 门、进入 800ms 延时，
+        // 若用户在 800ms 内连续开关卡片，它就会在新的打开动画进行中把锚点过渡位图清掉
+        // ——表现为打开/返回动画中途丢内容（一帧封面闪空白）。
+        SeamlessTransitionState.resetClosing()
         val cover = buildSoftwareCoverDrawable(anchor, coverUrl, coverLarge, anchorRadiusPx)
         if (cover != null) {
             // 与下方 CoverImage 同像素（同图同圆角），平时不可见；框架"绘制 view 内容"
@@ -91,13 +131,42 @@ class SeamlessCardOpener(
         if (!registered) {
             anchor.foreground = null
             anchor.background = null
-            Log.d(TAG, "registerOpenTransition=false, fallback to plain open")
+            Log.i(TAG, "registerOpenTransition=false, fallback to plain open")
             return false
         }
+        Log.i(TAG, "registerOpenTransition ok, seamless open pending")
+        SeamlessTransitionState.resetClosing()
         SeamlessTransitionState.beginOpen()
         lastDecorated = anchor
+        cleanupJob = scheduleAnchorCleanup(anchor)
         route(target, coverUrl, coverLarge, bundle)
         return true
+    }
+
+    /**
+     * 锚点过渡位图的确定性清理。实测系统 AnimationCallback 在部分固件上不送达，
+     * 若只依赖 onEnd(isOpen=false) 清理，位图会永久残留为卡片前景，盖住封面上的
+     * 播放量/时长角标。策略：视频页收起（markClosing / beginReturn）后延迟 800ms
+     * 清理——成对返回动画约 450ms，此时刻已在动画结束之后；清理仍以 onEnd 为准
+     * （回调正常时更精确），此处仅兜底。
+     */
+    private fun scheduleAnchorCleanup(anchor: View): Job? {
+        val scope = cleanupScope ?: return null
+        return scope.launch {
+            var waited = 0L
+            while (!SeamlessTransitionState.closing) {
+                delay(64)
+                waited += 64
+                if (waited > 60_000L) return@launch
+            }
+            delay(800)
+            if (lastDecorated === anchor) {
+                Log.i(TAG, "cleanup anchor decoration (fallback, callback missed)")
+                anchor.foreground = null
+                anchor.background = null
+                lastDecorated = null
+            }
+        }
     }
 
     /** 点击瞬间读取锚点屏幕矩形：系统取景计算失败时的兜底（纯内存读，无 IO）。 */
@@ -122,9 +191,7 @@ class SeamlessCardOpener(
         } else {
             coverUrlFor(coverUrl, BiliCoverSize.Small43)
         } ?: return null
-        coverMemo?.let { (memoUrl, memoCover) ->
-            if (memoUrl == resolved) return memoCover
-        }
+        memoGet(resolved)?.let { return it }
         val image = SingletonImageLoader.get(anchor.context)
             .memoryCache
             ?.get(MemoryCache.Key(resolved))
@@ -150,7 +217,7 @@ class SeamlessCardOpener(
             cornerRadius = radiusPx
             setAntiAlias(true)
         }
-        return SoftwareCover(drawable, safeBitmap).also { coverMemo = resolved to it }
+        return SoftwareCover(drawable, safeBitmap).also { memoPut(resolved, it) }
     }
 
     /**
@@ -164,16 +231,17 @@ class SeamlessCardOpener(
     ) : OplusViewSeamlessCompat.AnimationCallback() {
 
         override fun onProgress(progress: Float) {
-            Log.d(TAG, "progress=$progress")
+            Log.i(TAG, "progress=$progress")
         }
 
         override fun onStart(isOpen: Boolean) {
-            Log.d(TAG, "onAnimationStart isOpen=$isOpen")
+            // 诊断动画问题：确认系统回调是否送达（缺失 = 应用走 1.2s/1.6s 超时兜底）
+            Log.i(TAG, "onAnimationStart isOpen=$isOpen")
             if (isOpen) SeamlessTransitionState.beginOpen() else SeamlessTransitionState.beginReturn()
         }
 
         override fun onEnd(isOpen: Boolean) {
-            Log.d(TAG, "onAnimationEnd isOpen=$isOpen")
+            Log.i(TAG, "onAnimationEnd isOpen=$isOpen")
             if (isOpen) {
                 SeamlessTransitionState.endOpen()
                 // 打开已完成：补进 BUNDLE_BITMAP 不影响开画面面；若框架在返回开始时
@@ -195,6 +263,12 @@ class SeamlessCardOpener(
 
     private companion object {
         const val TAG = "OplusViewSeamless"
+
+        /**
+         * 软件封面 LRU 容量。4 条约 8MB ARGB_8888（960×540×4B），
+         * 覆盖"首页首屏几张卡来回点 + 连续开退同一张卡"的真实场景。
+         */
+        const val COVER_MEMO_CAPACITY = 4
     }
 }
 

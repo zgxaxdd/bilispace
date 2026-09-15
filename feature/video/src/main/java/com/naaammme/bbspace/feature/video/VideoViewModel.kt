@@ -30,6 +30,7 @@ import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import com.naaammme.bbspace.core.video.VideoActionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -520,6 +521,11 @@ class VideoViewModel @Inject constructor(
             markTripleResult(like = result.like, coin = result.coin, fav = result.fav)
             "三连成功"
         } catch (error: Exception) {
+            // 必须把降级结果赋值给 message：降级方法返回的是给用户看的提示文案
+            // （"已完成三连" / "点赞成功，投币失败"…）。此前写成裸调用表达式，
+            // catch 分支的类型被推导为 Unit 并装箱成 String("kotlin.Unit")，
+            // 于是降级成功也会弹 "kotlin.Unit"，而 tripleFallback 的文案被丢弃。
+            if (error is CancellationException) throw error
             tripleFallback(aid)
         }
         _msg.tryEmit(message)

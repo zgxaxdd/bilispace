@@ -16,9 +16,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 
 /**
  * 统一的媒体卡片容器：固定底色、按主题形状裁剪内容（封面圆角跟随卡片）。
@@ -49,7 +49,13 @@ fun BiliCardSurface(
             ),
             label = "cardPressScale"
         )
-        val pressModifier = clippedModifier.scale(pressScale)
+        // 缩放值在 graphicsLayer 块内延迟读取：按压动画的每一帧只更新图层属性，
+        // 不再按帧重组卡片 scope（Modifier.scale(pressScale) 会在组合期读值，
+        // 每个 feed/排行卡片的按压回弹都会按帧重组整张卡片）
+        val pressModifier = clippedModifier.graphicsLayer {
+            scaleX = pressScale
+            scaleY = pressScale
+        }
         if (onLongClick != null) {
             // 长按场景：点击/长按都由 combinedClickable 处理，Surface 仅作容器
             Surface(

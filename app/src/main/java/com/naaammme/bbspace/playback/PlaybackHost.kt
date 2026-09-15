@@ -150,13 +150,14 @@ fun PlaybackHost(
         val curTarget = target
         // 无缝返回动画进行中暂不出现迷你播放器：迷你 PlayerView 此时会从详情
         // PlayerView 手里抢绑播放器，缩回中的画面立刻变黑；等动画结束再淡入。
-        // 系统回调丢失时 1.6s 兜底放行。
+        // 成对返回动画约 450ms，系统回调缺失时以固定 900ms 兜底放行（原 1.6s 会让
+        // 迷你播放器每次都晚 1 秒+出现）；播放器关停仍由 RETURN deadline 单独守卫。
         val returnAnimRunning = SeamlessTransitionState.returnRunning
         var miniHold by remember { mutableStateOf(false) }
         LaunchedEffect(mode == PlaybackHostMode.Mini, returnAnimRunning) {
             if (mode == PlaybackHostMode.Mini && returnAnimRunning) {
                 miniHold = true
-                delay(1_600)
+                delay(900)
                 miniHold = false
             } else {
                 miniHold = false

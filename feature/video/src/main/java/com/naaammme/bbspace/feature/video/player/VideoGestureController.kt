@@ -310,7 +310,7 @@ fun VideoGestureFeedback(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(MaterialTheme.shapes.large)
-                    .background(Color.Black.copy(alpha = 0.7f))
+                    .background(Color.Black.copy(alpha = 0.78f))
                     .padding(16.dp)
             ) {
                 Row(
@@ -350,7 +350,7 @@ fun VideoGestureFeedback(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(MaterialTheme.shapes.small)
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .background(Color.Black.copy(alpha = 0.75f))
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
         }
@@ -372,7 +372,7 @@ fun VideoGestureFeedback(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.4f))
+                            .background(Color.Black.copy(alpha = 0.55f))
                             .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -396,7 +396,7 @@ fun VideoGestureFeedback(
                     .align(Alignment.TopCenter)
                     .padding(top = SpeedBadgeTopPadding)
                     .clip(MaterialTheme.shapes.small)
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .background(Color.Black.copy(alpha = 0.75f))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }

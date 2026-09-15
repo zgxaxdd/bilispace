@@ -52,11 +52,13 @@ import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.SkeletonBlock
 import com.naaammme.bbspace.core.designsystem.component.rememberAdaptiveGridColumnCount
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
+import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
+import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
@@ -66,6 +68,7 @@ import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.ThreePointItem
 import com.naaammme.bbspace.core.model.ThreePointReason
 import com.naaammme.bbspace.core.model.VideoTarget
+import com.naaammme.bbspace.feature.home.LOAD_MORE_THRESHOLD
 import com.naaammme.bbspace.feature.home.rememberHomeFlingBehavior
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -122,18 +125,20 @@ fun HomeVideoPage(
             }
         }
     }
-    // 返回动画末端遮挡渐隐参数：顶栏（含状态栏）遮挡区占屏比；
-    // 底部悬浮栏高度在 app 层不可得，bottom 传 0（不做底部渐隐），口径见接入文档
+    // 返回动画末端遮挡渐隐参数：顶栏（含状态栏）遮挡区占屏比 + 底部悬浮导航栏遮挡比。
+    // 底部比例由 App 层实测后经 LocalBottomNavOcclusionRatio 下发（见 ListCoverRatio.kt）；
+    // 底部被 Tab 栏/FAB 盖住的卡片，返回动画末端会做 alpha 渐隐，不再被"切一刀"。
     val density = LocalDensity.current
     val screenHpx = LocalWindowInfo.current.containerSize.height
-    val listCover = remember(topContentPadding, screenHpx) {
-        if (screenHpx <= 0) {
-            null
-        } else {
-            val topRatio = with(density) { topContentPadding.toPx() } / screenHpx
-            topRatio.coerceIn(0f, 1f) to 0f
-        }
+    val bottomNavRatio = LocalBottomNavOcclusionRatio.current
+    val listCover = remember(topContentPadding, screenHpx, density, bottomNavRatio) {
+        listCoverRatio(
+            topOcclusionPx = with(density) { topContentPadding.roundToPx() },
+            screenHeightPx = screenHpx,
+            bottomOcclusionRatio = bottomNavRatio
+        )?.let { it.top to it.bottom }
     }
+
     AdaptiveMediaGrid(
         items = items,
         isRefreshing = isRefreshing,
@@ -144,6 +149,10 @@ fun HomeVideoPage(
         state = gridState,
         columns = if (singleColumn) 1 else rememberAdaptiveGridColumnCount(),
         flingBehavior = homeFling,
+        // 尾部提前预取：距末尾 6 条就取下一页，滑到底不再等转圈
+        loadMoreThreshold = LOAD_MORE_THRESHOLD,
+        // 首屏不足一屏时自动补一页（额度上限在 HomeViewModel）
+        autoFillWhenNotScrollable = true,
         contentPadding = PaddingValues(
             start = 4.dp,
             top = topContentPadding,
@@ -257,7 +266,10 @@ private fun FeedCard(
         containerColor = containerColor,
         modifier = Modifier.fillMaxWidth()
     ) {
-        // 无缝动画锚点：与封面同边界的零绘制透明 View，起飞矩形即封面自身
+        // 无缝动画锚点：与封面同边界的零绘制透明 View，起飞矩形即封面自身。
+        // 必须放在封面内容**之前**（z 序在下）：锚点的过渡位图画在自身
+        // background+foreground 上，若盖在内容上方会遮住封面上的时长/播放量角标；
+        // 框架取的是锚点自身的绘制内容，与它在兄弟节点中的层级无关。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -265,6 +277,9 @@ private fun FeedCard(
                 // 封面节点上报窗口坐标：幽灵从封面本身起飞，与所见像素连续
                 .coverExpandTrack(item.target.takeIf { item.liveRoute == null })
         ) {
+            if (canSeamless) {
+                SeamlessAnchor(anchorState, Modifier.matchParentSize())
+            }
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
@@ -298,9 +313,6 @@ private fun FeedCard(
                         )
                     }
                 }
-            }
-            if (canSeamless) {
-                SeamlessAnchor(anchorState, Modifier.matchParentSize())
             }
         }
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {

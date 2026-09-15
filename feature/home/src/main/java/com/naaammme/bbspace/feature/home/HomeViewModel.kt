@@ -20,6 +20,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
+/**
+ * 列表尾部剩余条目数阈值：进入该范围就提前取下一页。
+ * 此前只在 `gridState.canScrollForward == false`（即已滑到底）时才请求，
+ * 用户每次都要在底部看转圈；按条目数提前取页后，滑到底时新内容已就位。
+ */
+const val LOAD_MORE_THRESHOLD = 6
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val feedRepo: FeedRepository,
@@ -30,6 +37,18 @@ class HomeViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "HomeViewModel"
+
+        /**
+         * "列表还没填满一屏就自动补一页"的次数上限。
+         * 首屏只有一屏多一点内容时用户必须手动划到底才会触发下一页，观感是
+         * "每次就刷出来这几个"；这里在首屏加载/刷新后自动补一页。
+         * 上限同时兜住异常服务端：若持续返回重复卡片，去重后条目不增长
+         * （stagnantLoads 累计），补拉随即停止，不会请求风暴。
+         */
+        private const val AUTO_FILL_MAX = 2
+
+        /** 连续多少次取页「没有新增条目」后停止自动补拉。 */
+        private const val MAX_STAGNANT_LOADS = 2
     }
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -50,12 +69,31 @@ class HomeViewModel @Inject constructor(
 
     private var flush = 0
 
+    /** 本轮列表（首屏/刷新后）已执行的自动补页次数。 */
+    private var autoFillCount = 0
+
+    /**
+     * 连续「取页成功但去重后条目没有增长」的次数。服务端异常时（重复下发同一批卡片）
+     * 它会连续累加，自动补拉随之停止——自动补页绝不能变成无条件循环请求。
+     */
+    private var stagnantLoads = 0
+
+    /** 列表还没填满一屏时的自动补页是否还有额度。 */
+    val canAutoFillMore: Boolean
+        get() = autoFillCount < AUTO_FILL_MAX && stagnantLoads < MAX_STAGNANT_LOADS
+
     private fun FeedItem.actionKey(): String {
         return "$goto|$param|$idx"
     }
 
     fun refreshPageAction() {
         pageActionTracker.refresh()
+    }
+
+    /** 新一轮列表开始：自动补页额度与停滞计数复位。 */
+    private fun resetPagingGuards() {
+        autoFillCount = 0
+        stagnantLoads = 0
     }
 
     init {
@@ -79,6 +117,7 @@ class HomeViewModel @Inject constructor(
                     )
                 }
                 flush = 0
+                resetPagingGuards()
                 val feed = feedRepo.fetchFeed(idx = 0L, pull = true, flush = flush)
                 _uiState.update { it.copy(items = feed.items) }
                 flush++
@@ -93,8 +132,21 @@ class HomeViewModel @Inject constructor(
                 _uiState.update { it.copy(errorMessage = e.message) }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
+                // 首屏内容不足一屏时先补一页，避免"打开就只有几张卡"的观感
+                autoFillIfNeeded()
             }
         }
+    }
+
+    /**
+     * 首屏/刷新后的自动补页：列表长度还不到 [LOAD_MORE_THRESHOLD] 条时再取一页
+     * （最多 [AUTO_FILL_MAX] 次）。手动滑到底仍由列表的提前预取阈值负责。
+     */
+    private fun autoFillIfNeeded() {
+        if (!canAutoFillMore) return
+        if (_uiState.value.items.size > LOAD_MORE_THRESHOLD) return
+        autoFillCount++
+        loadMore()
     }
 
     fun dismissInterest() {
@@ -141,6 +193,7 @@ class HomeViewModel @Inject constructor(
                 }
                 val currentTopIdx = _uiState.value.items.firstOrNull()?.idx ?: 0L
                 flush = 0
+                resetPagingGuards()
                 val feed = feedRepo.fetchFeed(idx = currentTopIdx, pull = true, flush = flush)
                 if (feed.items.isNotEmpty()) {
                     val merged = withContext(Dispatchers.Default) {
@@ -156,6 +209,8 @@ class HomeViewModel @Inject constructor(
                 _uiState.update { it.copy(errorMessage = e.message) }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
+                // 刷新结果太少时同样补页（服务端忽略 ps 或返回条数偏少）
+                autoFillIfNeeded()
             }
         }
     }
@@ -169,16 +224,26 @@ class HomeViewModel @Inject constructor(
                 val lastIdx = _uiState.value.items.lastOrNull()?.idx ?: 0L
                 val feed = feedRepo.fetchFeed(idx = lastIdx, pull = false, flush = flush)
                 if (feed.items.isNotEmpty()) {
+                    val before = _uiState.value.items
                     val merged = withContext(Dispatchers.Default) {
                         // 追加时同样去重，保留已有条目在前
-                        (_uiState.value.items + feed.items).distinctBy { it.actionKey() }
+                        (before + feed.items).distinctBy { it.actionKey() }
                     }
                     _uiState.update { it.copy(items = merged) }
                     flush++
+                    // 去重后条目没增长 → 服务端在下发重复卡片，累计停滞次数
+                    if (merged.size > before.size) {
+                        stagnantLoads = 0
+                    } else {
+                        stagnantLoads++
+                    }
+                } else {
+                    stagnantLoads++
                 }
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载更多失败" }
                 _uiState.update { it.copy(errorMessage = e.message) }
+                stagnantLoads++
             } finally {
                 _uiState.update { it.copy(isLoadingMore = false) }
             }

@@ -4,6 +4,7 @@ import android.graphics.Color as AndroidColor
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -147,9 +148,18 @@ fun BiliTheme(
                 MaterialTheme(
                     colorScheme = colorScheme,
                     typography = typography,
-                    shapes = shapes,
-                    content = content
-                )
+                    shapes = shapes
+                ) {
+                    // M3 的 LocalContentColor 默认值是 Color.Black；没有 Scaffold/Surface
+                    // 提供内容的宿主（如 VideoDetailActivity）里，未显式指定颜色的文字
+                    // 会渲染成黑字——深色主题下压深底不可见。在主题根部统一提供
+                    // onBackground，保证所有页面默认文字颜色随主题走。
+                    CompositionLocalProvider(
+                        LocalContentColor provides colorScheme.onBackground
+                    ) {
+                        content()
+                    }
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -112,6 +113,17 @@ private enum class PlayerDialog {
     Audio,
     Speed
 }
+
+// —— 播放器浮层视觉规范 ——
+// 浮层（顶栏/控制条/胶囊/手势气泡）直接叠在视频画面上，与主题色解耦：
+// 统一「黑遮罩 + 白前景」语言，遮罩透明度按可读性校准，保证亮画面上白字仍清晰，
+// 深/浅色主题下表现一致。改动时请维持整套 token 同步，勿在单处硬编码。
+private val PlayerOverlayScrimTopEnd = Color.Black.copy(alpha = 0.66f)
+private val PlayerOverlayScrimBottomEnd = Color.Black.copy(alpha = 0.76f)
+private val PlayerPillScrim = Color.Black.copy(alpha = 0.30f)
+private val PlayerPillBorder = Color.White.copy(alpha = 0.16f)
+private val PlayerPillTextDim = Color.White.copy(alpha = 0.68f)
+private val PlayerSecondaryText = Color.White.copy(alpha = 0.9f)
 
 internal val LocalVideoResizeModeState = compositionLocalOf<MutableState<PlayerVideoResizeMode>> {
     error("Missing player video resize mode state")
@@ -300,12 +312,12 @@ internal fun VideoPlayerPane(
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    Color.Black.copy(alpha = 0.54f),
+                                    PlayerOverlayScrimTopEnd,
                                     Color.Transparent
                                 )
                             )
                         )
-                        .padding(horizontal = 10.dp, vertical = 1.dp),
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -344,7 +356,7 @@ internal fun VideoPlayerPane(
                                     Text(
                                         text = it,
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White.copy(alpha = 0.8f),
+                                        color = PlayerSecondaryText,
                                         maxLines = 1
                                     )
                                 }
@@ -357,27 +369,23 @@ internal fun VideoPlayerPane(
                     ) {
                         // 全屏捏合放大后的快捷还原入口
                         if (isFull && zoomState.isZoomed) {
-                            Text(
+                            PlayerPillChip(
                                 text = "还原",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color.White,
-                                modifier = Modifier
-                                    .clickable { zoomState.reset() }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                showDot = false,
+                                dimmed = false,
+                                onClick = { zoomState.reset() }
                             )
                         }
-                        Text(
+                        PlayerPillChip(
                             text = if (danmakuOn) "弹幕" else "弹幕关",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White,
-                            modifier = Modifier
-                                .clickable {
-                                    showCtrl = true
-                                    viewModel.updateDanmaku(
-                                        settingsState.danmaku.copy(enabled = !settingsState.danmaku.enabled)
-                                    )
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                            showDot = danmakuOn,
+                            dimmed = !danmakuOn,
+                            onClick = {
+                                showCtrl = true
+                                viewModel.updateDanmaku(
+                                    settingsState.danmaku.copy(enabled = !settingsState.danmaku.enabled)
+                                )
+                            }
                         )
                         IconButton(
                             onClick = {
@@ -675,7 +683,8 @@ private fun VideoPlayerOverlay(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(72.dp)
-                    .background(color = Color.Black.copy(alpha = 0.45f), shape = CircleShape)
+                    .background(color = Color.Black.copy(alpha = 0.55f), shape = CircleShape)
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
                     .clickable { viewModel.togglePlayPause() },
                 contentAlignment = Alignment.Center
             ) {
@@ -832,8 +841,8 @@ private fun PlayerCtrlBar(
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = 0.18f),
-                        Color.Black.copy(alpha = 0.62f)
+                        Color.Black.copy(alpha = 0.26f),
+                        PlayerOverlayScrimBottomEnd
                     )
                 )
             )
@@ -948,6 +957,7 @@ private fun CtrlBtn(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 停用态前景用 0.72 白而非 0.5：停用也要在亮画面上保持可读
     val bg = if (on) {
         Color.White.copy(alpha = 0.16f)
     } else {
@@ -956,7 +966,7 @@ private fun CtrlBtn(
     val fg = if (on) {
         Color.White
     } else {
-        Color.White.copy(alpha = 0.5f)
+        Color.White.copy(alpha = 0.72f)
     }
 
     Box(
@@ -975,6 +985,50 @@ private fun CtrlBtn(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+/**
+ * 播放器顶栏悬浮胶囊：统一「弹幕开关 / 缩放还原」等轻操作的视觉语言。
+ * 半透明黑底 + 白字（[dimmed] 时降低字重）+ 细描边；[showDot] 用小白点表达开启态。
+ */
+@Composable
+private fun PlayerPillChip(
+    text: String,
+    showDot: Boolean,
+    dimmed: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pillShape = RoundedCornerShape(percent = 50)
+    Box(
+        modifier = modifier
+            .clip(pillShape)
+            .background(PlayerPillScrim)
+            .border(1.dp, PlayerPillBorder, pillShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (showDot) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (dimmed) PlayerPillTextDim else Color.White,
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -1137,7 +1191,7 @@ private fun SponsorBlockOverlay(
             Row(
                 modifier = Modifier
                     .background(
-                        color = Color.Black.copy(alpha = 0.65f),
+                        color = Color.Black.copy(alpha = 0.72f),
                         shape = RoundedCornerShape(20.dp)
                     ),
                 verticalAlignment = Alignment.CenterVertically
@@ -1153,7 +1207,7 @@ private fun SponsorBlockOverlay(
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "关闭提示",
-                    tint = Color.White.copy(alpha = 0.8f),
+                    tint = PlayerSecondaryText,
                     modifier = Modifier
                         .size(26.dp)
                         .clickable(onClick = onDismiss)
@@ -1168,7 +1222,7 @@ private fun SponsorBlockOverlay(
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier
                     .background(
-                        color = Color.Black.copy(alpha = 0.65f),
+                        color = Color.Black.copy(alpha = 0.72f),
                         shape = RoundedCornerShape(20.dp)
                     )
                     .clickable(onClick = onJumpPoi)

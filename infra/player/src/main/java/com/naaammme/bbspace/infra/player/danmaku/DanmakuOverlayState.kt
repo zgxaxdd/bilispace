@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.infra.player.danmaku
 
+import android.util.Log
 import android.view.View
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.DanmakuItem
@@ -132,6 +133,11 @@ class DanmakuOverlayState internal constructor(
         lastPlayState = nextState
 
         if (!enabled || !hasSource) {
+            Log.i(
+                TAG,
+                "syncPlayback -> hidden (enabled=$enabled hasSource=$hasSource) " +
+                    "prepared=${danmakuCtrl.isPrepared()}"
+            )
             danmakuView.visibility = View.INVISIBLE
             session.hide()
             session.pause()
@@ -139,6 +145,11 @@ class DanmakuOverlayState internal constructor(
             return
         }
 
+        Log.i(
+            TAG,
+            "syncPlayback -> visible isPlaying=$isPlaying prepared=${danmakuCtrl.isPrepared()} " +
+                "paused=${danmakuCtrl.isPaused()} shown=${danmakuView.isShown}"
+        )
         danmakuView.visibility = View.VISIBLE
         session.show()
         if (isPlaying) {
@@ -160,12 +171,14 @@ class DanmakuOverlayState internal constructor(
             pendingSeek = true
             return
         }
+        Log.i(TAG, "syncPosition -> seekTo=$positionMs prepared=${danmakuCtrl.isPrepared()}")
         session.seekTo(positionMs)
         pendingSeek = false
     }
 
     fun release() {
         if (!released.compareAndSet(false, true)) return
+        Log.i(TAG, "release prepared=${danmakuCtrl.isPrepared()}")
         appliedWindowId = null
         session.setPlayerTimeProvider(null)
         session.pause()
@@ -195,6 +208,16 @@ class DanmakuOverlayState internal constructor(
         danmaku.time = danmaku.time.coerceAtLeast(timeProvider.getCurrentTimeMs()) + LIVE_DANMAKU_LEAD_MS
         danmaku.priority = LIVE_DANMAKU_PRIORITY
         danmakuCtrl.addDanmaku(danmaku)
+    }
+
+    /** 诊断心跳用：一次性汇总弹幕管线状态（无弹幕问题定位）。 */
+    internal fun diagnosticState(): String {
+        return "prepared=${danmakuCtrl.isPrepared()} paused=${danmakuCtrl.isPaused()} " +
+            "viewVisible=${danmakuView.visibility == View.VISIBLE} viewShown=${danmakuView.isShown} " +
+            "attached=${danmakuView.isAttachedToWindow} " +
+            "viewWxH=${danmakuView.width}x${danmakuView.height} " +
+            "providerTimeMs=${timeProvider.getCurrentTimeMs()} " +
+            "windowId=$appliedWindowId pendingSeek=$pendingSeek released=${released.get()}"
     }
 
     private fun syncSource(sourceKey: String?) {
@@ -237,6 +260,13 @@ class DanmakuOverlayState internal constructor(
         if (appliedWindowId == targetWindow.id && appliedWindowSignature == nextSignature) {
             return
         }
+        Log.i(
+            TAG,
+            "syncWindow -> replaceSegments windowId=${targetWindow.id} " +
+                "items=${targetWindow.items.size} positionMs=${
+                    timeProvider.getCurrentTimeMs()
+                } prepared=${danmakuCtrl.isPrepared()}"
+        )
         session.replaceSegments(
             listOf(DanmakuSegmentData(targetWindow.id, targetWindow.items))
         )
@@ -274,3 +304,6 @@ private data class DanmakuPlayState(
 
 private const val LIVE_DANMAKU_LEAD_MS = 1_200L
 private const val LIVE_DANMAKU_PRIORITY: Byte = 1
+
+// 弹幕链路诊断日志（release 下保留，供 adb logcat -s BbDanmaku 定位"无弹幕/黑屏"）
+private const val TAG = "BbDanmaku"

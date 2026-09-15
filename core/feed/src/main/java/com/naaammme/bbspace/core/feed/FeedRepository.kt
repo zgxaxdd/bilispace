@@ -45,6 +45,14 @@ class FeedRepository @Inject constructor(
 
     companion object {
         private const val FEED_ENDPOINT = "/x/v2/feed/index"
+
+        /**
+         * 单次请求期望的卡片数（服务端参数 `ps`，官方 feed/index 支持，留空默认约 10~12）。
+         * 取 20：首屏一次就能拿到约两屏内容，翻页次数与"刷新太频繁"的观感明显下降；
+         * 服务端忽略该参数时行为与从前一致（返回默认条数），只是首屏偏少——
+         * 由 HomeViewModel 的自动补拉兜底。
+         */
+        const val FEED_PAGE_SIZE = 20
     }
 
     private val _toastFlow = MutableSharedFlow<FeedToast>(extraBufferCapacity = 1)
@@ -147,6 +155,7 @@ class FeedRepository @Inject constructor(
             put("open_event", if (isColdStart) "cold" else "hot")
             put("player_extra_content", "{\"short_edge\":\"1080\",\"long_edge\":\"1920\"}")
             put("player_net", "1")
+            put("ps", FEED_PAGE_SIZE.toString())
             put("pull", pull.toString())
             put("qn", "80")
             put("qn_policy", "0")

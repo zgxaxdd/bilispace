@@ -85,6 +85,12 @@ class VodDanmakuRepository @Inject constructor(
         Logger.d(TAG) {
             "Loaded danmaku segment aid=${request.ids.aid}, cid=${request.ids.cid}, segment=${request.segmentIndex}, elems=${elems.size}"
         }
+        // release 下也可见的诊断日志（Logger 在 release 是关闭的）
+        android.util.Log.i(
+            "BbDanmaku",
+            "fetchSegment aid=${request.ids.aid} cid=${request.ids.cid} " +
+                "segment=${request.segmentIndex} elems=${elems.size}"
+        )
 
         return VodDanmakuSegment(
             request = request,

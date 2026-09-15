@@ -10,23 +10,27 @@ enum class PlayerBufferProfile(
     val rebufferMs: Int,
     val backBufferMs: Int
 ) {
+    // 起播速度由 playBufferMs 决定（起播只等这么久的媒体数据，保持小值）；
+    // maxBufferMs 是播放期间持续预读的上限，直接决定网络抖动时的后备缓冲深度——
+    // 三档整体上调（15→20 / 20→25 / 30→40s），"视频缓冲慢/看着看着卡一下"的
+    // 主要缓解点在这里，起播时间不受影响。
     FastStart(
-        minBufferMs = 2_000,
-        maxBufferMs = 15_000,
+        minBufferMs = 5_000,
+        maxBufferMs = 20_000,
         playBufferMs = 250,
-        rebufferMs = 500,
+        rebufferMs = 1_000,
         backBufferMs = 2_000
     ),
     Balanced(
         minBufferMs = 5_000,
-        maxBufferMs = 20_000,
+        maxBufferMs = 25_000,
         playBufferMs = 500,
         rebufferMs = 1_000,
         backBufferMs = 5_000
     ),
     Stable(
         minBufferMs = 10_000,
-        maxBufferMs = 30_000,
+        maxBufferMs = 40_000,
         playBufferMs = 750,
         rebufferMs = 1_500,
         backBufferMs = 5_000

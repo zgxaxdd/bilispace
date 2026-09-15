@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -51,6 +53,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.naaammme.bbspace.core.designsystem.component.roundScreenSafePadding
+import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
@@ -230,14 +233,21 @@ fun AppNavHost(
         }
     // 共享无缝卡片执行器：任意页面的视频卡片经 LocalSeamlessCardOpener 接入；
     // 开关关闭时 tryOpen 直接返回 false，卡片侧自动退回普通打开。
-    val seamlessCardOpener = remember {
+    // cleanupScope 驱动锚点过渡位图的兜底清理（系统 onEnd 回调缺失时防残留）。
+    val seamlessCleanupScope = rememberCoroutineScope()
+    val seamlessCardOpener = remember(seamlessCleanupScope) {
         SeamlessCardOpener(
             route = { target, coverUrl, coverLarge, bundle ->
                 openVideoSeamless(target, coverUrl ?: "", coverLarge, bundle)
             },
+            cleanupScope = seamlessCleanupScope,
             enabled = { seamlessEnabledState.value }
         )
     }
+    // 底部悬浮导航栏遮挡屏幕的比例：由 MainTabsScaffold 实测高度写入，再经
+    // LocalBottomNavOcclusionRatio 下发给各卡片页，供无缝动画 BUNDLE_LIST_COVER 使用
+    // （底部被 Tab 栏/FAB 盖住的区域，返回动画末端会做 alpha 渐隐）。
+    var bottomNavOcclusionRatio by remember { mutableFloatStateOf(0f) }
     val openLive: (LiveRoute) -> Unit = { route ->
         liveViewModel.openRoute(route)
         playbackHostViewModel.openLive(route)
@@ -323,7 +333,10 @@ fun AppNavHost(
         onAppLinkConsumed()
     }
 
-    CompositionLocalProvider(LocalSeamlessCardOpener provides seamlessCardOpener) {
+    CompositionLocalProvider(
+        LocalSeamlessCardOpener provides seamlessCardOpener,
+        LocalBottomNavOcclusionRatio provides bottomNavOcclusionRatio
+    ) {
         Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             modifier = Modifier
@@ -340,6 +353,7 @@ fun AppNavHost(
                 MainTabsScaffold(
                     currentTab = currentTab,
                     onTabChange = { currentTab = it },
+                    onBottomNavOcclusionChanged = { bottomNavOcclusionRatio = it },
                     onNavigateToSearch = { rootNavController.navigateToSearch() },
                     onNavigateToSettings = { rootNavController.navigate(SETTINGS_ROUTE) },
                     onNavigateToAccount = { rootNavController.navigate(ACCOUNT_ROUTE) },
@@ -528,6 +542,7 @@ fun AppNavHost(
 private fun MainTabsScaffold(
     currentTab: TopLevelRoute,
     onTabChange: (TopLevelRoute) -> Unit,
+    onBottomNavOcclusionChanged: (Float) -> Unit = {},
     onNavigateToSearch: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToAccount: () -> Unit,
@@ -609,7 +624,8 @@ private fun MainTabsScaffold(
             currentTab = currentTab,
             visibilityController = navVisibilityController,
             onTabChange = onTabChange,
-            onNavigateToSearch = onNavigateToSearch
+            onNavigateToSearch = onNavigateToSearch,
+            onOcclusionChanged = onBottomNavOcclusionChanged
         )
     }
 }
@@ -620,7 +636,8 @@ private fun TopLevelFloatingNavigation(
     currentTab: TopLevelRoute,
     visibilityController: TopLevelNavVisibilityController,
     onTabChange: (TopLevelRoute) -> Unit,
-    onNavigateToSearch: () -> Unit
+    onNavigateToSearch: () -> Unit,
+    onOcclusionChanged: (Float) -> Unit = {}
 ) {
     val toolbarShape = MaterialTheme.shapes.extraLarge
     val anim = LocalAnimations.current
@@ -635,7 +652,20 @@ private fun TopLevelFloatingNavigation(
         .onSizeChanged { size ->
             hiddenDistancePx = size.height.toFloat()
         }
+        // 实测悬浮导航栏遮挡屏幕的比例，供无缝动画 BUNDLE_LIST_COVER 使用。
+        // 遮挡高度就是该悬浮栏自身高度（隐藏动画只是 graphicsLayer 平移，布局位置不变），
+        // 因此这里读到的是常驻遮挡区，正合返回动画末端做渐隐所需。
+        .onGloballyPositioned { coords ->
+            val windowHeight = coords.parentLayoutCoordinates
+                ?.size?.height ?: return@onGloballyPositioned
+            if (windowHeight <= 0) return@onGloballyPositioned
+            onOcclusionChanged(
+                (coords.size.height.toFloat() / windowHeight).coerceIn(0f, 1f)
+            )
+        }
         .graphicsLayer {
+            // 动画值在图层块内延迟读取：隐藏/显示过渡每帧只更新图层属性，
+            // 不按帧重组调用方（此前组合期读值 → 每个滚动 tick 都重组一次）
             translationY = animatedOffsetPx
         }
     val tabs: @Composable () -> Unit = {

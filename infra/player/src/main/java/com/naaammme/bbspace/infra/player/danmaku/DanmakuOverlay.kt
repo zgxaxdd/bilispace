@@ -13,7 +13,7 @@ import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.DanmakuSessionState
 import master.flame.danmaku.api.SegmentDanmakuSession
 import master.flame.danmaku.controller.IDanmakuView
-import master.flame.danmaku.ui.widget.DanmakuSurfaceView
+import master.flame.danmaku.ui.widget.DanmakuTextureView
 
 enum class DanmakuRenderMode {
     Segmented,
@@ -31,11 +31,24 @@ fun rememberDanmakuOverlayState(
     val context = LocalContext.current
     return remember(context) {
         // 绘制缓存 内存换cpu占用
-        val danmakuView = DanmakuSurfaceView(context).apply {
-            enableDanmakuDrawingCache(true)
+        // 必须用 TextureView 而非 SurfaceView 渲染弹幕：
+        // SurfaceView 是独立硬件合成层，开启弹幕时把 DanmakuSurfaceView 叠到
+        // TextureView 视频画面上会与窗口合成冲突（surface 区域被挖洞/盖住），
+        // 视频画面整体变黑但解码与声音正常；TextureView 画进窗口本身，
+        // 与视频层级、Compose 圆角裁剪、ColorOS 无缝动画的 View 内容快照均兼容。
+        val danmakuView = DanmakuTextureView(context).apply {
+            // 必须关闭 drawing cache：CacheManagingDrawTask 的 ready() 由缓存线程
+            // 首次 BUILD_CACHES 后才回调，实测在 Compose AndroidView 宿主里该回调
+            // 链路可能永不完成（心跳 prepared=false 恒定），绘制循环因此无法启动；
+            // 普通 DrawTask.prepare() 同步回调 ready()，PREPARE 一过门立即起播。
+            enableDanmakuDrawingCache(false)
             showFPS(false)
             setDrawingThreadType(IDanmakuView.THREAD_TYPE_LOW_PRIORITY)
-            setZOrderMediaOverlay(true)
+            // 库默认 setLayerType(HARDWARE)+willNotDraw(true)：与视频层的 TextureView
+            // （无此配置、surface 正常创建）不同，实测会导致 onSurfaceTextureAvailable
+            // 不回调、DrawHandler 的 PREPARE 门卡死。对齐普通 TextureView 配置。
+            setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+            setWillNotDraw(false)
             isClickable = false
             isFocusable = false
             isFocusableInTouchMode = false
@@ -79,15 +92,9 @@ fun DanmakuLayer(
     renderMode: DanmakuRenderMode = DanmakuRenderMode.Segmented,
     manageLifecycle: Boolean = true
 ) {
-    if (manageLifecycle) {
-        DisposableEffect(overlayState) {
-            overlayState.prepare()
-            onDispose {
-                overlayState.release()
-            }
-        }
-    }
-
+    // 先挂载、后 prepare：DrawHandler 的 PREPARE 完成回调会立即 start 播放，
+    // 若彼时 view 尚未挂载（surface 未就绪）绘制循环可能起不来。Effects 按声明
+    // 顺序执行，挂载效果声明在前，保证 prepare 时 view 已在窗口中。
     DisposableEffect(playerView, overlayState) {
         val view = overlayState.danmakuView
         val host = playerView.overlayFrameLayout ?: playerView
@@ -100,6 +107,11 @@ fun DanmakuLayer(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+            )
+            android.util.Log.i(
+                "BbDanmaku",
+                "attach danmaku view to ${host.javaClass.simpleName} " +
+                    "hostAttached=${host.isAttachedToWindow} size=${host.width}x${host.height}"
             )
         } else {
             val lp = view.layoutParams as? FrameLayout.LayoutParams
@@ -116,6 +128,23 @@ fun DanmakuLayer(
         }
         onDispose {
             (view.parent as? ViewGroup)?.removeView(view)
+        }
+    }
+
+    if (manageLifecycle) {
+        DisposableEffect(overlayState) {
+            overlayState.prepare()
+            onDispose {
+                overlayState.release()
+            }
+        }
+    }
+
+    // 诊断心跳：低频上报管线状态（无弹幕问题定位用，2s 一条）
+    LaunchedEffect(overlayState) {
+        while (true) {
+            kotlinx.coroutines.delay(2_000)
+            android.util.Log.i("BbDanmaku", "heartbeat ${overlayState.diagnosticState()}")
         }
     }
 

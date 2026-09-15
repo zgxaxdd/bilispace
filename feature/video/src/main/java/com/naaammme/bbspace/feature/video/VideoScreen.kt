@@ -143,9 +143,16 @@ fun VideoScreen(
     }
     LaunchedEffect(seamlessIdsKey) {
         if (coverBackdropUrl == null) return@LaunchedEffect
-        if (!SeamlessTransitionState.openRunning) return@LaunchedEffect
-        // 截止时刻以 beginOpen 起算：系统 onEnd 回调丢失时也不多盖一秒
-        SeamlessTransitionState.awaitOpenEnd()
+        if (!SeamlessTransitionState.openRunning) {
+            detailMaskOn = false
+            return@LaunchedEffect
+        }
+        // 遮罩放行条件：打开动画播完（近似 600ms，系统回调缺失）+ 播放器出首帧
+        // （与播放器区域封面垫底图同步淡出）。deadline 1.2s 仍为上限兜底。
+        SeamlessTransitionState.awaitOpenAnimDone()
+        while (!videoState.hasRenderedFirstFrame && SeamlessTransitionState.openRunning) {
+            delay(32)
+        }
         detailMaskOn = false
     }
     val isPortraitVideo = remember(videoState.currentStream) {

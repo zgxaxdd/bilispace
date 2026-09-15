@@ -174,7 +174,7 @@ internal fun VideoPlaybackSidebar(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(Color.Black.copy(alpha = 0.35f))
+                    .background(Color.Black.copy(alpha = 0.5f))
                     .clickable(onClick = onDismiss)
             )
             Surface(

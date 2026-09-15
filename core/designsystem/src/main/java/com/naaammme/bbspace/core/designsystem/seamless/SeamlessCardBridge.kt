@@ -44,9 +44,10 @@ fun rememberSeamlessAnchorState(): SeamlessAnchorState = remember { SeamlessAnch
  * [OplusViewSeamlessCompat.registerOpenTransition]，并以返回的 Bundle 调用
  * `startActivity(intent, bundle)`（不支持时走普通 startActivity 分支）。
  *
- * 注意：锚点会给每个卡片增加一个真实 View 节点，仅在打开目标为跨 Activity 跳转、
- * 且确认启用无缝动画的卡片上使用；当前 BBSpace 视频详情是 Compose 覆盖层，
- * 激活条件与接线位置见 docs/2026-09-06-BBSpace-OPPO无缝动画接入方案.md。
+ * 注意：锚点会给每个卡片增加一个真实 View 节点，仅在「打开目标为跨 Activity 跳转」的
+ * 卡片上使用（`canSeamless` 门禁把不支持无缝的设备挡在组合期之外）。
+ * 视频详情自 ColorOS 无缝路径起是独立 Activity（`VideoDetailActivity`），
+ * 覆盖层 Path 仅在设备不支持无缝动画时启用（详见 AppNavHost 的路由分支）。
  */
 @Composable
 fun SeamlessAnchor(state: SeamlessAnchorState, modifier: Modifier = Modifier) {

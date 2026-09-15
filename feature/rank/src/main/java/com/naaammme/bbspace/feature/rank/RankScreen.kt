@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,10 +37,12 @@ import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
+import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
+import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -65,6 +69,17 @@ fun RankScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val gridState = rememberLazyStaggeredGridState()
+    // 无缝返回动画的遮挡渐隐比例（顶部悬浮顶栏 + 底部悬浮导航栏），与推荐页同口径
+    val density = LocalDensity.current
+    val screenHpx = LocalWindowInfo.current.containerSize.height
+    val bottomNavRatio = LocalBottomNavOcclusionRatio.current
+    val listCover = remember(topContentPadding, screenHpx, density, bottomNavRatio) {
+        listCoverRatio(
+            topOcclusionPx = with(density) { topContentPadding.roundToPx() },
+            screenHeightPx = screenHpx,
+            bottomOcclusionRatio = bottomNavRatio
+        )?.let { it.top to it.bottom }
+    }
 
     AdaptiveMediaGrid(
         items = state.entries,
@@ -73,10 +88,12 @@ fun RankScreen(
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
         loadMoreEnabled = state.canLoadMore,
+        // 尾部提前预取：与推荐页一致，距末尾 4 条就取下一页（该网格有 header 项，
+        // 可见下标整体偏移 1，阈值取 4 即"还剩约 5 条"时触发）
+        loadMoreThreshold = 4,
         modifier = Modifier.fillMaxSize(),
         state = gridState,
-        key = { _, item -> item.key },
-        contentType = { _, item -> item::class.simpleName },
+        key = { _, item -> item.key },        contentType = { _, item -> item::class.simpleName },
         contentPadding = PaddingValues(
             start = 4.dp,
             top = topContentPadding,
@@ -145,6 +162,7 @@ fun RankScreen(
         when (entry) {
             is RankEntry.Video -> RankVideoCard(
                 item = entry.item,
+                listCover = listCover,
                 onOpenVideo = onOpenVideo,
                 onOpenSpace = onOpenSpace
             )
@@ -236,6 +254,7 @@ private fun RankSelectors(
 @Composable
 private fun RankVideoCard(
     item: RankVideoItem,
+    listCover: Pair<Float, Float>? = null,
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit
 ) {
@@ -269,7 +288,8 @@ private fun RankVideoCard(
                     target = target,
                     coverUrl = item.cover,
                     coverLarge = false,
-                    anchorRadiusPx = seamlessSpec.radiusPx
+                    anchorRadiusPx = seamlessSpec.radiusPx,
+                    listCover = listCover
                 )
             ) {
                 return@BiliCardSurface
@@ -287,6 +307,10 @@ private fun RankVideoCard(
                 .aspectRatio(4f / 3f)
                 .coverExpandTrack(target)
         ) {
+            // 锚点在封面内容之下（z 序）：过渡位图不能盖住封面上的时长角标
+            if (canSeamless) {
+                SeamlessAnchor(anchorState, Modifier.matchParentSize())
+            }
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
@@ -303,9 +327,6 @@ private fun RankVideoCard(
                             .padding(6.dp)
                     )
                 }
-            }
-            if (canSeamless) {
-                SeamlessAnchor(anchorState, Modifier.matchParentSize())
             }
         }
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {

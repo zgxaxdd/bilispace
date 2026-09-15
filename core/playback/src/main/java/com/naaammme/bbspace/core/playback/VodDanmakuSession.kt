@@ -101,6 +101,10 @@ internal class VodDanmakuSession(
                 if (segment.request.ids != currentIds || windowId != currentWindowId) {
                     return@onSuccess
                 }
+                android.util.Log.i(
+                    "BbDanmaku",
+                    "loadWindow ok windowId=$windowId items=${segment.items.size}"
+                )
                 _state.update { state ->
                     state.copy(
                         window = DanmakuWindow(
@@ -115,6 +119,7 @@ internal class VodDanmakuSession(
                 if (request.ids != currentIds || windowId != currentWindowId) {
                     return@onFailure
                 }
+                android.util.Log.w("BbDanmaku", "loadWindow fail windowId=$windowId: ${error.message}")
                 _state.update { it.copy(lastError = error.message ?: "Failed to load danmaku segment") }
             }
             if (loadingWindowId == windowId) {
@@ -132,6 +137,10 @@ internal class VodDanmakuSession(
         ids: ResolvedVideoIds,
         durationMs: Long
     ) {
+        android.util.Log.i(
+            "BbDanmaku",
+            "setSource reset aid=${ids.aid} cid=${ids.cid} durationMs=$durationMs"
+        )
         loadingJob?.cancel()
         loadingJob = null
         loadingWindowId = null
