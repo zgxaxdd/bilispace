@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
@@ -228,12 +227,21 @@ fun <T> AdaptiveMediaGrid(
     }
 }
 
+/**
+ * 网格错误态默认出口。
+ *
+ * 与全项目其余位置保持一致：空/错误态统一走 [StateMessageCard]（排行榜等页面已是
+ * 显式传入该卡片）。此前这里是裸露的 `Text("加载失败: $message")` —— 同一类错误在
+ * 不同页面呈现不同形态，且直接暴露原始 message。
+ */
 @Composable
 private fun DefaultGridError(message: String) {
-    Text(
-        text = "加载失败: $message",
-        color = MaterialTheme.colorScheme.error,
-        modifier = Modifier.padding(16.dp)
+    StateMessageCard(
+        text = message,
+        isError = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
     )
 }
 
