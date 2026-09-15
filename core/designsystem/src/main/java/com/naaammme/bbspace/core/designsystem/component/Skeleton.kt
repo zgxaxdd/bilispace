@@ -76,13 +76,24 @@ fun rememberSkeletonShimmer(): Float {
 }
 
 /**
- * 为内部所有 [SkeletonBlock] 提供同一份微光进度。
- * 在骨架容器的最外层包一次即可（见 [VideoListSkeletonList]）。
+ * 为内部所有 [SkeletonBlock] 提供微光进度。
+ *
+ * **幂等**：若外层已提供过（LocalSkeletonShimmer != null），这里直接透传、不新建动画。
+ * 这条很关键——骨架组件既有"整屏容器"（[VideoListSkeletonList]），也有被逐个调用的
+ * "单卡骨架"（[VideoGridCardSkeleton] 等）。不幂等的话，一个 8 卡骨架屏会创建 8 个
+ * 各自的无限动画；幂等后外层提供一次、内层复用，全屏仍只有一份动画。
+ *
+ * 之所以由各骨架组件自带 provider，而不是只放在调用方容器里：骨架组件在各页被**逐个
+ * 调用**，靠调用方记得包一层必然漏（首页 FeedCardSkeleton 就漏了，导致首页看不到微光）。
  */
 @Composable
 fun ProvideSkeletonShimmer(
     content: @Composable () -> Unit
 ) {
+    if (LocalSkeletonShimmer.current != null) {
+        content()
+        return
+    }
     val progress = rememberSkeletonShimmer()
     CompositionLocalProvider(LocalSkeletonShimmer provides progress, content = content)
 }
@@ -164,6 +175,7 @@ fun VideoListSkeletonList(
 
 @Composable
 fun VideoGridCardSkeleton(modifier: Modifier = Modifier) {
+    ProvideSkeletonShimmer {
     Column(modifier = modifier.fillMaxWidth()) {
         SkeletonBlock(
             modifier = Modifier
@@ -201,10 +213,12 @@ fun VideoGridCardSkeleton(modifier: Modifier = Modifier) {
             }
         }
     }
+    }
 }
 
 @Composable
 fun VideoListCardSkeleton(modifier: Modifier = Modifier) {
+    ProvideSkeletonShimmer {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -254,10 +268,12 @@ fun VideoListCardSkeleton(modifier: Modifier = Modifier) {
             }
         }
     }
+    }
 }
 
 @Composable
 fun CommentHeaderSkeleton(modifier: Modifier = Modifier) {
+    ProvideSkeletonShimmer {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -272,10 +288,12 @@ fun CommentHeaderSkeleton(modifier: Modifier = Modifier) {
             shape = MaterialTheme.shapes.extraLarge
         )
     }
+    }
 }
 
 @Composable
 fun CommentCardSkeleton(modifier: Modifier = Modifier) {
+    ProvideSkeletonShimmer {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -362,10 +380,12 @@ fun CommentCardSkeleton(modifier: Modifier = Modifier) {
             }
         }
     }
+    }
 }
 
 @Composable
 fun VideoDetailInfoSkeleton(modifier: Modifier = Modifier) {
+    ProvideSkeletonShimmer {
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -455,10 +475,12 @@ fun VideoDetailInfoSkeleton(modifier: Modifier = Modifier) {
         DetailEntryCardSkeleton()
         DetailEntryCardSkeleton()
     }
+    }
 }
 
 @Composable
 fun VideoRelateCardSkeleton(modifier: Modifier = Modifier) {
+    ProvideSkeletonShimmer {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -499,6 +521,7 @@ fun VideoRelateCardSkeleton(modifier: Modifier = Modifier) {
                 shape = MaterialTheme.shapes.extraSmall
             )
         }
+    }
     }
 }
 

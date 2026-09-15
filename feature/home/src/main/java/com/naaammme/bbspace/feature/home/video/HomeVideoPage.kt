@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
 import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonShimmer
 import com.naaammme.bbspace.core.designsystem.component.SkeletonBlock
 import com.naaammme.bbspace.core.designsystem.component.rememberAdaptiveGridColumnCount
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
@@ -415,6 +416,10 @@ private fun CoverBadge(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun FeedCardSkeleton(singleColumn: Boolean = false) {
+    // 首页信息流的骨架此前用的是裸 SkeletonBlock（没有走任何带微光的骨架组件），
+    // 所以首页加载时看不到微光——这里补上 provider，与其他骨架观感一致。
+    // ProvideSkeletonShimmer 幂等：若外层已提供会直接复用，不会叠加动画。
+    ProvideSkeletonShimmer {
     Column(modifier = Modifier.fillMaxWidth()) {
         SkeletonBlock(
             modifier = Modifier
@@ -444,6 +449,7 @@ private fun FeedCardSkeleton(singleColumn: Boolean = false) {
                 shape = MaterialTheme.shapes.extraSmall
             )
         }
+    }
     }
 }
 
