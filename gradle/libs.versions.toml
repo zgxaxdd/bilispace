@@ -20,10 +20,10 @@ kotlinxSerializationJson = "1.7.3"
 
 # Protobuf
 protobuf = "4.29.2"
-protobufPlugin = "0.9.4"
+protobufPlugin = "0.9.6"
 
 # Database & Storage
-room = "2.7.2"
+room = "2.8.4"
 datastore = "1.1.1"
 
 # Navigation
