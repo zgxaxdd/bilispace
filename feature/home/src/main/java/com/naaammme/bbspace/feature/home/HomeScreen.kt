@@ -190,6 +190,7 @@ fun HomeScreen(
                     topContentPadding = topBarHeightDp,
                     onRefresh = viewModel::refresh,
                     onLoadMore = viewModel::loadMore,
+                    onRetry = viewModel::refresh,
                     onOpenVideo = onOpenVideo,
                     onOpenSpace = onOpenSpace,
                     onOpenLive = onOpenLive,

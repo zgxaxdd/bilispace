@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.home.live
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.live.LiveRecommendRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -60,8 +61,9 @@ class HomeLiveViewModel @Inject constructor(
                 hasLoaded = true
                 loginEvent = 0
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "刷新直播推荐失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "刷新直播推荐失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
             }
@@ -96,8 +98,9 @@ class HomeLiveViewModel @Inject constructor(
                 hasLoaded = true
                 loginEvent = 0
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "加载更多直播推荐失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载更多直播推荐失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isLoadingMore = false) }
             }

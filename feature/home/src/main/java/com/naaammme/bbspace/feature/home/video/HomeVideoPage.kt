@@ -85,6 +85,8 @@ fun HomeVideoPage(
     topContentPadding: Dp = 0.dp,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
+    /** 错误卡就地重试；不传则错误卡不显示重试按钮。 */
+    onRetry: (() -> Unit)? = null,
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit,
     onOpenLive: (LiveRoute) -> Unit,
@@ -161,6 +163,7 @@ fun HomeVideoPage(
             bottom = 4.dp
         ),
         errorMessage = errorMessage,
+        onRetry = onRetry,
         key = { _, item -> item.actionKey() },
         contentType = { _, item -> item.cardType },
         loadingContent = {

@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.home.article
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.article.ArticleRecommendRepository
 import com.naaammme.bbspace.core.model.article.ArticleRecommendItem
@@ -59,8 +60,9 @@ class HomeArticleViewModel @Inject constructor(
                 hasLoaded = true
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                Logger.e(TAG, e) { "刷新专栏推荐失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "刷新专栏推荐失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
             }
@@ -91,8 +93,9 @@ class HomeArticleViewModel @Inject constructor(
                 hasLoaded = true
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                Logger.e(TAG, e) { "加载更多专栏推荐失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载更多专栏推荐失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isLoadingMore = false) }
             }

@@ -47,6 +47,7 @@ fun ListenHomePage(
         isLoadingMore = state.isLoadingMore,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
+        onRetry = viewModel::refresh,
         modifier = Modifier.fillMaxSize(),
         errorMessage = state.errorMessage,
         loadMoreEnabled = state.hasMore,

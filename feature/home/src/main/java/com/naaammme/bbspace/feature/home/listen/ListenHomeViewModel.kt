@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.home.listen
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.listen.ListenRepository
 import com.naaammme.bbspace.core.model.listen.ListenItem
@@ -46,8 +47,12 @@ class ListenHomeViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "加载听视频推荐失败" }
-                _uiState.update { it.copy(isRefreshing = false, errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(
+                        isRefreshing = false,
+                        errorMessage = UserFacingError.logAndMessage(TAG, e, "加载听视频推荐失败")
+                    )
+                }
             }
         }
     }

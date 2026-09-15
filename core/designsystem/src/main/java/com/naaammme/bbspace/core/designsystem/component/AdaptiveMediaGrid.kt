@@ -57,6 +57,11 @@ fun <T> AdaptiveMediaGrid(
     modifier: Modifier = Modifier,
     state: LazyStaggeredGridState? = null,
     errorMessage: String? = null,
+    /**
+     * 错误态的就地重试回调。传 null 时默认错误卡不显示重试按钮
+     * （调用方若自有整页重试入口，可不传，避免出现两个重试入口）。
+     */
+    onRetry: (() -> Unit)? = null,
     loadMoreEnabled: Boolean = true,
     /**
      * 尾部预取阈值（条目数）：最后一张可见卡的索引进入「距列表末尾 [loadMoreThreshold]
@@ -85,7 +90,7 @@ fun <T> AdaptiveMediaGrid(
     headerContent: (@Composable LazyStaggeredGridItemScope.() -> Unit)? = null,
     emptyContent: (@Composable LazyStaggeredGridItemScope.() -> Unit)? = null,
     errorContent: @Composable LazyStaggeredGridItemScope.(String) -> Unit = { msg ->
-        DefaultGridError(msg)
+        DefaultGridError(msg, onRetry)
     },
     loadMoreContent: @Composable LazyStaggeredGridItemScope.() -> Unit = {
         DefaultGridLoadMore()
@@ -232,13 +237,18 @@ fun <T> AdaptiveMediaGrid(
  *
  * 与全项目其余位置保持一致：空/错误态统一走 [StateMessageCard]（排行榜等页面已是
  * 显式传入该卡片）。此前这里是裸露的 `Text("加载失败: $message")` —— 同一类错误在
- * 不同页面呈现不同形态，且直接暴露原始 message。
+ * 不同页面呈现不同形态，且直接把原始 message 暴露在界面上。
+ *
+ * [onRetry] 非空时给一个就地重试入口：网络类失败最常见的用户动作就是重试，
+ * 此前必须先退回再进来。
  */
 @Composable
-private fun DefaultGridError(message: String) {
+private fun DefaultGridError(message: String, onRetry: (() -> Unit)? = null) {
     StateMessageCard(
         text = message,
         isError = true,
+        actionText = if (onRetry != null) "重试" else null,
+        onAction = onRetry,
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)

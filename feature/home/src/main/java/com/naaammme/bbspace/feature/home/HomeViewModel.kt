@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.feed.FeedDislikeRepository
 import com.naaammme.bbspace.core.feed.PageActionTracker
@@ -128,8 +129,9 @@ class HomeViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "加载首页失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载首页失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
                 // 首屏内容不足一屏时先补一页，避免"打开就只有几张卡"的观感
@@ -173,8 +175,9 @@ class HomeViewModel @Inject constructor(
                 _uiState.update { it.copy(items = feed.items) }
                 flush++
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "提交兴趣失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "提交兴趣失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
             }
@@ -205,8 +208,9 @@ class HomeViewModel @Inject constructor(
                     flush++
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "刷新失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "刷新失败"))
+                }
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
                 // 刷新结果太少时同样补页（服务端忽略 ps 或返回条数偏少）
@@ -241,8 +245,9 @@ class HomeViewModel @Inject constructor(
                     stagnantLoads++
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "加载更多失败" }
-                _uiState.update { it.copy(errorMessage = e.message) }
+                _uiState.update {
+                    it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载更多失败"))
+                }
                 stagnantLoads++
             } finally {
                 _uiState.update { it.copy(isLoadingMore = false) }
