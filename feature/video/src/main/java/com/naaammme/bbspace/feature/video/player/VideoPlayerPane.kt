@@ -102,6 +102,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+
 internal enum class PlayerVideoResizeMode {
     Fit,
     Zoom,
@@ -118,12 +119,14 @@ private enum class PlayerDialog {
 // 浮层（顶栏/控制条/胶囊/手势气泡）直接叠在视频画面上，与主题色解耦：
 // 统一「黑遮罩 + 白前景」语言，遮罩透明度按可读性校准，保证亮画面上白字仍清晰，
 // 深/浅色主题下表现一致。改动时请维持整套 token 同步，勿在单处硬编码。
+
 private val PlayerOverlayScrimTopEnd = Color.Black.copy(alpha = 0.66f)
 private val PlayerOverlayScrimBottomEnd = Color.Black.copy(alpha = 0.76f)
 private val PlayerPillScrim = Color.Black.copy(alpha = 0.30f)
 private val PlayerPillBorder = Color.White.copy(alpha = 0.16f)
 private val PlayerPillTextDim = Color.White.copy(alpha = 0.68f)
 private val PlayerSecondaryText = Color.White.copy(alpha = 0.9f)
+
 
 internal val LocalVideoResizeModeState = compositionLocalOf<MutableState<PlayerVideoResizeMode>> {
     error("Missing player video resize mode state")
@@ -468,6 +471,7 @@ internal fun VideoPlayerPane(
 }
 
 /** 双击点赞爱心动效：在点击位置放大、上浮并淡出 */
+
 @Composable
 private fun DoubleTapLikeHeart(
     position: Offset,
@@ -992,6 +996,7 @@ private fun CtrlBtn(
  * 播放器顶栏悬浮胶囊：统一「弹幕开关 / 缩放还原」等轻操作的视觉语言。
  * 半透明黑底 + 白字（[dimmed] 时降低字重）+ 细描边；[showDot] 用小白点表达开启态。
  */
+
 @Composable
 private fun PlayerPillChip(
     text: String,
@@ -1032,122 +1037,6 @@ private fun PlayerPillChip(
     }
 }
 
-@Composable
-private fun QualitySelectionDialog(
-    options: List<QualityOption>,
-    curQuality: Int?,
-    onDismiss: () -> Unit,
-    onSelect: (Int) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择画质") },
-        text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(options, key = { it.quality }) { option ->
-                    QualityOptionItem(
-                        option = option,
-                        isSelected = option.quality == curQuality,
-                        onClick = { onSelect(option.quality) }
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
-@Composable
-private fun AudioSelectionDialog(
-    audios: List<PlaybackAudio>,
-    curAudioId: Int?,
-    onDismiss: () -> Unit,
-    onSelect: (Int) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择音频") },
-        text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(audios, key = { it.id }) { audio ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(audio.id) }
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = getAudioName(audio.id),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        if (audio.id == curAudioId) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
-@Composable
-private fun SpeedSelectionDialog(
-    curSpeed: Float,
-    onDismiss: () -> Unit,
-    onSelect: (Float) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("播放速度") },
-        text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(speedOps, key = { it }) { speed ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(speed) }
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = formatSpeed(speed),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        if (speed == curSpeed) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
 private fun readPlayerTopMetaText(
     context: android.content.Context,
     timeFmt: java.text.DateFormat
@@ -1160,6 +1049,7 @@ private fun readPlayerTopMetaText(
 }
 
 /** 空降片段在标记条上的位置与颜色。 */
+
 private data class SbMark(
     val start: Float,
     val end: Float,
@@ -1169,6 +1059,7 @@ private data class SbMark(
 /**
  * 空降助手浮层：手动跳过按钮条与「跳到精彩时刻」。
  */
+
 @Composable
 private fun SponsorBlockOverlay(
     state: SponsorBlockUiState,
@@ -1231,4 +1122,3 @@ private fun SponsorBlockOverlay(
         }
     }
 }
-
