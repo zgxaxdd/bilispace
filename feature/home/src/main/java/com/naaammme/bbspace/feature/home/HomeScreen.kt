@@ -283,7 +283,11 @@ private fun HomeTopBar(
             Card(
                 onClick = onNavigateToSearch,
                 modifier = Modifier.weight(1f),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+                // 跟随主题圆角 token：此前硬编码 RoundedCornerShape(26.dp)，绕过了主题，
+                // 用户在设置里切换「圆角/圆形」风格时，搜索页/历史搜索/直播/设置/发布记录
+                // 五处搜索框都会跟着变，唯独首页这条永远 26dp —— 是不一致的真实来源。
+                // 取值与项目其他卡片表面一致（MaterialTheme.shapes.large）。
+                shape = MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
                     MaterialTheme.colorScheme.surfaceContainerHigh
                 )
