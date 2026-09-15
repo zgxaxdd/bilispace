@@ -18,7 +18,11 @@ data class ThemeConfig(
     val transitionStyle: TransitionStyle = TransitionStyle.SHARED_AXIS_Z,
     val isPureBlack: Boolean = false,
     val preferredFrameRate: FrameRateMode = FrameRateMode.AUTO,
-    val cornerStyle: CornerStyle = CornerStyle.STANDARD
+    // 默认圆角由 STANDARD 提到 ROUNDED：STANDARD 下卡片圆角仅 12dp（medium），
+    // 观感偏方、显得陈旧；ROUNDED 给到 16dp / 大容器 24dp，与当下主流客户端
+    // （BiliPai、PiliPala 等）的圆润卡片一致。
+    // 注意：这是**默认值**，用户已在设置里选过圆角风格的不受影响。
+    val cornerStyle: CornerStyle = CornerStyle.ROUNDED
 )
 
 const val DEFAULT_PULL_REFRESH_DISTANCE_DP = 80f
