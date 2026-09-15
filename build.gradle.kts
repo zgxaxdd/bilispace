@@ -6,7 +6,7 @@ import org.gradle.kotlin.dsl.configure
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
-    alias(libs.plugins.kotlin.android) apply false
+    // AGP 9 内置 Kotlin 支持：org.jetbrains.kotlin.android 已移除（Kotlin 2.3.0+ 下应用它会直接报错）
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.ksp) apply false
