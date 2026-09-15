@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
@@ -88,10 +89,24 @@ import com.naaammme.bbspace.core.model.VideoDownloadRequest
 import com.naaammme.bbspace.feature.video.detail.VideoDetailPage
 import com.naaammme.bbspace.feature.video.player.VideoPlayerPane
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.math.roundToInt
 
 internal val speedOps = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
+
+/**
+ * 详情遮罩在「打开动画播完」之后愿意等待视频首帧的时长。
+ *
+ * 真机实测（PLC110 / ColorOS 16.0）：首帧就绪相对 beginOpen 为 616~847ms，而打开动画本身
+ * 约 610ms——也就是说动画结束时视频通常还没出画面，旧逻辑会把**已经组合好的**详情内容
+ * 一直盖到首帧为止（实测遮罩驻留 639~892ms）。此处只保留一小段宽限用于吸收抖动，
+ * 超时即放行详情内容；播放器区域的封面垫底仍按首帧淡出，视频画面本身不受影响。
+ *
+ * 取 120ms：足以覆盖首帧紧随动画结束的情形，又不会让用户对着空背景干等。
+ */
+private const val MASK_FIRST_FRAME_GRACE_MS = 120L
 
 @Suppress("UnsafeOptInUsageError")
 @UnstableApi
@@ -141,18 +156,28 @@ fun VideoScreen(
     var detailMaskOn by remember(seamlessIdsKey) {
         mutableStateOf(coverBackdropUrl != null && SeamlessTransitionState.openRunning)
     }
+    // 遮罩放行：打开动画播完后，等「播放器首帧」或「宽限期」二者先到者。
+    // - 首帧先到（常见）：画面与详情同步出现，最理想。
+    // - 宽限期先到（起播慢，真机实测首帧 616~847ms）：放行**早已组合好的**详情内容，
+    //   不再让纯色遮罩继续盖着可读内容。代价是详情区可能先露骨架/占位再被真实数据替换，
+    //   这是有意的取舍：可读内容优先于等待视频就绪。播放器区域的封面垫底
+    //   （CoverSettleBackdrop）仍独立守在首帧才淡出，视频画面本身不受影响。
+    // 幂等放行：effect 以 ids 为键，详情数据到达（cid 补全）会重跑本块，遮罩已放行时不再重复动作。
     LaunchedEffect(seamlessIdsKey) {
         if (coverBackdropUrl == null) return@LaunchedEffect
         if (!SeamlessTransitionState.openRunning) {
             detailMaskOn = false
             return@LaunchedEffect
         }
-        // 遮罩放行条件：打开动画播完（近似 600ms，系统回调缺失）+ 播放器出首帧
-        // （与播放器区域封面垫底图同步淡出）。deadline 1.2s 仍为上限兜底。
         SeamlessTransitionState.awaitOpenAnimDone()
-        while (!videoState.hasRenderedFirstFrame && SeamlessTransitionState.openRunning) {
-            delay(32)
+        // 已经出首帧 → 立即放行；否则最多再等宽限期。withTimeoutOrNull 比手写轮询精确：
+        // 首帧一到就返回，不必等满宽限期，也不会像 while(delay) 那样产生空转。
+        if (!videoState.hasRenderedFirstFrame) {
+            withTimeoutOrNull(MASK_FIRST_FRAME_GRACE_MS) {
+                snapshotFlow { videoState.hasRenderedFirstFrame }.first { it }
+            }
         }
+        if (!detailMaskOn) return@LaunchedEffect
         detailMaskOn = false
     }
     val isPortraitVideo = remember(videoState.currentStream) {
