@@ -122,10 +122,52 @@ private enum class PlayerDialog {
 
 private val PlayerOverlayScrimTopEnd = Color.Black.copy(alpha = 0.66f)
 private val PlayerOverlayScrimBottomEnd = Color.Black.copy(alpha = 0.76f)
+
+/**
+ * 控制条顶部渐隐的**中间步**。它不是"另一个遮罩"：控制条上缘用
+ * 透明 → 本值 → [PlayerOverlayScrimBottomEnd] 的三段渐变，让控制条与画面衔接更柔和。
+ * 单独成 token 是因为它是渐变曲线上的一个定点，与两端语义不同。
+ */
+private val PlayerOverlayScrimMid = Color.Black.copy(alpha = 0.26f)
 private val PlayerPillScrim = Color.Black.copy(alpha = 0.30f)
 private val PlayerPillBorder = Color.White.copy(alpha = 0.16f)
 private val PlayerPillTextDim = Color.White.copy(alpha = 0.68f)
 private val PlayerSecondaryText = Color.White.copy(alpha = 0.9f)
+
+// —— 以下为本轮补全的 token ——
+// 此前这些值以裸字面量散落在各处（方案 P1-4 指出"浮层只做了半程 token 化"）。
+// 补全的意义：透明度的可读性校准值集中成组，后续统一调整不必再全局搜替换。
+// 注意全部维持「黑遮罩 + 白前景」语言，**不要**改成主题色（本文件顶部约定）。
+
+/** 大播放按钮的圆形底盘。比控制条遮罩更透（按钮叠在画面中央，过重会挡住内容）。 */
+private val PlayerPlayButtonScrim = Color.Black.copy(alpha = 0.55f)
+
+/** 大播放按钮的描边。比 [PlayerPillBorder] 略亮：圆形描边在亮画面上更易被"吃掉"。 */
+private val PlayerPlayButtonBorder = Color.White.copy(alpha = 0.18f)
+
+/** 手势气泡 / 提示胶囊的底盘（深底保证白字在任意画面上可读）。 */
+private val PlayerToastScrim = Color.Black.copy(alpha = 0.72f)
+
+/** 进度条当前轨道。 */
+private val PlayerSliderActiveTrack = Color.White.copy(alpha = 0.24f)
+
+/** 进度条未激活轨道。 */
+private val PlayerSliderInactiveTrack = Color.White.copy(alpha = 0.24f)
+
+/** 进度条停用态轨道。 */
+private val PlayerSliderDisabledTrack = Color.White.copy(alpha = 0.1f)
+
+/** 进度条停用态滑块。 */
+private val PlayerSliderDisabledThumb = Color.White.copy(alpha = 0.24f)
+
+/** 控制条按钮选中态底盘。 */
+private val PlayerCtrlButtonOn = Color.White.copy(alpha = 0.16f)
+
+/** 控制条按钮未选中态底盘。 */
+private val PlayerCtrlButtonOff = Color.White.copy(alpha = 0.10f)
+
+/** 控制条按钮未选中态前景（0.72 而非 0.5：停用也要在亮画面上保持可读）。 */
+private val PlayerCtrlButtonTextOff = Color.White.copy(alpha = 0.72f)
 
 
 internal val LocalVideoResizeModeState = compositionLocalOf<MutableState<PlayerVideoResizeMode>> {
@@ -687,8 +729,8 @@ private fun VideoPlayerOverlay(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(72.dp)
-                    .background(color = Color.Black.copy(alpha = 0.55f), shape = CircleShape)
-                    .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
+                    .background(color = PlayerPlayButtonScrim, shape = CircleShape)
+                    .border(1.dp, PlayerPlayButtonBorder, CircleShape)
                     .clickable { viewModel.togglePlayPause() },
                 contentAlignment = Alignment.Center
             ) {
@@ -845,7 +887,7 @@ private fun PlayerCtrlBar(
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = 0.26f),
+                        PlayerOverlayScrimMid,
                         PlayerOverlayScrimBottomEnd
                     )
                 )
@@ -866,10 +908,10 @@ private fun PlayerCtrlBar(
                 colors = SliderDefaults.colors(
                     thumbColor = Color.White,
                     activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.24f),
-                    disabledThumbColor = Color.White.copy(alpha = 0.24f),
-                    disabledActiveTrackColor = Color.White.copy(alpha = 0.16f),
-                    disabledInactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                    inactiveTrackColor = PlayerSliderInactiveTrack,
+                    disabledThumbColor = PlayerSliderDisabledThumb,
+                    disabledActiveTrackColor = PlayerPillBorder,
+                    disabledInactiveTrackColor = PlayerSliderDisabledTrack
                 ),
                 track = { sliderState ->
                     Box(modifier = Modifier.fillMaxWidth()) {
@@ -895,9 +937,9 @@ private fun PlayerCtrlBar(
                             modifier = Modifier.fillMaxWidth(),
                             colors = SliderDefaults.colors(
                                 activeTrackColor = Color.White,
-                                inactiveTrackColor = Color.White.copy(alpha = 0.24f),
-                                disabledActiveTrackColor = Color.White.copy(alpha = 0.16f),
-                                disabledInactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                                inactiveTrackColor = PlayerSliderInactiveTrack,
+                                disabledActiveTrackColor = PlayerPillBorder,
+                                disabledInactiveTrackColor = PlayerSliderDisabledTrack
                             )
                         )
                     }
@@ -962,15 +1004,11 @@ private fun CtrlBtn(
     modifier: Modifier = Modifier
 ) {
     // 停用态前景用 0.72 白而非 0.5：停用也要在亮画面上保持可读
-    val bg = if (on) {
-        Color.White.copy(alpha = 0.16f)
-    } else {
-        Color.White.copy(alpha = 0.10f)
-    }
+    val bg = if (on) PlayerCtrlButtonOn else PlayerCtrlButtonOff
     val fg = if (on) {
         Color.White
     } else {
-        Color.White.copy(alpha = 0.72f)
+        PlayerCtrlButtonTextOff
     }
 
     Box(
@@ -1082,7 +1120,7 @@ private fun SponsorBlockOverlay(
             Row(
                 modifier = Modifier
                     .background(
-                        color = Color.Black.copy(alpha = 0.72f),
+                        color = PlayerToastScrim,
                         shape = RoundedCornerShape(20.dp)
                     ),
                 verticalAlignment = Alignment.CenterVertically
@@ -1113,7 +1151,7 @@ private fun SponsorBlockOverlay(
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier
                     .background(
-                        color = Color.Black.copy(alpha = 0.72f),
+                        color = PlayerToastScrim,
                         shape = RoundedCornerShape(20.dp)
                     )
                     .clickable(onClick = onJumpPoi)
