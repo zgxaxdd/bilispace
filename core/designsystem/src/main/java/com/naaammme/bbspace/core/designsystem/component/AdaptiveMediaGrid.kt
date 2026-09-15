@@ -215,7 +215,11 @@ fun <T> AdaptiveMediaGrid(
                         key = { index -> key(index, items[index]) },
                         contentType = { index -> contentType(index, items[index]) }
                     ) { index ->
-                        itemContent(items[index])
+                        // 首屏这批条目做「轻微上移 + 淡入」入场；之后（滚动加载出来的）一律直出，
+                        // 避免快速滚动时每行都在做动画——那正是掉帧的典型来源。
+                        AnimatedItemAppearance(enabled = index < ENTRANCE_ANIMATION_ITEM_LIMIT) {
+                            itemContent(items[index])
+                        }
                     }
 
                     if (isLoadingMore) {
@@ -266,3 +270,9 @@ private fun DefaultGridLoadMore() {
         CircularProgressIndicator(modifier = Modifier.size(24.dp))
     }
 }
+
+/**
+ * 参与入场动效的条目数上限：双列布局下 8 条基本覆盖首屏，单列约一屏半。
+ * 取小值是有意为之——动效只服务于「页面出现」的第一印象，不参与滚动。
+ */
+private const val ENTRANCE_ANIMATION_ITEM_LIMIT = 8
