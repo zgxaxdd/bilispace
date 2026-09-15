@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.live.component
+﻿package com.naaammme.bbspace.feature.live.component
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -373,6 +373,7 @@ private fun LiveDanmakuInputBar(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
+                // 发送失败只给用户一句可读文案：这里在 UI 层，原始 message 会直接渲染到界面上
                 error = e.message ?: "发送弹幕失败"
             } finally {
                 sending = false

@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.im.conversation
+﻿package com.naaammme.bbspace.feature.im.conversation
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.common.error.UserFacingError
 
 @HiltViewModel
 class ImConversationViewModel @Inject constructor(
@@ -125,7 +126,7 @@ class ImConversationViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isSending = false,
-                            sendErrorMessage = err.message ?: "发送消息失败"
+                            sendErrorMessage = UserFacingError.messageOf(err)
                         )
                     }
                 }

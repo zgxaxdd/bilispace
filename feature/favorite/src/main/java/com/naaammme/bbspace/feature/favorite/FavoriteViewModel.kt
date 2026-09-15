@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.favorite
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
 import com.naaammme.bbspace.core.model.FavoriteContentCursor
@@ -111,7 +112,7 @@ class FavoriteViewModel @Inject constructor(
                         folder = it.folder.copy(
                             isLoading = false,
                             isRefreshing = false,
-                            errorMessage = e.message ?: "加载收藏失败"
+                            errorMessage = UserFacingError.messageOf(e)
                         )
                     )
                 }
@@ -156,14 +157,13 @@ class FavoriteViewModel @Inject constructor(
                 }
             }.onFailure { e ->
                 if (!isActive) return@launch
-                Logger.e(TAG, e) { "加载全部收藏失败" }
                 _uiState.update {
                     it.copy(
                         content = it.content.copy(
                             isLoading = false,
                             isRefreshing = false,
                             isLoadingMore = false,
-                            errorMessage = e.message ?: "加载收藏失败",
+                            errorMessage = UserFacingError.logAndMessage(TAG, e, "加载全部收藏失败"),
                             errorOnLoadMore = !reset
                         )
                     )

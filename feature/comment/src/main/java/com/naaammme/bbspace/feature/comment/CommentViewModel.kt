@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.comment
+﻿package com.naaammme.bbspace.feature.comment
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import com.naaammme.bbspace.core.common.error.UserFacingError
 
 @HiltViewModel
 class CommentViewModel @Inject constructor(
@@ -183,7 +184,7 @@ class CommentViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             loadingMore = false,
-                            loadMoreError = err.message ?: "加载更多评论失败"
+                            loadMoreError = UserFacingError.messageOf(err)
                         )
                     }
                 }
@@ -682,7 +683,7 @@ class CommentViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             loading = false,
-                            error = err.message ?: "加载评论失败"
+                            error = UserFacingError.messageOf(err)
                         )
                     }
                 }

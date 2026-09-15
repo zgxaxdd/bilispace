@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.search
+﻿package com.naaammme.bbspace.feature.search
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.common.error.UserFacingError
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -196,8 +197,7 @@ class SearchViewModel @Inject constructor(
                     syncFilters(page.filters)
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "搜索翻页失败" }
-                errorMessage = e.message
+                errorMessage = UserFacingError.logAndMessage(TAG, e, "搜索翻页失败")
             } finally {
                 isLoadingMore = false
             }
@@ -223,8 +223,7 @@ class SearchViewModel @Inject constructor(
             _authors.value = page.authors.filter { authorIds.add(it.mid) }
             _videos.value = page.videos.filter { videoIds.add(it.aid to it.cid) }
         } catch (e: Exception) {
-            Logger.e(TAG, e) { "搜索失败" }
-            errorMessage = e.message
+            errorMessage = UserFacingError.logAndMessage(TAG, e, "搜索失败")
         } finally {
             isLoading = false
         }

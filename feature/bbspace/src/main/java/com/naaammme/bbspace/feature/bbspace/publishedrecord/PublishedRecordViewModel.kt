@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.bbspace.publishedrecord
+﻿package com.naaammme.bbspace.feature.bbspace.publishedrecord
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

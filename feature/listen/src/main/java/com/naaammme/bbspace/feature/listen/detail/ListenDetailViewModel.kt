@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.listen.detail
+﻿package com.naaammme.bbspace.feature.listen.detail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.common.error.UserFacingError
 
 @HiltViewModel
 class ListenDetailViewModel @Inject constructor(
@@ -116,7 +117,7 @@ class ListenDetailViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         isPreparing = false,
-                        errorMessage = e.message ?: "加载失败"
+                        errorMessage = UserFacingError.logAndMessage(TAG, e, "获取播放地址失败")
                     )
                 }
             }

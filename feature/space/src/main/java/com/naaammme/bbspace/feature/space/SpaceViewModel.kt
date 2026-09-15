@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.space
+﻿package com.naaammme.bbspace.feature.space
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -9,6 +9,7 @@ import com.naaammme.bbspace.core.model.SpaceProfile
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.SpaceRouteTool
 import com.naaammme.bbspace.core.auth.AuthStore
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.space.SpaceRepository
 import com.naaammme.bbspace.feature.space.navigation.SPACE_FROM_ARG
 import com.naaammme.bbspace.feature.space.navigation.SPACE_FROM_VIEW_AID_ARG
@@ -141,7 +142,7 @@ class SpaceViewModel @Inject constructor(
                 loadDynamics()
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载个人空间失败" }
-                val message = e.message ?: "加载个人空间失败"
+                val message = UserFacingError.messageOf(e)
                 _uiState.update {
                     it.copy(
                         archive = it.archive.copy(
@@ -202,7 +203,7 @@ class SpaceViewModel @Inject constructor(
                     it.copy(
                         archive = prevArchive.copy(
                             isRefreshing = false,
-                            message = e.message ?: "切换排序失败"
+                            message = UserFacingError.messageOf(e)
                         )
                     )
                 }
@@ -306,7 +307,7 @@ class SpaceViewModel @Inject constructor(
                     it.copy(
                         archive = it.archive.copy(
                             isLoadingMore = false,
-                            loadMoreError = e.message ?: "加载更多失败"
+                            loadMoreError = UserFacingError.messageOf(e)
                         )
                     )
                 }
@@ -353,7 +354,7 @@ class SpaceViewModel @Inject constructor(
                     it.copy(
                         dynamics = it.dynamics.copy(
                             isLoadingMore = false,
-                            loadMoreError = e.message ?: "加载更多失败"
+                            loadMoreError = UserFacingError.messageOf(e)
                         )
                     )
                 }
@@ -393,7 +394,7 @@ class SpaceViewModel @Inject constructor(
                         dynamics = current.copy(
                             isRefreshing = false,
                             isLoadingMore = false,
-                            message = e.message ?: "加载动态失败"
+                            message = UserFacingError.messageOf(e)
                         )
                     )
                 }

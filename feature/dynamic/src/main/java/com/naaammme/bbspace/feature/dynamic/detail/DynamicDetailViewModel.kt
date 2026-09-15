@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.dynamic.DynamicRepository
 import com.naaammme.bbspace.feature.dynamic.navigation.DYNAMIC_DETAIL_OPUS_ID_ARG
@@ -97,9 +98,11 @@ class DynamicDetailViewModel @Inject constructor(
                     it.copy(detail = detail, isLoading = false, errorMessage = null)
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, e) { "加载动态详情失败" }
                 _uiState.update {
-                    it.copy(isLoading = false, errorMessage = e.message ?: "加载失败")
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = UserFacingError.logAndMessage(TAG, e, "加载动态详情失败")
+                    )
                 }
             }
         }

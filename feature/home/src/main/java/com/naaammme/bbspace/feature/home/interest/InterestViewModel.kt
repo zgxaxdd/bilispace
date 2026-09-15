@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.home.interest
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.feed.InterestRepository
 import com.naaammme.bbspace.core.model.UinterestResponse
@@ -56,7 +57,7 @@ class InterestViewModel @Inject constructor(
                 it.copy(
                     isLoading = false,
                     isRefreshing = false,
-                    errorMessage = e.message ?: "加载兴趣标签失败"
+                    errorMessage = UserFacingError.logAndMessage(TAG, e, "加载兴趣标签失败")
                 )
             }
         }

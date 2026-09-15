@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.common.error.UserFacingError
 
 @HiltViewModel
 class DownloadViewModel @Inject constructor(
@@ -125,7 +126,7 @@ class DownloadViewModel @Inject constructor(
                 _formState.update {
                     it.copy(
                         loading = false,
-                        error = e.message ?: "解析缓存目标失败"
+                        error = UserFacingError.logAndMessage(TAG, e, "解析缓存目标失败")
                     )
                 }
             }
@@ -333,6 +334,7 @@ class DownloadViewModel @Inject constructor(
     }
 
     private companion object {
+        const val TAG = "DownloadViewModel"
         val AV_REGEX = Regex("""(?i)(?:^|\D)av(\d+)""")
         val BV_REGEX = Regex("""BV[0-9A-Za-z]+""")
         val EP_REGEX = Regex("""(?i)(?:^|\D)ep(\d+)""")

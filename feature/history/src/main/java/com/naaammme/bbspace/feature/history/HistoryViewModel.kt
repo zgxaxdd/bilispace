@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.history
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.history.HistoryRepository
 import com.naaammme.bbspace.core.model.HistoryCursor
@@ -151,7 +152,7 @@ class HistoryViewModel @Inject constructor(
                     isLoading = false,
                     isRefreshing = false,
                     isLoadingMore = false,
-                    errorMessage = e.message ?: "加载历史记录失败",
+                    errorMessage = UserFacingError.logAndMessage(TAG, e, "加载历史记录失败"),
                     errorOnLoadMore = !reset && !refreshing
                 )
             }

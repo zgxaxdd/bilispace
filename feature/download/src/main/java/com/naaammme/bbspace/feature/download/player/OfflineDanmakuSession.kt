@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.download.player
+﻿package com.naaammme.bbspace.feature.download.player
 
 import com.naaammme.bbspace.core.download.VideoDownloadRepository
 import com.naaammme.bbspace.core.model.DanmakuItem
@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.naaammme.bbspace.core.common.error.UserFacingError
 
 internal class OfflineDanmakuSession(
     private val scope: CoroutineScope,
@@ -68,7 +69,7 @@ internal class OfflineDanmakuSession(
             reset()
             _state.value = DanmakuSessionState(
                 sourceKey = fallbackKey,
-                lastError = error.message ?: "加载离线弹幕失败"
+                lastError = UserFacingError.messageOf(error)
             )
             return
         } ?: run {

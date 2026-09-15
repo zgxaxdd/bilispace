@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.favorite.folderdetail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
 import com.naaammme.bbspace.core.model.FavoriteContentItem
@@ -104,7 +105,7 @@ class FavoriteFolderDetailViewModel @Inject constructor(
                         isLoading = false,
                         isRefreshing = false,
                         isLoadingMore = false,
-                        errorMessage = e.message ?: "加载收藏夹失败",
+                        errorMessage = UserFacingError.logAndMessage(TAG, e, "加载收藏夹内容失败 fid=$fid page=$reqPage"),
                         errorOnLoadMore = !reset
                     )
                 }

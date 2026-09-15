@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.home
+﻿package com.naaammme.bbspace.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -275,7 +275,7 @@ class HomeViewModel @Inject constructor(
                     Logger.e(TAG, e as? Exception) { "提交不感兴趣失败" }
                     _uiState.update { state ->
                         state.copy(
-                            toastMessage = e.message ?: "提交失败"
+                            toastMessage = UserFacingError.messageOf(e)
                         )
                     }
                 }
@@ -302,7 +302,7 @@ class HomeViewModel @Inject constructor(
                     Logger.e(TAG, e as? Exception) { "撤回不感兴趣失败" }
                     _uiState.update { state ->
                         state.copy(
-                            toastMessage = e.message ?: "撤回失败"
+                            toastMessage = UserFacingError.messageOf(e)
                         )
                     }
                 }

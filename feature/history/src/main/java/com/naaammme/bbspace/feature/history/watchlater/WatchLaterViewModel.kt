@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.history.watchlater
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.history.WatchLaterRepository
 import com.naaammme.bbspace.core.model.WatchLaterCursor
@@ -208,7 +209,7 @@ class WatchLaterViewModel @Inject constructor(
                     isLoading = false,
                     isRefreshing = false,
                     isLoadingMore = false,
-                    errorMessage = e.message ?: "加载稍后再看失败",
+                    errorMessage = UserFacingError.logAndMessage(TAG, e, "加载稍后再看失败"),
                     errorOnLoadMore = !reset && !refreshing
                 )
             }

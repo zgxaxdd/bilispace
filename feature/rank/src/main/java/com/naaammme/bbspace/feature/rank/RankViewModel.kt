@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.model.rank.RankEntry
 import com.naaammme.bbspace.core.model.rank.RankSeriesEntry
 import com.naaammme.bbspace.core.model.rank.RankType
+import com.naaammme.bbspace.core.common.error.UserFacingError
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.rank.RankRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -110,7 +112,7 @@ class RankViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isLoadingMore = false,
-                            errorMessage = error.message ?: "加载更多失败"
+                            errorMessage = UserFacingError.messageOf(error)
                         )
                     }
                 }
@@ -195,7 +197,7 @@ class RankViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             isRefreshing = false,
-                            errorMessage = error.message ?: "加载失败"
+                            errorMessage = UserFacingError.messageOf(error)
                         )
                     }
                 }
@@ -237,6 +239,7 @@ class RankViewModel @Inject constructor(
     )
 
     private companion object {
+        const val TAG = "RankViewModel"
         val DEFAULT_TYPE = RankType.POPULAR
     }
 }

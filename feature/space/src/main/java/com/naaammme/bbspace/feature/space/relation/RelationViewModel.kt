@@ -3,6 +3,8 @@ package com.naaammme.bbspace.feature.space.relation
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.error.UserFacingError
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.space.SpaceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -68,7 +70,7 @@ class RelationViewModel @Inject constructor(
                 updateTabState(isFans) {
                     it.copy(
                         isRefreshing = false,
-                        error = e.localizedMessage ?: "加载失败"
+                        error = UserFacingError.logAndMessage(TAG, e, "加载关注/粉丝列表失败")
                     )
                 }
             }
@@ -99,7 +101,7 @@ class RelationViewModel @Inject constructor(
                 updateTabState(isFans) {
                     it.copy(
                         isLoading = false,
-                        error = e.localizedMessage ?: "加载失败"
+                        error = UserFacingError.logAndMessage(TAG, e, "加载更多关注/粉丝失败")
                     )
                 }
             }
@@ -117,6 +119,7 @@ class RelationViewModel @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "RelationViewModel"
         private const val PAGE_SIZE = 20
     }
 }
