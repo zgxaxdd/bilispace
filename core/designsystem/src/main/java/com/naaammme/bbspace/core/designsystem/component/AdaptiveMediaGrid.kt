@@ -125,6 +125,21 @@ fun <T> AdaptiveMediaGrid(
     var loadMoreAttempted by remember(gridState) { mutableStateOf(false) }
     val itemCount = items.size
 
+    // 增长复位：列表**确实变长**（上一次取页成功）时复位守卫，允许下一次预取。
+    //
+    // 为什么必须单独有这一段：下面那个 effect 在「if (loadMoreAttempted) return」处会
+    // **提前返回**，因此它自己无法复位守卫；原先唯一的复位途径是 shouldLoadMore 变
+    // false——也就是必须「滑离尾部」。但预取阈值只有 6 条，新一页进来后用户通常仍在
+    // 末尾 6 条内，shouldLoadMore 持续为 true → 守卫永远为 true → **滑到一定程度就再也
+    // 加载不出新内容**（实测表现：向上滑一点再快速下滑才能继续，因为那一下手动把
+    // shouldLoadMore 拉成 false 又拉回 true）。
+    //
+    // 仍然保留"防请求风暴"能力：只有 itemCount 变长才复位。服务端返回空页 / 全是重复
+    // 条目时列表不增长，守卫保持 true，不会反复发请求（原设计意图不受影响）。
+    LaunchedEffect(itemCount) {
+        if (itemCount > 0) loadMoreAttempted = false
+    }
+
     LaunchedEffect(shouldLoadMore, loadMoreEnabled, isRefreshing, isLoadingMore, itemCount) {
         if (!loadMoreEnabled || !shouldLoadMore || isRefreshing || isLoadingMore) {
             if (!shouldLoadMore) loadMoreAttempted = false
