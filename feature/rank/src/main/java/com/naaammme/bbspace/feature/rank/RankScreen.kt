@@ -45,6 +45,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
 import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
@@ -273,7 +274,7 @@ private fun RankVideoCard(
     // 版本门禁前置到组合期：不支持的设备不为每张卡实例化锚点 View
     val anchorState = rememberSeamlessAnchorState()
     val seamlessSpec = rememberSeamlessCardSpec(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(BiliRadius.card),
         containerColor = MaterialTheme.colorScheme.surface
     )
     val seamlessOpener = LocalSeamlessCardOpener.current
@@ -314,7 +315,7 @@ private fun RankVideoCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(BiliRadius.card),
                 coverLarge = false,
                 coverFourThree = true,
                 modifier = Modifier.matchParentSize()
@@ -390,7 +391,7 @@ private fun RankPgcCard(
     }
     val anchorState = rememberSeamlessAnchorState()
     val seamlessSpec = rememberSeamlessCardSpec(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(BiliRadius.card),
         containerColor = MaterialTheme.colorScheme.surface
     )
     val seamlessOpener = LocalSeamlessCardOpener.current
@@ -426,7 +427,7 @@ private fun RankPgcCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(BiliRadius.card),
                 coverLarge = false,
                 coverFourThree = true,
                 modifier = Modifier.matchParentSize()

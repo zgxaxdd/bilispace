@@ -43,7 +43,7 @@ import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
-import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
+import com.naaammme.bbspace.core.designsystem.component.VideoListSkeletonList
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
 import com.naaammme.bbspace.core.model.FavoriteFolder
 import com.naaammme.bbspace.feature.favorite.folder.FavoriteFolderList
@@ -405,19 +405,11 @@ private fun FavoriteBody(
 
 @Composable
 fun FavoriteLoading(modifier: Modifier = Modifier) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(
-            count = LOADING_COUNT,
-            key = { index -> "favorite_loading_$index" },
-            contentType = { "loading" }
-        ) {
-            VideoListCardSkeleton()
-        }
-    }
+    VideoListSkeletonList(
+        count = LOADING_COUNT,
+        modifier = modifier,
+        keyPrefix = "favorite_loading"
+    )
 }
 
 private const val LOADING_COUNT = 8

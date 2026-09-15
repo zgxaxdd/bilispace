@@ -61,6 +61,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
 import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.LiveRoute
@@ -208,12 +209,12 @@ private fun FeedCard(
         Color.Transparent
     }
     // 无缝动画参数全部由主题 token 解析：圆角与封面 shape 一致（单列随卡片
-    // MaterialTheme.shapes.large，双列固定 12dp），兜底色即卡片所在区域的底色
+    // MaterialTheme.shapes.large，双列固定 BiliRadius.card），兜底色即卡片所在区域的底色
     val seamlessSpec = if (singleColumn) {
         rememberSeamlessCardSpec()
     } else {
         rememberSeamlessCardSpec(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(BiliRadius.card),
             containerColor = MaterialTheme.colorScheme.surface
         )
     }
@@ -283,7 +284,7 @@ private fun FeedCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = if (singleColumn) null else RoundedCornerShape(12.dp),
+                shape = if (singleColumn) null else RoundedCornerShape(BiliRadius.card),
                 coverLarge = singleColumn,
                 coverFourThree = !singleColumn,
                 modifier = Modifier.matchParentSize()
@@ -416,7 +417,7 @@ private fun FeedCardSkeleton(singleColumn: Boolean = false) {
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (singleColumn) 16f / 9f else 4f / 3f),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(BiliRadius.card)
         )
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             SkeletonBlock(

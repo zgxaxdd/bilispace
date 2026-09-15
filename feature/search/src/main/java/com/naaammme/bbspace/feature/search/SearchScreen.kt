@@ -36,6 +36,7 @@ import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
+import com.naaammme.bbspace.core.designsystem.component.VideoListSkeletonList
 import com.naaammme.bbspace.core.model.SearchFilter
 import com.naaammme.bbspace.core.model.SearchTime
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -351,19 +352,11 @@ private fun SearchFilterButton(
 
 @Composable
 private fun SearchLoadingList(modifier: Modifier = Modifier) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(
-            count = INIT_SKELETON_COUNT,
-            key = { index -> "skeleton_$index" },
-            contentType = { "skeleton" }
-        ) {
-            VideoListCardSkeleton()
-        }
-    }
+    VideoListSkeletonList(
+        count = INIT_SKELETON_COUNT,
+        modifier = modifier,
+        keyPrefix = "skeleton"
+    )
 }
 
 private fun buildSelectedMap(

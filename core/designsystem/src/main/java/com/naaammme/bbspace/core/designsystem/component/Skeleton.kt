@@ -4,14 +4,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -35,6 +38,37 @@ fun SkeletonBlock(
         color
     }
     Box(modifier = modifier.background(color = blockColor, shape = shape))
+}
+
+/**
+ * 「列表首次加载」骨架容器：整屏 LazyColumn + [VideoListCardSkeleton] × [count]。
+ *
+ * 为什么要抽出来：这段容器（contentPadding 12/12、间距 10dp、key/contentType 约定）
+ * 原本在收藏、搜索、历史三处**逐字重复**，任何一个参数调整都要改三遍，正是过去
+ * 「改一次加载态要动多处」的来源。视觉与行为保持与三处原实现完全一致。
+ *
+ * @param count 骨架条数；各页原先分别是 8（收藏/搜索）与 8（历史默认），沿用调用方取值。
+ * @param keyPrefix 列表项 key 前缀，用于区分同页面内多组骨架、避免 key 冲突。
+ */
+@Composable
+fun VideoListSkeletonList(
+    count: Int,
+    modifier: Modifier = Modifier,
+    keyPrefix: String = "skeleton"
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(
+            count = count,
+            key = { index -> "${keyPrefix}_$index" },
+            contentType = { "skeleton" }
+        ) {
+            VideoListCardSkeleton()
+        }
+    }
 }
 
 @Composable
