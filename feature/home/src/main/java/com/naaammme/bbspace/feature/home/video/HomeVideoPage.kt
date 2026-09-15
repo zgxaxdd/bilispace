@@ -212,16 +212,20 @@ private fun FeedCard(
         // 双列参考 PiliPlus-Max：无卡片底色，封面与文字直接落在页面背景上
         Color.Transparent
     }
-    // 无缝动画参数全部由主题 token 解析：圆角与封面 shape 一致（单列随卡片
-    // MaterialTheme.shapes.large，双列固定 BiliRadius.card），兜底色即卡片所在区域的底色
-    val seamlessSpec = if (singleColumn) {
-        rememberSeamlessCardSpec()
-    } else {
-        rememberSeamlessCardSpec(
-            shape = RoundedCornerShape(BiliRadius.card),
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    }
+    // 卡片圆角：**单一来源**。容器、封面、无缝动画锚点三者共用同一个 shape，
+    // 避免出现"容器 24dp / 封面 12dp / 单列封面直角"这种卡片自身就不一致的观感。
+    // 单列本可用更大的圆角，但普通 HomeVideoPage 只有双列；排行榜/搜索等页在单列下
+    // 也用卡片圆角，保持全局一致。
+    val cardShape = RoundedCornerShape(BiliRadius.card)
+    // 无缝动画参数：圆角取卡片自身 shape；兜底色即卡片所在区域的底色
+    val seamlessSpec = rememberSeamlessCardSpec(
+        shape = cardShape,
+        containerColor = if (singleColumn) {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        } else {
+            MaterialTheme.colorScheme.surface
+        }
+    )
     val anchorState = rememberSeamlessAnchorState()
     val seamlessOpener = LocalSeamlessCardOpener.current
     // 版本门禁前置到组合期：不支持的设备不为每张卡片实例化锚点 View（省一个真实
@@ -267,7 +271,7 @@ private fun FeedCard(
             }
         },
         enabled = canOpen,
-        shape = MaterialTheme.shapes.large,
+        shape = cardShape,
         containerColor = containerColor,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -288,7 +292,7 @@ private fun FeedCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = if (singleColumn) null else RoundedCornerShape(BiliRadius.card),
+                shape = cardShape,
                 coverLarge = singleColumn,
                 coverFourThree = !singleColumn,
                 modifier = Modifier.matchParentSize()

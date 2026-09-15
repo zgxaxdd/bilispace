@@ -76,6 +76,7 @@ import androidx.media3.common.util.UnstableApi
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
@@ -291,7 +292,7 @@ fun VideoScreen(
             }
 
             isExpandedWidth -> {
-                val expandedPlayerShape = MaterialTheme.shapes.extraLarge
+                val expandedPlayerShape = RoundedCornerShape(BiliRadius.player)
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -342,7 +343,10 @@ fun VideoScreen(
             }
 
             else -> {
-                val compactPlayerShape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                val compactPlayerShape = RoundedCornerShape(
+                    bottomStart = BiliRadius.playerCompact,
+                    bottomEnd = BiliRadius.playerCompact
+                )
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
