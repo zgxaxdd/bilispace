@@ -58,8 +58,28 @@ class AppInitializer @Inject constructor(
     @Volatile
     private var coldStartSucceeded = false
 
+    /**
+     * 启动期上报 [PlayerViewTargetBinder] 的已释放 player 驻留量。
+     *
+     * 用途：量化 `released`（`IdentityHashMap<Player, Unit>`，只写不删）是否会在真实使用中
+     * 无界增长。每次冷启动打印一次 —— 若多次冷启动之间该值持续变大，说明真的在累积；
+     * 若始终为 0 或很小，说明正常浏览/播放流程根本不触发引擎释放（返回时播放转交迷你播放器，
+     * 引擎实例被复用），无需收敛。
+     *
+     * 仅 [BuildConfig.DEBUG] 输出；release 下该分支不成立，无日志开销。
+     */
+    private fun reportPlayerBinderRetention() {
+        if (!BuildConfig.DEBUG) return
+        Logger.d(TAG) {
+            "PlayerViewTargetBinder.released 驻留 = " +
+                com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
+                    .releasedCountForDiagnostics()
+        }
+    }
+
     fun initialize() {
         observePlaybackService()
+        reportPlayerBinderRetention()
 
         initScope.launch {
             val useSystemDns = appSettings.useSystemDns.first()
