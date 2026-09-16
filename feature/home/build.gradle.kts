@@ -49,3 +49,11 @@ dependencies {
 
     implementation(libs.coil.compose)
 }
+
+// Compose compiler metrics: the only objective way to quantify recomposition.
+// Output goes to <module>/build/compose-metrics and build/compose-reports.
+// Diagnostic artifacts only; safe to delete with clean.
+composeCompiler {
+    metricsDestination.set(layout.buildDirectory.dir("compose-metrics"))
+    reportsDestination.set(layout.buildDirectory.dir("compose-reports"))
+}
