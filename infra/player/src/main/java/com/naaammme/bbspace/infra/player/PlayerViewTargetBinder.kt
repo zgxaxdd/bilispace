@@ -98,4 +98,16 @@ object PlayerViewTargetBinder {
     private fun safeSetPlayer(view: PlayerView, player: Player?) {
         runCatching { view.player = player }
     }
+
+    /**
+     * **仅供诊断**：当前 [released] 中滞留的已释放 player 数量。
+     *
+     * `released` 是 `IdentityHashMap<Player, Unit>`，只写不删 —— 这是刻意设计
+     * （见类注释第 3 条：迟到的陈旧 StateFlow 快照必须被判为 no-op），但意味着
+     * 每个被释放的 player 实例都会被强引用驻留。
+     *
+     * 本方法只读、无副作用，供 debug 构建量化驻留规模；不要在业务逻辑里使用。
+     */
+    @UnstableApi
+    fun releasedCountForDiagnostics(): Int = released.size
 }

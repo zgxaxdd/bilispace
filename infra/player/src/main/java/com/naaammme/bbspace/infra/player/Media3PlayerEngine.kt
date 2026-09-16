@@ -189,6 +189,19 @@ class Media3PlayerEngine @Inject constructor(
         prev?.let { player ->
             PlayerViewTargetBinder.onPlayerReleased(player)
             player.release()
+            logReleasedRetention("rebuild")
+        }
+    }
+
+    /**
+     * 诊断用（仅 debug 输出）：[PlayerViewTargetBinder] 内部 `released` 是
+     * `IdentityHashMap<Player, Unit>`，只写不删 —— 这是刻意设计（见 binder 类注释第 3 条），
+     * 但意味着每个被释放的 player 会被强引用驻留。此处量化驻留规模，便于判断是否值得收敛。
+     */
+    private fun logReleasedRetention(where: String) {
+        Logger.d(TAG) {
+            "retained released players after $where = " +
+                PlayerViewTargetBinder.releasedCountForDiagnostics()
         }
     }
 
@@ -283,6 +296,7 @@ class Media3PlayerEngine @Inject constructor(
         // 仍绑定的视图，最后 release：视图层永远只会见到存活实例或 null
         PlayerViewTargetBinder.onPlayerReleased(player)
         player.release()
+        logReleasedRetention("release")
     }
 
     private fun buildPlayer(context: Context, config: PlayerConfig): ExoPlayer {
@@ -342,6 +356,7 @@ class Media3PlayerEngine @Inject constructor(
         // 释放旧实例前先标记释放并摘除仍绑定的视图（同 release() 的所有权顺序）
         PlayerViewTargetBinder.onPlayerReleased(player)
         player.release()
+        logReleasedRetention("recover")
         runtimeScope.launch {
             try {
                 setSource(source, positionMs, playWhenReady)
