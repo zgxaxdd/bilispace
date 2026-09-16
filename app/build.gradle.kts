@@ -1,7 +1,9 @@
 plugins {
-    alias(libs.plugins.android.application)
-    // AGP 9 内置 Kotlin 支持：kotlin.android 已移除
-    alias(libs.plugins.kotlin.compose)
+    // 公共 application 配置（namespace / compileSdk / minSdk / targetSdk / Java 17）
+    // 由约定插件提供。顺序重要：compose 约定要配置 Android 扩展，
+    // 因此必须排在 application 约定之后。
+    id("bbspace.android.application")
+    id("bbspace.android.compose")
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
@@ -22,9 +24,6 @@ val hasReleaseSigning: Boolean =
         !signingKeyPassword.isNullOrBlank()
 
 android {
-    namespace = "com.naaammme.bbspace"
-    compileSdk = 36
-
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
@@ -37,13 +36,13 @@ android {
     }
 
     defaultConfig {
+        // 只留约定插件无法提供、且属于发布身份的项；
+        // minSdk / targetSdk / testInstrumentationRunner 已由
+        // bbspace.android.application 提供，不再重复。
         applicationId = "com.naaammme.bbspace"
-        minSdk = 24
-        targetSdk = 36
         versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 10804
         versionName = (project.findProperty("versionName") as String?) ?: "1.8.04"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -76,12 +75,8 @@ android {
             proguardFiles("proguard-rules.pro")
         }
     }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
     buildFeatures {
-        compose = true
+        // compose = true 由 bbspace.android.compose 设置；这里只留 BuildConfig
         buildConfig = true
     }
     packaging {
