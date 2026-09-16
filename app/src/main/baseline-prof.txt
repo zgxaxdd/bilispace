@@ -1,7 +1,13 @@
 # BBSpace 手工 Baseline Profile
 # 覆盖启动 + 首屏 + 进入播放的关键路径。规则以源码/产物中真实存在的类为准；
 # 三方库统一使用包级通配（AGP 会解析为运行时命中的方法）。
-# 目标：冷启动与首屏滚动 JIT 预编译/AOT，减少启动期解释执行。
+#
+# 规则语法：`<标志位><类描述符>;-><方法名><签名>`
+#   HS = hot + startup（预热编译），L 起头是类描述符
+#   例：HSPLcom/foo/Bar;->*()V   →  hot+startup，Bar 的全部 void 无参方法
+#       Lcom/foo/Bar;            →  仅类（无方法标志）
+#
+# 目标：让冷启动与首屏滚动路径走 AOT 预编译，减少启动期解释执行。
 
 # ---- 应用入口与启动链路 ----
 HSPLcom/naaammme/bbspace/BiliApplication;->*()V
