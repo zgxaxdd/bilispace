@@ -63,15 +63,17 @@ android {
         }
 
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // AGP 9.3+ 的新 optimization DSL：同时开启代码优化与优化资源缩减，
+            // 并自动提供默认 Android keep 规则（含 @JavascriptInterface / @Keep），
+            // 因此不再需要 getDefaultProguardFile("proguard-android-optimize.txt")。
+            // 注意：绝不能与 isMinifyEnabled / isShrinkResources 同时使用（语义重叠）。
+            optimization {
+                enable = true
+            }
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            proguardFiles("proguard-rules.pro")
         }
     }
     compileOptions {
