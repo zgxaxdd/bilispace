@@ -81,6 +81,7 @@ import com.naaammme.bbspace.infra.player.danmaku.DanmakuOverlayState
 import com.naaammme.bbspace.infra.player.danmaku.rememberDanmakuOverlayState
 import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.core.model.PlayerSettingsState
+import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
 import com.naaammme.bbspace.feature.video.R
 import com.naaammme.bbspace.feature.video.SponsorBlockUiState
@@ -714,8 +715,19 @@ private fun VideoPlayerOverlay(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 暂停时显示中央大播放键（现代播放器通用交互）
-        if (!state.isPlaying) {
+        // 暂停时显示中央大播放键（现代播放器通用交互）。
+        //
+        // 判据不能只看 isPlaying：Media3 的 isPlaying == (playbackState==READY && playWhenReady)，
+        // 因此「起播前 / 缓冲中 / 首帧未出」这些阶段 isPlaying 也是 false。只用 isPlaying 判断，
+        // 会让这个中央播放键在每次打开视频时闪一下再消失（用户可见的「暂停标志」）。
+        //
+        // 同时必须保留 Ended：播完后 playWhenReady 仍为 true 而 isPlaying 变 false，
+        // 若一并抑制，用户就没有「重播」入口了。
+        val showCenterPlayButton =
+            !state.isPlaying &&
+                (!state.playWhenReady || state.playbackState == PlaybackState.Ended)
+
+        if (showCenterPlayButton) {
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)

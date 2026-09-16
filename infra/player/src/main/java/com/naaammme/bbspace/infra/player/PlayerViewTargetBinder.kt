@@ -45,8 +45,17 @@ object PlayerViewTargetBinder {
             return
         }
         if (released.containsKey(player)) {
-            // 迟到的陈旧绑定请求：视图若仍持有旧引用则安全摘除，绝不再绑
-            if (owners.containsKey(view) || view.player != null) {
+            // 迟到的陈旧绑定请求。只处理「该视图当前确实绑着这个已释放实例」的情况。
+            //
+            // 关键：不能无条件 detachView(view)。视图可能已经被另一个存活实例重新绑定了 ——
+            // 典型时序：本实例在 Media3PlayerEngine.updateConfig 里先发布新实例、再把本实例
+            // 记入 released（见 updateConfig 的顺序），而另一处（如应用内小窗）迟到的
+            // AndroidView.update 仍带着本实例进来。此时无条件摘除会把「已绑好新实例」的视图
+            // 打回未绑定，且组合态已稳定、不会再有 update 重跑，表现为永久黑屏（视频渲染不出来）。
+            // 只有视图当前确实持有本实例时才摘除；否则一律不碰：
+            // - view.player 已是另一个存活实例 => 视图已被重新绑定，摘了就是永久黑屏；
+            // - view.player 为 null        => 视图未被绑定，无需处理。
+            if (owners[view] === player || view.player === player) {
                 detachView(view)
             }
             return
