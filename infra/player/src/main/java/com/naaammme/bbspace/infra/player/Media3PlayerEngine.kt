@@ -67,6 +67,9 @@ class Media3PlayerEngine @Inject constructor(
     override val playbackProgress: StateFlow<PlaybackProgress> = _playbackProgress.asStateFlow()
     private val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var playerConfig = PlayerConfig()
+    // 循环播放是播放器级属性，buildPlayer() 不会带上它：必须与 playerConfig 一样
+    // 作为期望状态保存在引擎里，并在每个新建实例上重新施加（懒创建/配置重建/错误恢复）。
+    private var desiredRepeatOne = false
     private var videoDecoderName: String? = null
     private var audioDecoderName: String? = null
     private var firstFrameSeq = 0L
@@ -236,12 +239,37 @@ class Media3PlayerEngine @Inject constructor(
 
     override fun play() {
         val player = ensurePlayer()
+        // ExoPlayer 语义：处于 STATE_ENDED 时单纯 play() 不会重播，必须先把位置移回起点。
+        // 否则「播完后点中央播放键」表现为点击无反应（按钮在，但画面不动）。
+        if (player.playbackState == Player.STATE_ENDED) {
+            player.seekTo(0L)
+        }
         player.play()
     }
 
     override fun pause() {
         val player = exoPlayer ?: return
         player.pause()
+    }
+
+    override fun setRepeatMode(repeatOne: Boolean) {
+        // 与 playerConfig 同为「期望状态」：必须先记住，再应用到当前实例。
+        // 播放器是懒创建的（ensurePlayer），设置可能在实例存在之前就到达
+        // （例如冷启动时订阅立刻发出持久化的值），此时只记状态、建实例时再施加，
+        // 否则该次设置会被静默丢弃且永远不补。
+        desiredRepeatOne = repeatOne
+        Logger.d(TAG) {
+            "setRepeatMode desiredRepeatOne=" + repeatOne + " playerExists=" + (exoPlayer != null)
+        }
+        exoPlayer?.let { applyRepeatMode(it) }
+    }
+
+    private fun applyRepeatMode(player: ExoPlayer) {
+        player.repeatMode = if (desiredRepeatOne) {
+            Player.REPEAT_MODE_ONE
+        } else {
+            Player.REPEAT_MODE_OFF
+        }
     }
 
     override fun setSpeed(speed: Float) {
@@ -319,6 +347,8 @@ class Media3PlayerEngine @Inject constructor(
                     true
                 )
                 setHandleAudioBecomingNoisy(true)
+                // 新建实例一律带上的期望状态（buildPlayer 是三条建实例路径的唯一出口）
+                applyRepeatMode(this)
                 addListener(newPlayerListener(rebuildGen))
                 addAnalyticsListener(analyticsListener)
             }

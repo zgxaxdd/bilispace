@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.infra.player
+package com.naaammme.bbspace.infra.player
 
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -36,6 +36,14 @@ interface PlayerEngine {
     fun play()
     fun pause()
     fun setSpeed(speed: Float)
+
+    /**
+     * 设置循环模式；[repeatOne] 为 true 表示单视频循环。
+     *
+     * 与 [updateConfig] 分开是有意的：改循环不应触发播放器重建（重建会打断正在播放的视频）。
+     */
+    fun setRepeatMode(repeatOne: Boolean)
+
     fun seekTo(positionMs: Long)
     fun setMediaMetadata(metadata: MediaMetadata)
     fun stopForReuse(resetPosition: Boolean = true)

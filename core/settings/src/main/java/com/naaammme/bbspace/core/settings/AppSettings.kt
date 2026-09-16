@@ -20,6 +20,7 @@ import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.PlayerBufferProfile
 import com.naaammme.bbspace.core.model.PlayerBufferSettings
 import com.naaammme.bbspace.core.model.PlayerPlaybackPrefs
+import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.VideoCdnMode
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -329,6 +330,7 @@ class AppSettings @Inject constructor(
     private val gestureSpeedKey = floatPreferencesKey("gesture_speed")
     private val doubleTapLikeKey = booleanPreferencesKey("double_tap_like")
     private val videoCdnModeKey = stringPreferencesKey("video_cdn_mode")
+    private val repeatModeKey = stringPreferencesKey("player_repeat_mode")
     private val reportPlaybackKey = booleanPreferencesKey("report_playback")
     private val danmakuEnabledKey = booleanPreferencesKey("danmaku_enabled")
     private val danmakuAreaPercentKey = intPreferencesKey("danmaku_area_percent")
@@ -372,7 +374,10 @@ class AppSettings @Inject constructor(
                 videoCdnMode = prefs[videoCdnModeKey]
                     ?.let(VideoCdnMode::valueOf)
                     ?: defaultPlaybackPrefs.videoCdnMode,
-                doubleTapLike = prefs[doubleTapLikeKey] ?: defaultPlaybackPrefs.doubleTapLike
+                doubleTapLike = prefs[doubleTapLikeKey] ?: defaultPlaybackPrefs.doubleTapLike,
+                repeatMode = prefs[repeatModeKey]
+                    ?.let(PlayerRepeatMode::valueOf)
+                    ?: defaultPlaybackPrefs.repeatMode
             ),
             danmaku = DanmakuConfig(
                 enabled = prefs[danmakuEnabledKey] ?: defaultDanmakuConfig.enabled,
@@ -460,6 +465,10 @@ class AppSettings @Inject constructor(
 
     suspend fun setDoubleTapLike(enabled: Boolean) {
         context.appSettingsDataStore.edit { it[doubleTapLikeKey] = enabled }
+    }
+
+    suspend fun setRepeatMode(mode: PlayerRepeatMode) {
+        context.appSettingsDataStore.edit { it[repeatModeKey] = mode.name }
     }
 
     suspend fun setVideoCdnMode(mode: VideoCdnMode) {

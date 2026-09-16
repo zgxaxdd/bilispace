@@ -97,6 +97,19 @@ enum class VideoCdnMode(
         }
 }
 
+/**
+ * 循环播放模式。
+ *
+ * 用枚举而非布尔，便于后续不加字段就扩到「列表循环 / 随机」。
+ */
+enum class PlayerRepeatMode {
+    /** 不循环：播完停在结尾 */
+    Off,
+
+    /** 单个视频循环：播完自动从头再播 */
+    One
+}
+
 @Immutable
 data class PlayerPlaybackPrefs(
     val backgroundPlayback: Boolean = true,
@@ -110,7 +123,9 @@ data class PlayerPlaybackPrefs(
     /** 双击画面点赞：关闭时双击为暂停（默认） */
     val doubleTapLike: Boolean = false,
     /** ColorOS 系统级无缝过渡动画（首页卡片 → 全屏详情）：关闭则退回应用内覆盖层路径 */
-    val seamlessTransition: Boolean = true
+    val seamlessTransition: Boolean = true,
+    /** 单视频循环播放（播完自动重播） */
+    val repeatMode: PlayerRepeatMode = PlayerRepeatMode.Off
 )
 
 @Immutable

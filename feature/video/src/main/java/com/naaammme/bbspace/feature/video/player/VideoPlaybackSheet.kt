@@ -65,6 +65,7 @@ import com.naaammme.bbspace.core.model.PlayerBufferProfile
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.VideoCdnMode
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.formatDuration
@@ -393,6 +394,13 @@ private fun PlaybackSettingsSection(
         subtitle = "开启后双击画面点赞并播放爱心动效；关闭时双击为暂停/播放",
         checked = settingsState.playback.doubleTapLike,
         onCheckedChange = viewModel::updateDoubleTapLike
+    )
+
+    SheetSwitchCard(
+        title = "单个视频循环播放",
+        subtitle = "开启后播完自动从头再播；关闭则播完停在结尾",
+        checked = settingsState.playback.repeatMode == PlayerRepeatMode.One,
+        onCheckedChange = viewModel::updateRepeatMode
     )
 }
 

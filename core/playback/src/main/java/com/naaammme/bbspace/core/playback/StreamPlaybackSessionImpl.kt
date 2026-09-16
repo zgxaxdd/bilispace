@@ -29,6 +29,7 @@ import com.naaammme.bbspace.core.model.PlaybackProgress
 import com.naaammme.bbspace.core.model.PlaybackRequest
 import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
+import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSessionState
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
 import com.naaammme.bbspace.core.model.StreamPlaybackSessionState
@@ -57,6 +58,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -130,6 +132,17 @@ class StreamPlaybackSessionImpl @Inject constructor(
                     danmakuSession.onProgress(progress.positionMs)
                 }
             }
+        }
+        runtimeScope.launch {
+            // 循环播放：设置变化即作用到当前播放器（含「先开循环、再开视频」的情形）。
+            // 走设置流而不是直接调引擎，是为了让改设置与持久化保持同一条链路；
+            // 若在视频加载前就订阅，flow 会立刻发一次当前值，因此无需额外初始化调用。
+            playerSettings.state
+                .map { it.playback.repeatMode }
+                .distinctUntilChanged()
+                .collect { mode ->
+                    playerEngine.setRepeatMode(mode == PlayerRepeatMode.One)
+                }
         }
         runtimeScope.launch {
             playerSettings.state.map { it.danmaku.enabled }.collect { enabled ->

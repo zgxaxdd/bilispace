@@ -14,6 +14,7 @@ import com.naaammme.bbspace.core.model.FavoriteFolder
 import com.naaammme.bbspace.core.model.PlayBiz
 import com.naaammme.bbspace.core.model.PlaybackProgress
 import com.naaammme.bbspace.core.model.PlayerBufferProfile
+import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.VideoCdnMode
 import com.naaammme.bbspace.core.model.VideoDownloadKind
 import com.naaammme.bbspace.core.model.VideoDownloadMeta
@@ -393,6 +394,20 @@ class VideoViewModel @Inject constructor(
     fun updateDoubleTapLike(enabled: Boolean) {
         viewModelScope.launch {
             playerSettings.setDoubleTapLike(enabled)
+        }
+    }
+
+    /**
+     * 单视频循环播放开关。
+     *
+     * 只写设置；实际作用到播放器由 [com.naaammme.bbspace.core.playback.StreamPlaybackSessionImpl]
+     * 订阅 `playback.repeatMode` 完成 —— 这样「先开开关、再开视频」也能生效（订阅时会立刻发一次当前值）。
+     */
+    fun updateRepeatMode(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setRepeatMode(
+                if (enabled) PlayerRepeatMode.One else PlayerRepeatMode.Off
+            )
         }
     }
 
