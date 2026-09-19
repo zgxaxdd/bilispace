@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -88,14 +89,17 @@ fun FavoriteContentList(
             key = { it.key },
             contentType = { it.otype }
         ) { item ->
-            FavoriteContentCard(
-                item = item,
-                onOpenContent = onOpenContent,
-                selectionMode = selectionMode,
-                selected = item.key in selectedKeys,
-                onItemLongPress = onItemLongPress,
-                onToggleSelect = onToggleSelect
-            )
+            // A10：移除收藏条目时淡出+位移回弹收拢
+            Box(modifier = Modifier.animateItem()) {
+                FavoriteContentCard(
+                    item = item,
+                    onOpenContent = onOpenContent,
+                    selectionMode = selectionMode,
+                    selected = item.key in selectedKeys,
+                    onItemLongPress = onItemLongPress,
+                    onToggleSelect = onToggleSelect
+                )
+            }
         }
 
         if (isLoadingMore) {

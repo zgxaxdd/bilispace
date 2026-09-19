@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.space.archive
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -139,10 +140,13 @@ private fun LazyListScope.videoSection(
                 key = { "${it.aid}_${it.cid}" },
                 contentType = { "video" }
             ) { video ->
-                SpaceVideoCard(
-                    video = video,
-                    onClick = { onOpenVideo(video.target) }
-                )
+                // A8：分区切换（视频↔动态）条目淡入+位移过渡
+                Box(modifier = Modifier.animateItem()) {
+                    SpaceVideoCard(
+                        video = video,
+                        onClick = { onOpenVideo(video.target) }
+                    )
+                }
             }
         }
     }

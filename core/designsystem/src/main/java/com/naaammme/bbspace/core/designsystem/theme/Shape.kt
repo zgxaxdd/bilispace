@@ -34,3 +34,16 @@ fun buildShapes(style: CornerStyle): Shapes = when (style) {
         extraLarge = RoundedCornerShape(36.dp)
     )
 }
+
+/**
+ * iOS 风格固定圆角档（方案 3.2 节）：不随 [CornerStyle] 漂移，也**不读取**它——
+ * iOS 无"圆角风格"概念，该维度在 iOS 模式下置灰。容器级圆角走这里；具体组件的
+ * 圆角约定（卡片 12dp、Dock 28dp 等）仍走 [BiliRadius]，两者分工不变。
+ */
+fun iOSShapes(): Shapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(20.dp)
+)

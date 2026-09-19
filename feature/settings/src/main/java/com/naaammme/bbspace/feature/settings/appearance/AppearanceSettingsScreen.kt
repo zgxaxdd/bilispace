@@ -27,7 +27,12 @@ import com.naaammme.bbspace.core.designsystem.theme.PresetColors
 import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.glass.GlassStyle
+import com.naaammme.bbspace.core.designsystem.component.BiliTopBar
+import com.naaammme.bbspace.core.designsystem.component.rememberBiliLargeTitleScrollState
 import com.naaammme.bbspace.feature.settings.components.SettingSwitch
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,18 +43,14 @@ fun AppearanceSettingsScreen(
 ) {
     val config by viewModel.themeConfig.collectAsStateWithLifecycle()
     val fixBottomBar by viewModel.fixBottomBar.collectAsStateWithLifecycle()
+    val isIOS = config.uiStyle == UiStyle.IOS
+    val topBarState = rememberBiliLargeTitleScrollState()
 
     Scaffold(
+        modifier = if (isIOS) Modifier.nestedScroll(topBarState.connection) else Modifier,
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar(
-                title = { Text("外观设计") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
-                    }
-                }
-            )
+            BiliTopBar(title = "外观设计", state = topBarState, onBack = onBack)
         },
     ) { padding ->
         LazyColumn(
@@ -60,6 +61,13 @@ fun AppearanceSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
+                UiStyleSelector(
+                    selected = config.uiStyle,
+                    onSelect = viewModel::updateUiStyle
+                )
+            }
+
+            item {
                 ThemeModeSelector(
                     selected = config.themeMode,
                     onSelect = viewModel::updateThemeMode
@@ -67,18 +75,21 @@ fun AppearanceSettingsScreen(
             }
 
             item {
+                // iOS 无动态取色概念：置灰保留值（方案 3.4 第 4 条）
                 SettingSwitch(
                     title = "动态取色",
                     subtitle = "Android 12+ 使用系统动态配色",
                     checked = config.useDynamicColor,
-                    onCheckedChange = viewModel::updateUseDynamicColor
+                    onCheckedChange = viewModel::updateUseDynamicColor,
+                    enabled = !isIOS
                 )
             }
 
             item {
                 PaletteStyleSelector(
                     selected = config.paletteStyle,
-                    onSelect = viewModel::updatePaletteStyle
+                    onSelect = viewModel::updatePaletteStyle,
+                    enabled = !isIOS
                 )
             }
 
@@ -104,6 +115,16 @@ fun AppearanceSettingsScreen(
                     subtitle = "深色用纯黑，浅色用纯白，会参与背景层级反转",
                     checked = config.isPureBlack,
                     onCheckedChange = viewModel::updateIsPureBlack
+                )
+            }
+
+            item {
+                GlassSection(
+                    isIOS = isIOS,
+                    enabled = config.glassEnabled,
+                    style = config.glassStyle,
+                    onEnabledChange = viewModel::updateGlassEnabled,
+                    onStyleChange = viewModel::updateGlassStyle
                 )
             }
 
@@ -154,7 +175,8 @@ fun AppearanceSettingsScreen(
             item {
                 CornerStyleSelector(
                     selected = config.cornerStyle,
-                    onSelect = viewModel::updateCornerStyle
+                    onSelect = viewModel::updateCornerStyle,
+                    enabled = !isIOS
                 )
             }
 
@@ -164,6 +186,48 @@ fun AppearanceSettingsScreen(
                     onSelect = viewModel::updateTransitionStyle
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun UiStyleSelector(
+    selected: UiStyle,
+    onSelect: (UiStyle) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("界面风格", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = selected == UiStyle.MATERIAL,
+                    onClick = { onSelect(UiStyle.MATERIAL) },
+                    label = { Text("Material", maxLines = 1) }
+                )
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = selected == UiStyle.IOS,
+                    onClick = { onSelect(UiStyle.IOS) },
+                    label = { Text("iOS", maxLines = 1) }
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                when (selected) {
+                    UiStyle.IOS ->
+                        "iOS：灰底白卡分组、大标题导航、固定圆角档；主题色作为强调色。" +
+                            "动态取色 / 调色板 / 圆角风格不参与。"
+                    UiStyle.MATERIAL ->
+                        "Material：Material You 动态取色、调色板风格与圆角风格全部生效。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -261,11 +325,20 @@ private fun ColorItem(
 @Composable
 private fun PaletteStyleSelector(
     selected: PaletteStyle,
-    onSelect: (PaletteStyle) -> Unit
+    onSelect: (PaletteStyle) -> Unit,
+    enabled: Boolean = true
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("调色盘风格", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "调色盘风格",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
             Spacer(Modifier.height(12.dp))
             PaletteStyle.entries.forEach { style ->
                 Row(
@@ -275,6 +348,7 @@ private fun PaletteStyleSelector(
                 ) {
                     TextButton(
                         onClick = { onSelect(style) },
+                        enabled = enabled,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
@@ -610,11 +684,20 @@ private fun AnimationSpeedSelector(
 @Composable
 private fun CornerStyleSelector(
     selected: CornerStyle,
-    onSelect: (CornerStyle) -> Unit
+    onSelect: (CornerStyle) -> Unit,
+    enabled: Boolean = true
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("圆角风格", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "圆角风格",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -625,6 +708,7 @@ private fun CornerStyleSelector(
                         modifier = Modifier.weight(1f),
                         selected = selected == s,
                         onClick = { onSelect(s) },
+                        enabled = enabled,
                         label = {
                             Text(
                                 when (s) {
@@ -638,6 +722,63 @@ private fun CornerStyleSelector(
                         }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassSection(
+    isIOS: Boolean,
+    enabled: Boolean,
+    style: GlassStyle,
+    onEnabledChange: (Boolean) -> Unit,
+    onStyleChange: (GlassStyle) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "液态玻璃",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (isIOS) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "仅 iOS 风格下生效：Dock、首页顶栏与播放胶囊使用背板模糊材质（API 31 以下自动回退半透明）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            SettingSwitch(
+                title = "玻璃材质",
+                subtitle = if (isIOS) "悬浮表面使用液态玻璃材质" else "需先选择 iOS 界面风格",
+                checked = enabled,
+                onCheckedChange = onEnabledChange,
+                enabled = isIOS
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = style == GlassStyle.STABLE,
+                    onClick = { onStyleChange(GlassStyle.STABLE) },
+                    enabled = isIOS && enabled,
+                    label = { Text("稳定", maxLines = 1) }
+                )
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = style == GlassStyle.RICH,
+                    onClick = { onStyleChange(GlassStyle.RICH) },
+                    enabled = isIOS && enabled,
+                    label = { Text("浓郁", maxLines = 1) }
+                )
             }
         }
     }

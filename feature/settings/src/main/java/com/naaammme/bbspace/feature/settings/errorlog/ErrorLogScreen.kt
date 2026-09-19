@@ -6,6 +6,9 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -113,7 +116,17 @@ private fun ErrorLogItem(log: ErrorLog, fmt: SimpleDateFormat) {
             containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
         )
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(10.dp)
+                // A12：错误日志堆栈展开/折叠 300ms Emphasized 高度过渡
+                .animateContentSize(
+                    animationSpec = tween(
+                        durationMillis = LocalAnimations.current.long,
+                        easing = LocalAnimations.current.emphasized
+                    )
+                )
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

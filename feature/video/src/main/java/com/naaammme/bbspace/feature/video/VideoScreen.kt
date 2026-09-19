@@ -72,6 +72,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.media3.common.util.UnstableApi
+import androidx.compose.material3.BottomSheetDefaults
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
@@ -588,6 +591,13 @@ private fun DownloadTaskSheet(
     }
 
     ModalBottomSheet(
+        // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+        shape = if (LocalUiStyle.current == UiStyle.IOS) {
+            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        } else {
+            BottomSheetDefaults.ExpandedShape
+        },
+        scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {

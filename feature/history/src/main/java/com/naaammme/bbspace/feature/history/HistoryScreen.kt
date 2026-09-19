@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.feature.history
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -139,10 +140,13 @@ fun HistoryScreen(
                                 key = { it.key },
                                 contentType = { it.type }
                             ) { item ->
-                                HistoryItemCard(
-                                    item = item,
-                                    onClick = { onOpenHistoryTarget(item.target) }
-                                )
+                                // A10：删除历史条目时淡出+位移回弹收拢
+                                Box(modifier = Modifier.animateItem()) {
+                                    HistoryItemCard(
+                                        item = item,
+                                        onClick = { onOpenHistoryTarget(item.target) }
+                                    )
+                                }
                             }
 
                             if (state.isLoadingMore) {

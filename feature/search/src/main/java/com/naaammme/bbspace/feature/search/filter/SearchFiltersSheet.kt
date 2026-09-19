@@ -33,6 +33,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import androidx.compose.ui.graphics.Color
 import com.naaammme.bbspace.core.model.SearchFilter
 import com.naaammme.bbspace.core.model.SearchOp
 import com.naaammme.bbspace.core.model.SearchTime
@@ -63,6 +68,13 @@ fun SearchFiltersSheet(
     val canApply = draftSel[SINCE_KEY]?.singleOrNull() != CUSTOM_TIME || draftTime.isActive
 
     ModalBottomSheet(
+        // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+        shape = if (LocalUiStyle.current == UiStyle.IOS) {
+            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        } else {
+            BottomSheetDefaults.ExpandedShape
+        },
+        scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {

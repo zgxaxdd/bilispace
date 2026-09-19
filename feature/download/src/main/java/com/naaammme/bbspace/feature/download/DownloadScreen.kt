@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.feature.download
 
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
@@ -251,15 +252,18 @@ private fun QueueTab(
                 items = tasks,
                 key = { it.id }
             ) { task ->
-                TaskCard(
-                    task = task,
-                    onPauseTask = onPauseTask,
-                    onResumeTask = onResumeTask,
-                    onDeleteTask = { pendingDelete = task },
-                    onExportTask = onExportTask,
-                    export = state.export,
-                    onOpenPlayer = onOpenPlayer
-                )
+                // A10：删除缓存任务时淡出+位移回弹收拢
+                Box(modifier = Modifier.animateItem()) {
+                    TaskCard(
+                        task = task,
+                        onPauseTask = onPauseTask,
+                        onResumeTask = onResumeTask,
+                        onDeleteTask = { pendingDelete = task },
+                        onExportTask = onExportTask,
+                        export = state.export,
+                        onOpenPlayer = onOpenPlayer
+                    )
+                }
             }
         }
     }

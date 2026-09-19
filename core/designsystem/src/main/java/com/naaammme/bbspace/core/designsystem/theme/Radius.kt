@@ -39,4 +39,20 @@ object BiliRadius {
 
     /** 详情页竖排（非展开宽度）时播放器区域的底部圆角。 */
     val playerCompact = 16.dp
+
+    /**
+     * iOS Inset Grouped 分组卡圆角（方案 2.5）。iOS 模式下 CapsuleGroup /
+     * 设置分组使用；不随 CornerStyle 漂移（iOS 无该维度）。
+     */
+    val groupedList = 16.dp
+
+    /** 弹层（BottomSheet / Dialog）顶部圆角。 */
+    val sheetTop = 20.dp
+
+    /**
+     * 悬浮 Dock（底部导航容器）圆角。iOS 模式下由 32dp（shapes.extraLarge@ROUNDED）
+     * 刻意收紧至 28dp：容器改半透明后视觉体量更轻，32dp 显得过圆。
+     * 注意 Material 模式仍取 MaterialTheme.shapes.extraLarge，勿改回。
+     */
+    val dock = 28.dp
 }

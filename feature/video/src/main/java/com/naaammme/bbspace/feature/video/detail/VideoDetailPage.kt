@@ -76,6 +76,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.BottomSheetDefaults
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import androidx.compose.ui.graphics.Color
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoDetailInfoSkeleton
@@ -239,6 +243,13 @@ internal fun VideoDetailPage(
 
     sheet?.let { activeSheet ->
         ModalBottomSheet(
+            // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+            shape = if (LocalUiStyle.current == UiStyle.IOS) {
+                RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            } else {
+                BottomSheetDefaults.ExpandedShape
+            },
+            scrimColor = Color.Black.copy(alpha = 0.40f),
             onDismissRequest = { closeSheet() },
             sheetState = sheetState
         ) {

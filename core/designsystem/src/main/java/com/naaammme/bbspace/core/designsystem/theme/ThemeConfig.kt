@@ -22,7 +22,18 @@ data class ThemeConfig(
     // 观感偏方、显得陈旧；ROUNDED 给到 16dp / 大容器 24dp，与当下主流客户端
     // （BiliPai、PiliPala 等）的圆润卡片一致。
     // 注意：这是**默认值**，用户已在设置里选过圆角风格的不受影响。
-    val cornerStyle: CornerStyle = CornerStyle.ROUNDED
+    val cornerStyle: CornerStyle = CornerStyle.ROUNDED,
+    // 界面风格预设：MATERIAL 维持现有 Material You 全链路（取色 / 调色板 / 圆角档
+    // 全部生效）；IOS 切换为固定语义色板 + tint 覆盖 primary + 固定圆角档 + iOS
+    // 排版阶梯，此时 useDynamicColor / paletteStyle / cornerStyle 不生效（设置页置灰）。
+    // 默认 MATERIAL 是风险面决策：iOS 化覆盖全部 feature 模块，先作为可选项发布，
+    // 真机走查干净后翻转默认值只改这一行（读取路径以 defaultThemeConfig 兜底）。
+    val uiStyle: UiStyle = UiStyle.MATERIAL,
+    // 液态玻璃材质包（挂在 iOS 风格上，非新风格维度）：MATERIAL 下不生效且置灰。
+    // 默认关闭——玻璃只在白名单表面生效，先走查再默认。
+    val glassEnabled: Boolean = false,
+    val glassStyle: com.naaammme.bbspace.core.designsystem.glass.GlassStyle =
+        com.naaammme.bbspace.core.designsystem.glass.GlassStyle.STABLE
 )
 
 const val DEFAULT_PULL_REFRESH_DISTANCE_DP = 80f
@@ -33,6 +44,15 @@ enum class CornerStyle {
     STANDARD,
     ROUNDED,
     CIRCULAR
+}
+
+/**
+ * 界面风格预设。MATERIAL 是默认与回退路径：切换到 IOS 后所有视觉 token 换源，
+ * 但已有动画链路（无缝 morph、迷你播放器、导航过渡）不受影响。
+ */
+enum class UiStyle {
+    MATERIAL,
+    IOS
 }
 
 enum class TransitionStyle {

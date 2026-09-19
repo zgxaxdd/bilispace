@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -107,6 +111,13 @@ internal fun CommentEditorSheet(
     }
 
     ModalBottomSheet(
+        // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+        shape = if (LocalUiStyle.current == UiStyle.IOS) {
+            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        } else {
+            BottomSheetDefaults.ExpandedShape
+        },
+        scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = {
             if (!busy) {
                 onDismiss()

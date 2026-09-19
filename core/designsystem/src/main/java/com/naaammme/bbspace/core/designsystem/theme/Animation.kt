@@ -14,6 +14,9 @@ data class BiliAnimations(
     val medium: Int,
     val long: Int,
     val extraLong: Int,
+    // iOS morph 缓动族（方案 3.2 #2，移植自 BiliPai iosMorphTween 280ms）：
+    // 供胶囊 / 底栏滑块 / 弹层共用，与既有档位并存而非替换。
+    val morph: Int,
     val emphasized: Easing,
     val standard: Easing
 )
@@ -24,6 +27,7 @@ val LocalAnimations = compositionLocalOf {
         medium = 200,
         long = 300,
         extraLong = 400,
+        morph = 280,
         emphasized = EmphasizedEasing,
         standard = StandardEasing
     )
@@ -41,6 +45,7 @@ fun createAnimations(speed: AnimationSpeed): BiliAnimations {
         medium = (200 * factor).toInt().coerceAtLeast(1),
         long = (300 * factor).toInt().coerceAtLeast(1),
         extraLong = (400 * factor).toInt().coerceAtLeast(1),
+        morph = (280 * factor).toInt().coerceAtLeast(1),
         emphasized = EmphasizedEasing,
         standard = StandardEasing
     )

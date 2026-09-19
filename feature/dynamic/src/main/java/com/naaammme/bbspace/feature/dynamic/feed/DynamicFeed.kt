@@ -27,9 +27,20 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -220,24 +231,46 @@ private fun DynamicCardContent(
                         .clickable { onLike(item) }
                         .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ThumbUp,
-                        contentDescription = "点赞",
-                        tint = if (stats.liked) {
+                    // A9：点赞选中态颜色 150ms 渐变 + 图标 spring 弹跳（同 A3 规格）
+                    val likedTint by animateColorAsState(
+                        targetValue = if (stats.liked) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.size(15.dp)
+                        animationSpec = tween(durationMillis = 150),
+                        label = "dynamicLikeTint"
+                    )
+                    val likeScale = remember { Animatable(1f) }
+                    var lastLiked by remember { mutableStateOf(stats.liked) }
+                    LaunchedEffect(stats.liked) {
+                        if (stats.liked != lastLiked) {
+                            lastLiked = stats.liked
+                            likeScale.snapTo(0.85f)
+                            likeScale.animateTo(
+                                1f,
+                                spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ThumbUp,
+                        contentDescription = "点赞",
+                        tint = likedTint,
+                        modifier = Modifier
+                            .size(15.dp)
+                            .graphicsLayer {
+                                scaleX = likeScale.value
+                                scaleY = likeScale.value
+                            }
                     )
                     Text(
                         text = stats.like.toString(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (stats.liked) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        color = likedTint
                     )
                 }
                 RepostStatText(stats.repost, onClick = { onRepost(item) })

@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.naaammme.bbspace.core.designsystem.component.CapsuleGroup
@@ -134,19 +135,11 @@ fun SettingsScreen(
             )
         )
 
-    CollapsingTopBarScaffold(
-        topBar = { scrollBehavior ->
-            TopAppBar(
-                title = { Text("设置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                scrollBehavior = scrollBehavior
-            )
-        }
-    ) { padding ->
+    val isIOSStyle = com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle.current ==
+        com.naaammme.bbspace.core.designsystem.theme.UiStyle.IOS
+    val topBarState = com.naaammme.bbspace.core.designsystem.component.rememberBiliLargeTitleScrollState()
+
+    val settingsContent: @Composable (PaddingValues) -> Unit = { padding ->
         androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -239,6 +232,38 @@ fun SettingsScreen(
                     }
                 }
             )
+        }
+    }
+
+    if (isIOSStyle) {
+        androidx.compose.material3.Scaffold(
+            modifier = Modifier.nestedScroll(topBarState.connection),
+            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0),
+            topBar = {
+                com.naaammme.bbspace.core.designsystem.component.BiliTopBar(
+                    title = "设置",
+                    state = topBarState,
+                    onBack = onBack
+                )
+            }
+        ) { padding ->
+            settingsContent(padding)
+        }
+    } else {
+        CollapsingTopBarScaffold(
+            topBar = { scrollBehavior ->
+                TopAppBar(
+                    title = { Text("设置") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    scrollBehavior = scrollBehavior
+                )
+            }
+        ) { padding ->
+            settingsContent(padding)
         }
     }
 }

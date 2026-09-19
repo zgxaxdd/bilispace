@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.space.dynamic
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -59,12 +60,15 @@ internal fun LazyListScope.spaceDynamicSection(
                 key = { it.id },
                 contentType = { "dynamic" }
             ) { item ->
-                SpaceDynamicCard(
-                    item = item,
-                    onOpenDynamic = onOpenDynamic,
-                    onOpenLive = onOpenLive,
-                    onOpenVideo = onOpenVideo
-                )
+                // A8：分区切换条目淡入+位移过渡
+                Box(modifier = Modifier.animateItem()) {
+                    SpaceDynamicCard(
+                        item = item,
+                        onOpenDynamic = onOpenDynamic,
+                        onOpenLive = onOpenLive,
+                        onOpenVideo = onOpenVideo
+                    )
+                }
             }
         }
     }

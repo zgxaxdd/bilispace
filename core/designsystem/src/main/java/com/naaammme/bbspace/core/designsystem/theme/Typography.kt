@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.sp
 // 收紧到 ~0.1sp；胶囊里的小标签（labelSmall）继续收到 0.2sp 是为了保持一点呼吸感。
 // 同时给西文/数字开启等宽对齐（"tnum" + "cv11"），让时长、播放量、弹幕数在列表中
 // 纵向对齐、刷新时不跳宽——这是"精致感"最容易见效的一处。
-private const val TABULAR_NUMS = "tnum"
+// internal 而非 private：iOSTypography.kt 的数字样式同样需要 tnum
+internal const val TABULAR_NUMS = "tnum"
 
 private val BaseTypography = Typography(
     displayLarge = TextStyle(
@@ -132,24 +133,32 @@ private val BaseTypography = Typography(
 )
 
 fun createTypography(fontScale: Float): Typography {
-    if (fontScale == 1.0f) return BaseTypography
+    return scaleTypography(BaseTypography, fontScale)
+}
+
+/**
+ * 按 [fontScale] 缩放一套字体的全部槽位。1.0f 时原样返回（保持实例同一性）。
+ * Material 与 iOS 两条排版链路共用；行高随字号等比缩放（TextUnit 乘法对 sp 生效）。
+ */
+internal fun scaleTypography(base: Typography, fontScale: Float): Typography {
+    if (fontScale == 1.0f) return base
 
     return Typography(
-        displayLarge = BaseTypography.displayLarge.copy(fontSize = BaseTypography.displayLarge.fontSize * fontScale),
-        displayMedium = BaseTypography.displayMedium.copy(fontSize = BaseTypography.displayMedium.fontSize * fontScale),
-        displaySmall = BaseTypography.displaySmall.copy(fontSize = BaseTypography.displaySmall.fontSize * fontScale),
-        headlineLarge = BaseTypography.headlineLarge.copy(fontSize = BaseTypography.headlineLarge.fontSize * fontScale),
-        headlineMedium = BaseTypography.headlineMedium.copy(fontSize = BaseTypography.headlineMedium.fontSize * fontScale),
-        headlineSmall = BaseTypography.headlineSmall.copy(fontSize = BaseTypography.headlineSmall.fontSize * fontScale),
-        titleLarge = BaseTypography.titleLarge.copy(fontSize = BaseTypography.titleLarge.fontSize * fontScale),
-        titleMedium = BaseTypography.titleMedium.copy(fontSize = BaseTypography.titleMedium.fontSize * fontScale),
-        titleSmall = BaseTypography.titleSmall.copy(fontSize = BaseTypography.titleSmall.fontSize * fontScale),
-        bodyLarge = BaseTypography.bodyLarge.copy(fontSize = BaseTypography.bodyLarge.fontSize * fontScale),
-        bodyMedium = BaseTypography.bodyMedium.copy(fontSize = BaseTypography.bodyMedium.fontSize * fontScale),
-        bodySmall = BaseTypography.bodySmall.copy(fontSize = BaseTypography.bodySmall.fontSize * fontScale),
-        labelLarge = BaseTypography.labelLarge.copy(fontSize = BaseTypography.labelLarge.fontSize * fontScale),
-        labelMedium = BaseTypography.labelMedium.copy(fontSize = BaseTypography.labelMedium.fontSize * fontScale),
-        labelSmall = BaseTypography.labelSmall.copy(fontSize = BaseTypography.labelSmall.fontSize * fontScale)
+        displayLarge = base.displayLarge.copy(fontSize = base.displayLarge.fontSize * fontScale),
+        displayMedium = base.displayMedium.copy(fontSize = base.displayMedium.fontSize * fontScale),
+        displaySmall = base.displaySmall.copy(fontSize = base.displaySmall.fontSize * fontScale),
+        headlineLarge = base.headlineLarge.copy(fontSize = base.headlineLarge.fontSize * fontScale),
+        headlineMedium = base.headlineMedium.copy(fontSize = base.headlineMedium.fontSize * fontScale),
+        headlineSmall = base.headlineSmall.copy(fontSize = base.headlineSmall.fontSize * fontScale),
+        titleLarge = base.titleLarge.copy(fontSize = base.titleLarge.fontSize * fontScale),
+        titleMedium = base.titleMedium.copy(fontSize = base.titleMedium.fontSize * fontScale),
+        titleSmall = base.titleSmall.copy(fontSize = base.titleSmall.fontSize * fontScale),
+        bodyLarge = base.bodyLarge.copy(fontSize = base.bodyLarge.fontSize * fontScale),
+        bodyMedium = base.bodyMedium.copy(fontSize = base.bodyMedium.fontSize * fontScale),
+        bodySmall = base.bodySmall.copy(fontSize = base.bodySmall.fontSize * fontScale),
+        labelLarge = base.labelLarge.copy(fontSize = base.labelLarge.fontSize * fontScale),
+        labelMedium = base.labelMedium.copy(fontSize = base.labelMedium.fontSize * fontScale),
+        labelSmall = base.labelSmall.copy(fontSize = base.labelSmall.fontSize * fontScale)
     )
 }
 

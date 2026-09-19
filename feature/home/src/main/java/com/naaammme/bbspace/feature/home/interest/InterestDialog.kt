@@ -27,6 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import androidx.compose.ui.graphics.Color
 import com.naaammme.bbspace.core.model.InterestChoose
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -67,6 +72,13 @@ fun InterestDialog(
     val canConfirm = selected.value.isNotEmpty() || selectedGenderId != null || selectedAgeId != null
 
     ModalBottomSheet(
+        // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+        shape = if (LocalUiStyle.current == UiStyle.IOS) {
+            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        } else {
+            BottomSheetDefaults.ExpandedShape
+        },
+        scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {

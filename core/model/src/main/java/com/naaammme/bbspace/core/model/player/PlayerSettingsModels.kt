@@ -113,7 +113,6 @@ enum class PlayerRepeatMode {
 @Immutable
 data class PlayerPlaybackPrefs(
     val backgroundPlayback: Boolean = true,
-    val inAppMiniPlayer: Boolean = true,
     val reportPlayback: Boolean = true,
     val preferSoftwareDecode: Boolean = false,
     val decoderFallback: Boolean = true,

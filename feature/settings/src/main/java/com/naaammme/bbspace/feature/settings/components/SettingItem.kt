@@ -22,6 +22,10 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CapsuleListItem
+import com.naaammme.bbspace.core.designsystem.component.IOSSwitch
+import com.naaammme.bbspace.core.designsystem.component.IOSChevron
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 @Composable
 fun SettingCategory(
     icon: ImageVector? = null,
@@ -29,17 +33,22 @@ fun SettingCategory(
     subtitle: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape = MaterialTheme.shapes.medium,
-    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
+    containerColor: Color? = null,
     iconContainerColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
     iconTint: Color = MaterialTheme.colorScheme.primary,
     onClick: () -> Unit
 ) {
+    val isIOS = LocalUiStyle.current == UiStyle.IOS
     CapsuleListItem(
         title = title,
         subtitle = subtitle,
         modifier = modifier,
         shape = shape,
-        containerColor = containerColor,
+        containerColor = containerColor ?: if (isIOS) {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
         leadingContent = if (icon != null) {
             {
                 Box(
@@ -61,6 +70,14 @@ fun SettingCategory(
         } else {
             null
         },
+        // iOS 分组行尾 chevron（tertiaryLabel 语义），Material 保持无
+        trailingContent = if (isIOS) {
+            {
+                IOSChevron()
+            }
+        } else {
+            null
+        },
         onClick = onClick
     )
 }
@@ -70,8 +87,10 @@ fun SettingSwitch(
     title: String,
     subtitle: String? = null,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
+    val isIOS = LocalUiStyle.current == UiStyle.IOS
     Card {
         Row(
             modifier = Modifier
@@ -81,16 +100,39 @@ fun SettingSwitch(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (enabled) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    }
+                )
                 if (subtitle != null) {
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (enabled) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                        }
                     )
                 }
             }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            if (isIOS) {
+                IOSSwitch(
+                    checked = checked,
+                    onCheckedChange = if (enabled) onCheckedChange else null
+                )
+            } else {
+                Switch(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    enabled = enabled
+                )
+            }
         }
     }
 }

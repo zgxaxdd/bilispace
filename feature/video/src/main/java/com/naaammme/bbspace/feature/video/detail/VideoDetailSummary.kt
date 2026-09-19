@@ -6,6 +6,13 @@ package com.naaammme.bbspace.feature.video.detail
  */
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,11 +39,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoDetail
@@ -67,8 +79,14 @@ internal fun VideoSummarySection(
     interaction: VideoInteractionState
 ) {
     val spaceRoute = detail.toSpaceRouteOrNull(ids.aid.takeIf { it > 0L })
+    val anim = LocalAnimations.current
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // A4：简介/标签展开折叠 300ms（long）Emphasized，随内容高度平滑过渡
+            .animateContentSize(
+                animationSpec = tween(durationMillis = anim.long, easing = anim.emphasized)
+            ),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         // 标题直接落在背景上，配 UP 行/操作栏形成层次，弱化"卡片套卡片"
@@ -349,15 +367,39 @@ internal fun RowScope.ActionChip(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null
 ) {
-    val iconTint = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val textColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurface
+    // A3：选中态颜色 150ms 渐变 + 图标 spring 弹跳（0.85→1.0，一次回弹）
+    val iconTint by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(durationMillis = 150),
+        label = "actionChipTint"
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(durationMillis = 150),
+        label = "actionChipText"
+    )
+    val iconScale = remember { Animatable(1f) }
+    var lastSelected by remember { mutableStateOf(selected) }
+    LaunchedEffect(selected) {
+        if (selected != lastSelected) {
+            lastSelected = selected
+            iconScale.snapTo(0.85f)
+            iconScale.animateTo(
+                1f,
+                spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
+        }
     }
     val clickableModifier = when {
         onClick != null && onLongClick != null -> Modifier.combinedClickable(
@@ -382,7 +424,12 @@ internal fun RowScope.ActionChip(
             imageVector = icon,
             contentDescription = label,
             tint = iconTint,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier
+                .size(22.dp)
+                .graphicsLayer {
+                    scaleX = iconScale.value
+                    scaleY = iconScale.value
+                }
         )
         Text(
             text = value ?: label,

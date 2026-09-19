@@ -29,9 +29,13 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -83,6 +87,7 @@ import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.feature.video.R
 import com.naaammme.bbspace.feature.video.SponsorBlockUiState
 import com.naaammme.bbspace.feature.video.VideoViewModel
@@ -341,10 +346,17 @@ internal fun VideoPlayerPane(
                 }
             )
 
-            if (showCtrl) {
+            // A5：控制层显隐动画（fadeIn + 4dp 轻位移 200ms Standard，退出 150ms fadeOut）
+            val ctrlAnim = LocalAnimations.current
+            AnimatedVisibility(
+                visible = showCtrl,
+                modifier = Modifier.align(Alignment.TopCenter),
+                enter = fadeIn(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) +
+                    slideInVertically(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) { it / 16 },
+                exit = fadeOut(tween(durationMillis = 150))
+            ) {
                 Row(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
@@ -763,7 +775,15 @@ private fun VideoPlayerOverlay(
             modifier = Modifier.align(Alignment.BottomEnd)
         )
 
-        if (showCtrl) {
+        // A5：底部控制栏同规格显隐动画
+        val ctrlAnim = LocalAnimations.current
+        AnimatedVisibility(
+            visible = showCtrl,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) +
+                slideInVertically(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) { it / 16 },
+            exit = fadeOut(tween(durationMillis = 150))
+        ) {
             PlayerCtrlBarHost(
                 viewModel = viewModel,
                 state = state,
@@ -777,7 +797,7 @@ private fun VideoPlayerOverlay(
                 onShowQ = onShowQ,
                 onShowSp = onShowSp,
                 onToggleFull = onToggleFull,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
             )
         }
     }

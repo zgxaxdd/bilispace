@@ -294,7 +294,10 @@ fun CommentPanel(
                             key = { index -> "comment_skeleton_$index" },
                             contentType = { "reply_skeleton" }
                         ) {
-                            CommentCardSkeleton()
+                            // A7：加载态条目淡入/位移，内容替换骨架时平滑过渡
+                            Box(modifier = Modifier.animateItem()) {
+                                CommentCardSkeleton()
+                            }
                         }
                     }
 
@@ -322,12 +325,16 @@ fun CommentPanel(
                             key = { it.rpid },
                             contentType = { "reply" }
                         ) { reply ->
-                            CommentCard(
-                                reply = reply,
-                                currentMid = uiState.currentMid,
-                                busyReplyIds = uiState.busyReplyIds,
-                                onAction = onReplyAction
-                            )
+                            // A7：评论条目淡入+位移 spring，替代整段 Crossfade
+                            // （状态分支在同一 LazyColumn 内，Crossfade 会重建列表宿主、丢滚动位置）
+                            Box(modifier = Modifier.animateItem()) {
+                                CommentCard(
+                                    reply = reply,
+                                    currentMid = uiState.currentMid,
+                                    busyReplyIds = uiState.busyReplyIds,
+                                    onAction = onReplyAction
+                                )
+                            }
                         }
                     }
                 }

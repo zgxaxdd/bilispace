@@ -1,6 +1,5 @@
 package com.naaammme.bbspace.core.designsystem.theme
 
-import android.graphics.Color as AndroidColor
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
@@ -13,11 +12,24 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
+import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
+import com.naaammme.bbspace.core.designsystem.glass.GlassGuardPolicy
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassGuard
+import com.naaammme.bbspace.core.designsystem.glass.rememberGlassGuardTracker
+import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+
+/**
+ * 当前界面风格预设。组件层用它做 iOS / Material 双形态分支（分组列表、开关、
+ * 分段控件、Dock 等）；经 [BiliTheme] 下发，默认 MATERIAL 保证独立预览可用。
+ */
+val LocalUiStyle = staticCompositionLocalOf { UiStyle.MATERIAL }
 
 private val MonochromeDarkColorScheme = darkColorScheme(
     primary = Color.White,
@@ -114,23 +126,31 @@ fun BiliTheme(
     val colorScheme = remember(
         context,
         darkTheme,
+        config.uiStyle,
         config.seedColor,
         config.useDynamicColor,
         config.paletteStyle,
         config.swapBaseColors,
         config.isPureBlack
     ) {
-        val base = when {
-            config.paletteStyle == PaletteStyle.MONOCHROME -> createMonochromeColorScheme(darkTheme)
-            config.useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        when (config.uiStyle) {
+            // iOS：固定语义色板 + tint（seedColor）覆盖 primary。
+            // 动态取色 / 调色板 / 纯黑在 iOS 模式下不参与（设置页置灰，值保留）。
+            UiStyle.IOS -> iOSColorScheme(darkTheme, config.seedColor)
+            UiStyle.MATERIAL -> {
+                val base = when {
+                    config.paletteStyle == PaletteStyle.MONOCHROME -> createMonochromeColorScheme(darkTheme)
+                    config.useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                    }
+                    else -> createSeedColorScheme(config.seedColor, darkTheme)
+                }
+                val styled = if (config.paletteStyle == PaletteStyle.MONOCHROME) base
+                else applyPaletteStyle(base, config.paletteStyle, darkTheme)
+                val neutralized = applyNeutralBackgroundScheme(styled, darkTheme, config.isPureBlack)
+                if (config.swapBaseColors) applyBaseColorSwap(neutralized) else neutralized
             }
-            else -> createSeedColorScheme(config.seedColor, darkTheme)
         }
-        val styled = if (config.paletteStyle == PaletteStyle.MONOCHROME) base
-        else applyPaletteStyle(base, config.paletteStyle, darkTheme)
-        val neutralized = applyNeutralBackgroundScheme(styled, darkTheme, config.isPureBlack)
-        if (config.swapBaseColors) applyBaseColorSwap(neutralized) else neutralized
     }
 
     val density = remember(baseDensity, uiScale) {
@@ -139,10 +159,35 @@ fun BiliTheme(
             fontScale = baseDensity.fontScale / uiScale
         )
     }
-    val typography = remember(config.fontScale) { createTypography(config.fontScale) }
-    val shapes = remember(config.cornerStyle) { buildShapes(config.cornerStyle) }
+    val typography = remember(config.uiStyle, config.fontScale) {
+        when (config.uiStyle) {
+            UiStyle.IOS -> iOSTypography(config.fontScale)
+            UiStyle.MATERIAL -> createTypography(config.fontScale)
+        }
+    }
+    val shapes = remember(config.uiStyle, config.cornerStyle) {
+        when (config.uiStyle) {
+            // iOS 圆角是固定档，不随 cornerStyle 漂移（该维度 iOS 下置灰）
+            UiStyle.IOS -> iOSShapes()
+            UiStyle.MATERIAL -> buildShapes(config.cornerStyle)
+        }
+    }
 
     CompositionLocalProvider(LocalDensity provides density) {
+    // 帧率守卫：JankStats 窗口统计，jank 连续超标时玻璃整体降级（只失效玻璃叶子）
+    val glassGuardTracker = rememberGlassGuardTracker()
+    LaunchedEffect(glassGuardTracker) {
+        while (true) {
+            delay(com.naaammme.bbspace.core.designsystem.glass.GlassGuardTracker.WINDOW_MS)
+            glassGuardTracker.tick(System.currentTimeMillis())
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalUiStyle provides config.uiStyle,
+        LocalGlassConfig provides GlassConfig(config.glassEnabled, config.glassStyle),
+        LocalGlassGuard provides glassGuardTracker.policy
+    ) {
         ProvideAnimations(config.animationSpeed) {
             ProvidePullRefresh(config.pullRefreshDistanceDp) {
                 MaterialTheme(
@@ -162,6 +207,7 @@ fun BiliTheme(
                 }
             }
         }
+    }
     }
 }
 
@@ -473,25 +519,6 @@ private fun applyBaseColorSwap(base: ColorScheme): ColorScheme {
     )
 }
 
-private fun Color.tone(
-    hueShift: Float = 0f,
-    saturationScale: Float = 1f,
-    value: Float
-): Color {
-    val hsv = FloatArray(3)
-    AndroidColor.colorToHSV(toArgb(), hsv)
-    hsv[0] = (hsv[0] + hueShift + 360f) % 360f
-    hsv[1] = (hsv[1] * saturationScale).coerceIn(0f, 1f)
-    hsv[2] = value.coerceIn(0f, 1f)
-    return Color(AndroidColor.HSVToColor(hsv))
-}
-
-private fun Color.mix(other: Color, amount: Float): Color {
-    val t = amount.coerceIn(0f, 1f)
-    return Color(
-        red = red * (1f - t) + other.red * t,
-        green = green * (1f - t) + other.green * t,
-        blue = blue * (1f - t) + other.blue * t,
-        alpha = alpha * (1f - t) + other.alpha * t
-    )
-}
+// Color.tone / Color.mix 已抽至 ColorUtils.kt（internal）：iOS 色板需要复用同一套
+// HSV 派生工具，且 Kotlin 的文件级 private 无法跨文件访问。函数体未改动，
+// 本文件处于同一包，调用点无需 import。

@@ -16,6 +16,7 @@ import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.PlayerBufferProfile
 import com.naaammme.bbspace.core.model.PlayerBufferSettings
@@ -55,6 +56,9 @@ class AppSettings @Inject constructor(
     private val isPureBlackKey = booleanPreferencesKey("is_pure_black")
     private val frameRateModeKey = stringPreferencesKey("frame_rate_mode")
     private val cornerStyleKey = stringPreferencesKey("corner_style")
+    private val uiStyleKey = stringPreferencesKey("ui_style")
+    private val glassEnabledKey = booleanPreferencesKey("glass_enabled")
+    private val glassStyleKey = stringPreferencesKey("glass_style")
     private val hdFeedKey = booleanPreferencesKey("hd_feed")
     private val personalizedRcmdKey = booleanPreferencesKey("personalized_rcmd")
     private val lessonsModeKey = booleanPreferencesKey("lessons_mode")
@@ -87,7 +91,15 @@ class AppSettings @Inject constructor(
             preferredFrameRate = prefs[frameRateModeKey]?.let { FrameRateMode.valueOf(it) }
                 ?: defaultThemeConfig.preferredFrameRate,
             cornerStyle = prefs[cornerStyleKey]?.let { CornerStyle.valueOf(it) }
-                ?: defaultThemeConfig.cornerStyle
+                ?: defaultThemeConfig.cornerStyle,
+            // 兜底统一走 defaultThemeConfig：默认值只在 ThemeConfig 数据类定义一处，
+            // 将来翻转默认风格（MATERIAL → IOS）时本文件零改动。
+            uiStyle = prefs[uiStyleKey]?.let { UiStyle.valueOf(it) }
+                ?: defaultThemeConfig.uiStyle,
+            glassEnabled = prefs[glassEnabledKey] ?: defaultThemeConfig.glassEnabled,
+            glassStyle = prefs[glassStyleKey]
+                ?.let { com.naaammme.bbspace.core.designsystem.glass.GlassStyle.valueOf(it) }
+                ?: defaultThemeConfig.glassStyle
         )
     }.distinctUntilChanged()
 
@@ -145,6 +157,18 @@ class AppSettings @Inject constructor(
 
     suspend fun updateCornerStyle(style: CornerStyle) {
         context.appSettingsDataStore.edit { it[cornerStyleKey] = style.name }
+    }
+
+    suspend fun updateUiStyle(style: UiStyle) {
+        context.appSettingsDataStore.edit { it[uiStyleKey] = style.name }
+    }
+
+    suspend fun updateGlassEnabled(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[glassEnabledKey] = enabled }
+    }
+
+    suspend fun updateGlassStyle(style: com.naaammme.bbspace.core.designsystem.glass.GlassStyle) {
+        context.appSettingsDataStore.edit { it[glassStyleKey] = style.name }
     }
 
     val hdFeed: Flow<Boolean> = context.appSettingsDataStore.data.map { it[hdFeedKey] ?: false }
@@ -324,7 +348,6 @@ class AppSettings @Inject constructor(
     private val preferSoftDecKey = booleanPreferencesKey("prefer_soft_dec")
     private val decFallbackKey = booleanPreferencesKey("dec_fallback")
     private val bgPlayKey = booleanPreferencesKey("bg_play")
-    private val inAppMiniPlayerKey = booleanPreferencesKey("in_app_mini_player")
     private val seamlessTransitionKey = booleanPreferencesKey("seamless_transition")
     private val autoRotateFullscreenKey = booleanPreferencesKey("auto_rotate_fullscreen")
     private val gestureSpeedKey = floatPreferencesKey("gesture_speed")
@@ -360,7 +383,6 @@ class AppSettings @Inject constructor(
             ),
             playback = PlayerPlaybackPrefs(
                 backgroundPlayback = prefs[bgPlayKey] ?: defaultPlaybackPrefs.backgroundPlayback,
-                inAppMiniPlayer = prefs[inAppMiniPlayerKey] ?: defaultPlaybackPrefs.inAppMiniPlayer,
                 seamlessTransition = prefs[seamlessTransitionKey] ?: defaultPlaybackPrefs.seamlessTransition,
                 reportPlayback = prefs[reportPlaybackKey] ?: defaultPlaybackPrefs.reportPlayback,
                 preferSoftwareDecode = prefs[preferSoftDecKey]
@@ -432,10 +454,6 @@ class AppSettings @Inject constructor(
 
     suspend fun setBackgroundPlayback(enabled: Boolean) {
         context.appSettingsDataStore.edit { it[bgPlayKey] = enabled }
-    }
-
-    suspend fun setInAppMiniPlayer(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[inAppMiniPlayerKey] = enabled }
     }
 
     /** ColorOS 无缝过渡动画开关（默认开）；关闭退回覆盖层路径。 */

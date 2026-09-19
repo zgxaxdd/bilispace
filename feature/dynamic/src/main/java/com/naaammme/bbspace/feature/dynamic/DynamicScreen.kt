@@ -55,6 +55,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import androidx.compose.ui.graphics.Color
 import coil3.compose.AsyncImage
 import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
@@ -244,6 +249,13 @@ private fun DynamicPublishSheet(
     }
 
     ModalBottomSheet(
+        // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+        shape = if (LocalUiStyle.current == UiStyle.IOS) {
+            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        } else {
+            BottomSheetDefaults.ExpandedShape
+        },
+        scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {

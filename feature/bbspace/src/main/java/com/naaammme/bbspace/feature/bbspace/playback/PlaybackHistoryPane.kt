@@ -5,6 +5,9 @@ import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -237,7 +240,15 @@ private fun PlaybackHistoryCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    // A11：条目详情展开/折叠 300ms Emphasized 高度过渡
+                    .animateContentSize(
+                        animationSpec = tween(
+                            durationMillis = LocalAnimations.current.long,
+                            easing = LocalAnimations.current.emphasized
+                        )
+                    ),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(

@@ -11,6 +11,7 @@ import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.sponsorblock.SbCategory
 import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
@@ -303,6 +304,24 @@ class SettingsViewModel @Inject constructor(
     fun updateCornerStyle(style: CornerStyle) {
         viewModelScope.launch {
             appSettings.updateCornerStyle(style)
+        }
+    }
+
+    fun updateUiStyle(style: UiStyle) {
+        viewModelScope.launch {
+            appSettings.updateUiStyle(style)
+        }
+    }
+
+    fun updateGlassEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updateGlassEnabled(enabled)
+        }
+    }
+
+    fun updateGlassStyle(style: com.naaammme.bbspace.core.designsystem.glass.GlassStyle) {
+        viewModelScope.launch {
+            appSettings.updateGlassStyle(style)
         }
     }
 

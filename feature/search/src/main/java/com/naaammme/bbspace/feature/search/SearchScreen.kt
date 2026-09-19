@@ -1,6 +1,8 @@
 package com.naaammme.bbspace.feature.search
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -37,6 +39,7 @@ import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.VideoListSkeletonList
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.SearchFilter
 import com.naaammme.bbspace.core.model.SearchTime
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -162,89 +165,104 @@ fun SearchScreen(
                 }
             }
 
-            when {
-                viewModel.isLoading && !hasItems -> SearchLoadingList()
+            // A6：状态切换（历史→加载→错误→空→结果）Crossfade，200ms Standard
+            val anim = LocalAnimations.current
+            val stateKey = when {
+                viewModel.isLoading && !hasItems -> "loading"
+                viewModel.errorMessage != null && !hasItems -> "error"
+                viewModel.keyword.isBlank() -> "history"
+                !hasItems -> "empty"
+                else -> "results"
+            }
+            Crossfade(
+                targetState = stateKey,
+                animationSpec = tween(durationMillis = anim.medium, easing = anim.standard),
+                label = "searchStateCrossfade"
+            ) { key ->
+                when (key) {
+                    "loading" -> SearchLoadingList()
 
-                viewModel.errorMessage != null && !hasItems -> {
-                    StateMessageCard(
-                        text = viewModel.errorMessage.orEmpty().ifBlank { "搜索失败" },
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        isError = true,
-                        actionText = "重试",
-                        onAction = {
-                            keyboard?.hide()
-                            viewModel.submitSearch(recordHistory = false)
-                        }
-                    )
-                }
-
-                viewModel.keyword.isBlank() -> {
-                    if (histories.isNotEmpty()) {
-                        SearchHistoryPanel(
-                            histories = histories,
-                            order = historyOrder,
-                            onToggleOrder = viewModel::toggleHistoryOrder,
-                            onSearch = { keyword ->
+                    "error" -> {
+                        StateMessageCard(
+                            text = viewModel.errorMessage.orEmpty().ifBlank { "搜索失败" },
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            isError = true,
+                            actionText = "重试",
+                            onAction = {
                                 keyboard?.hide()
-                                viewModel.submitSearch(keyword)
-                            },
-                            onDelete = viewModel::deleteHistory
+                                viewModel.submitSearch(recordHistory = false)
+                            }
                         )
                     }
-                }
 
-                !hasItems -> StateMessageCard(
-                    text = "没有找到结果",
-                    modifier = Modifier.fillMaxSize().padding(16.dp)
-                )
-
-                else -> {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(
-                            items = authors,
-                            key = { it.mid },
-                            contentType = { "author" }
-                        ) { author ->
-                            SearchAuthorCard(
-                                author = author,
-                                onClick = { onOpenSpace(SpaceRoute(mid = author.mid, name = author.name)) }
+                    "history" -> {
+                        if (histories.isNotEmpty()) {
+                            SearchHistoryPanel(
+                                histories = histories,
+                                order = historyOrder,
+                                onToggleOrder = viewModel::toggleHistoryOrder,
+                                onSearch = { keyword ->
+                                    keyboard?.hide()
+                                    viewModel.submitSearch(keyword)
+                                },
+                                onDelete = viewModel::deleteHistory
                             )
                         }
+                    }
 
-                        items(
-                            items = videos,
-                            key = { "${it.aid}_${it.cid}" },
-                            contentType = { "video" }
-                        ) { video ->
-                            SearchCard(
-                                video = video,
-                                onClick = { onOpenVideo(video.target) }
-                            )
-                        }
+                    "empty" -> StateMessageCard(
+                        text = "没有找到结果",
+                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                    )
 
-                        if (viewModel.isLoadingMore) {
+                    else -> {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             items(
-                                count = LOAD_MORE_SKELETON_COUNT,
-                                key = { index -> "loading_$index" },
-                                contentType = { "skeleton" }
-                            ) {
-                                VideoListCardSkeleton()
-                            }
-                        }
-
-                        if (viewModel.errorMessage != null && itemCount > 0) {
-                            item {
-                                StateMessageCard(
-                                    text = viewModel.errorMessage.orEmpty().ifBlank { "搜索失败" },
-                                    isError = true,
-                                    actionText = "重试",
-                                    onAction = viewModel::loadMore
+                                items = authors,
+                                key = { it.mid },
+                                contentType = { "author" }
+                            ) { author ->
+                                SearchAuthorCard(
+                                    author = author,
+                                    onClick = { onOpenSpace(SpaceRoute(mid = author.mid, name = author.name)) }
                                 )
+                            }
+
+                            items(
+                                items = videos,
+                                key = { "${it.aid}_${it.cid}" },
+                                contentType = { "video" }
+                            ) { video ->
+                                SearchCard(
+                                    video = video,
+                                    onClick = { onOpenVideo(video.target) }
+                                )
+                            }
+
+                            if (viewModel.isLoadingMore) {
+                                items(
+                                    count = LOAD_MORE_SKELETON_COUNT,
+                                    key = { index -> "loading_$index" },
+                                    contentType = { "skeleton" }
+                                ) {
+                                    VideoListCardSkeleton()
+                                }
+                            }
+
+                            if (viewModel.errorMessage != null && itemCount > 0) {
+                                item {
+                                    StateMessageCard(
+                                        text = viewModel.errorMessage.orEmpty().ifBlank { "搜索失败" },
+                                        isError = true,
+                                        actionText = "重试",
+                                        onAction = viewModel::loadMore
+                                    )
+                                }
                             }
                         }
                     }

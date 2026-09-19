@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Menu
@@ -40,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -49,8 +51,17 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.CompositionLocalProvider
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
+import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
+import com.naaammme.bbspace.core.designsystem.glass.glassEffect
+import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
@@ -152,6 +163,10 @@ fun HomeScreen(
         topBarOffsetPx = 0f
     }
 
+    // 首页玻璃：独立 HazeState，源 = Pager 内容（顶栏不在源内，避免自采样鬼影）
+    val homeGlassState = remember { HazeState() }
+    val homeGlassOn = isGlassActive(homeGlassState)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -161,7 +176,11 @@ fun HomeScreen(
         // 内容全屏：延伸到状态栏之后，滚动时卡片可上探到状态栏区域
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize()
+            modifier = if (homeGlassOn) {
+                Modifier.fillMaxSize().hazeSource(homeGlassState)
+            } else {
+                Modifier.fillMaxSize()
+            }
         ) { page ->
             when (page) {
                 0 -> ListenHomePage(
@@ -229,6 +248,7 @@ fun HomeScreen(
         // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏。
         // 偏移量以 provider 延迟读取：滚动期间每个滚动 tick 只触发顶栏 offset 块重布局，
         // 不再重组 HomeScreen 整个 scope（含 HorizontalPager 分支与全部子项参数比对）。
+        CompositionLocalProvider(LocalGlassHazeState provides homeGlassState) {
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
             singleColumn = singleColumn,
@@ -249,6 +269,7 @@ fun HomeScreen(
                     }
                 }
         )
+        }
     }
 }
 
@@ -266,14 +287,43 @@ private fun HomeTopBar(
     onSelectTab: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isIOS = LocalUiStyle.current == UiStyle.IOS
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val topGlassState = LocalGlassHazeState.current
+    val topGlassOn = isGlassActive(topGlassState)
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .statusBarsPadding()
             .clipToBounds()
             .offset { IntOffset(0, -topBarOffsetPxProvider().roundToInt()) }
+            // iOS：玻璃 / 半透明底放在 offset 之后、statusBarsPadding 之前——
+            // 既随顶栏 1:1 滑动，又铺满含状态栏的整条（走查发现的两个层级问题）
+            .then(
+                when {
+                    isIOS && topGlassOn -> Modifier.glassEffect(
+                        state = topGlassState,
+                        surfaceType = GlassSurfaceType.HEADER
+                    )
+                    isIOS -> Modifier.background(
+                        MaterialTheme.colorScheme.background.copy(
+                            alpha = if (dark) 0.85f else 0.92f
+                        )
+                    )
+                    else -> Modifier
+                }
+            )
+            .statusBarsPadding()
             .padding(top = 4.dp)
     ) {
+        if (isIOS) {
+            // iOS 大标题：当前分区名，随顶栏 1:1 滚动收起
+            Text(
+                text = homeTabs[selectedIndex.coerceIn(0, homeTabs.lastIndex)],
+                style = MaterialTheme.typography.displayLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp)
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -287,9 +337,14 @@ private fun HomeTopBar(
                 // 用户在设置里切换「圆角/圆形」风格时，搜索页/历史搜索/直播/设置/发布记录
                 // 五处搜索框都会跟着变，唯独首页这条永远 26dp —— 是不一致的真实来源。
                 // 取值与项目其他卡片表面一致（MaterialTheme.shapes.large）。
-                shape = MaterialTheme.shapes.large,
+                shape = if (isIOS) RoundedCornerShape(10.dp) else MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
-                    MaterialTheme.colorScheme.surfaceContainerHigh
+                    if (isIOS) {
+                        // iOS 搜索胶囊：onSurfaceVariant@12%（≈ #767680 12%，方案 2.3）
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
                 )
             ) {
                 Row(
