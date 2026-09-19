@@ -56,6 +56,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -148,6 +149,8 @@ import com.naaammme.bbspace.playback.PlaybackHostMode
 import com.naaammme.bbspace.playback.PlaybackHostViewModel
 import com.naaammme.bbspace.playback.capsule.CapsuleIndicator
 import com.naaammme.bbspace.playback.capsule.CapsuleIndicatorState
+import com.naaammme.bbspace.playback.capsule.DockGeometry
+import com.naaammme.bbspace.playback.capsule.LocalDockGeometry
 
 private const val MAIN_ROUTE = "main"
 private val topLevelNavEdgePadding = 16.dp
@@ -591,6 +594,8 @@ private fun MainTabsScaffold(
     // 玻璃背景源：页面内容（含各 Tab 页）作为 hazeSource，Dock / 胶囊在其上采样
     val glassState = remember { HazeState() }
     val glassOn = isGlassActive(glassState)
+    // 底栏几何快照：供胶囊融合动画计算落点（终版方案 4.3）
+    var dockGeometry by remember { mutableStateOf<DockGeometry?>(null) }
 
     Box(
         modifier = Modifier
@@ -642,7 +647,10 @@ private fun MainTabsScaffold(
         }
 
         // 悬浮播放胶囊：内容层之后、底栏之前（z 序低于底栏，方案 2.8）
-        CompositionLocalProvider(LocalGlassHazeState provides glassState) {
+        CompositionLocalProvider(
+            LocalGlassHazeState provides glassState,
+            LocalDockGeometry provides dockGeometry
+        ) {
             CapsuleIndicator(
                 capsuleState = capsuleState,
                 onOpen = onCapsuleOpen,
@@ -666,6 +674,8 @@ private fun MainTabsScaffold(
                 .zIndex(1f),
             currentTab = currentTab,
             visibilityController = navVisibilityController,
+            capsuleState = capsuleState,
+            onGeometryChanged = { dockGeometry = it },
             onTabChange = onTabChange,
             onNavigateToSearch = onNavigateToSearch,
             onOcclusionChanged = onBottomNavOcclusionChanged
@@ -678,11 +688,30 @@ private fun TopLevelFloatingNavigation(
     modifier: Modifier = Modifier,
     currentTab: TopLevelRoute,
     visibilityController: TopLevelNavVisibilityController,
+    capsuleState: CapsuleIndicatorState,
+    onGeometryChanged: (DockGeometry?) -> Unit,
     onTabChange: (TopLevelRoute) -> Unit,
     onNavigateToSearch: () -> Unit,
     onOcclusionChanged: (Float) -> Unit = {}
 ) {
     val isIOS = LocalUiStyle.current == UiStyle.IOS
+    val glassState = LocalGlassHazeState.current
+    val glassOn = isGlassActive(glassState)
+    // 底栏容器色与圆角提前计算：onGloballyPositioned 回调（非组合上下文）只读捕获值
+    val dockCornerRadiusPx = with(LocalDensity.current) { BiliRadius.dock.toPx() }
+    val dockColor = when {
+        // 玻璃生效：Haze 染色接管，容器底透明
+        glassOn -> Color.Transparent
+        isIOS -> {
+            val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+            if (dark) {
+                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.90f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.92f)
+            }
+        }
+        else -> MaterialTheme.colorScheme.surfaceContainer
+    }
     val toolbarShape = if (isIOS) {
         // iOS：Dock 圆角刻意由 32dp（extraLarge@ROUNDED）收紧至 28dp（方案 2.5）
         RoundedCornerShape(BiliRadius.dock)
@@ -690,8 +719,7 @@ private fun TopLevelFloatingNavigation(
         MaterialTheme.shapes.extraLarge
     }
     val anim = LocalAnimations.current
-    val glassState = LocalGlassHazeState.current
-    val glassOn = isGlassActive(glassState)
+    val dockDeformPx = with(LocalDensity.current) { 2.dp.toPx() }
     val edgePaddingPx = with(LocalDensity.current) { topLevelNavEdgePadding.toPx() }
     var hiddenDistancePx by remember { mutableFloatStateOf(0f) }
     val animatedOffsetPx by animateFloatAsState(
@@ -713,11 +741,29 @@ private fun TopLevelFloatingNavigation(
             onOcclusionChanged(
                 (coords.size.height.toFloat() / windowHeight).coerceIn(0f, 1f)
             )
+            // 终版方案 4.3：追加底栏几何采集（不动 onOcclusionChanged 逻辑）
+            val pos = coords.positionInParent()
+            onGeometryChanged(
+                DockGeometry(
+                    leftPx = pos.x,
+                    topPx = pos.y,
+                    widthPx = coords.size.width.toFloat(),
+                    heightPx = coords.size.height.toFloat(),
+                    cornerRadiusPx = dockCornerRadiusPx,
+                    containerColor = dockColor,
+                    visible = !visibilityController.hidden
+                )
+            )
         }
         .graphicsLayer {
             // 动画值在图层块内延迟读取：隐藏/显示过渡每帧只更新图层属性，
             // 不按帧重组调用方（此前组合期读值 → 每个滚动 tick 都重组一次）
-            translationY = animatedOffsetPx
+            // 底栏形变（终版方案 4.4）：胶囊融合接触瞬间 scaleY 微凸 + 上浮 2dp，
+            // 独立维度不干扰滚动隐藏的 translationY。
+            val p = capsuleState.sinkAnim.value
+            val deform = if (p < 0.6f) p / 0.6f else ((1f - p) / 0.4f).coerceAtLeast(0f)
+            translationY = animatedOffsetPx - dockDeformPx * deform
+            scaleY = 1f + deform * 0.02f
         }
     val tabs: @Composable () -> Unit = {
         if (isIOS) {
@@ -803,21 +849,6 @@ private fun TopLevelFloatingNavigation(
         modifier = animatedModifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // iOS：纯半透明色 + 细描边 + 轻环境阴影（不做模糊，方案 2.5）；
-        // Material 维持 surfaceContainer 实色、无描边。
-        val dockColor = when {
-            // 玻璃生效：Haze 染色接管，容器底透明
-            glassOn -> Color.Transparent
-            isIOS -> {
-                val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                if (dark) {
-                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.90f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.92f)
-                }
-            }
-            else -> MaterialTheme.colorScheme.surfaceContainer
-        }
         val dockModifier = when {
             isIOS && glassOn -> Modifier.glassEffect(
                 state = glassState,

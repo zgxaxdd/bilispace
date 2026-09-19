@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.playback.capsule
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.mutableStateOf
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
@@ -27,6 +28,12 @@ class CapsuleIndicatorState @Inject constructor(
 
     /** 播放进度（positionMs / durationMs），引擎 StateFlow 直供，零轮询。 */
     val progress = playerEngine.playbackProgress
+
+    /**
+     * 融合动画进度（1=完全沉入底栏，0=常态悬浮）。Animatable 提升到进程级状态：
+     * 胶囊 UI 驱动它，底栏在 graphicsLayer 内读值做形变（层属性，零重组）。
+     */
+    val sinkAnim = Animatable(1f)
 
     private val _active = mutableStateOf(false)
 

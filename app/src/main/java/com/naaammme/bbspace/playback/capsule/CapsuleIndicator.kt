@@ -56,6 +56,7 @@ import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
 import com.naaammme.bbspace.core.designsystem.glass.glassEffect
 import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import androidx.compose.ui.layout.onSizeChanged
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.model.PlaybackState
@@ -87,9 +88,10 @@ fun CapsuleIndicator(
     val active = capsuleState.active
     val anim = LocalAnimations.current
 
-    // 1 = 完全下沉隐藏，0 = 常态。出现（激活）：1→0 带 spring 回弹；
-    // 隐藏（dismiss/结束）：0→1 先实体下沉、后 30% 才淡出。
-    val sinkProgress = remember { Animatable(1f) }
+    // 1 = 完全沉入底栏，0 = 常态。Animatable 提升至 State（底栏形变共用读取）。
+    // 出现（激活）：1→0 带 spring 回弹；隐藏（dismiss/结束）：0→1
+    // 前 60% 实体下沉融合，后 40% 淡出（终版方案 4.4）。
+    val sinkProgress = capsuleState.sinkAnim
     var mounted by remember { mutableStateOf(false) }
 
     LaunchedEffect(active) {
@@ -123,6 +125,10 @@ fun CapsuleIndicator(
     val capsuleGlassState = LocalGlassHazeState.current
     val capsuleGlassOn = isGlassActive(capsuleGlassState)
     val capsuleShape = RoundedCornerShape(CapsuleRadius)
+    // 融合落点：底栏几何（终版方案 4.3）。缺失时退回固定距离平移淡出。
+    val dockGeometry = LocalDockGeometry.current
+    var capsuleWidthPx by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
     val containerColor = when {
         // 玻璃生效：Haze 染色接管，容器底透明
         capsuleGlassOn -> Color.Transparent
@@ -137,7 +143,8 @@ fun CapsuleIndicator(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 0.dp),
+            .heightIn(min = 0.dp)
+            .onSizeChanged { capsuleWidthPx = it.width.toFloat() },
         contentAlignment = Alignment.BottomCenter
     ) {
         Surface(
@@ -163,11 +170,30 @@ fun CapsuleIndicator(
                     }
                 )
                 .graphicsLayer {
-                    // 单 Animatable 驱动：translationY 全程插值，alpha 仅后 30% 衰减
-                    //（先实体下沉融入底栏，后淡出）；水平位移来自滑动跟手值。
-                    translationY = sinkProgress.value * sinkDistancePx
+                    // 七维融合插值（终版方案 4.4）：单 Animatable 驱动，全部在图层块内
+                    // 按帧读值，调用方零重组。前 60% 实体下沉+收窄，后 40% 淡出。
+                    val p = sinkProgress.value
+                    val settle = (p / 0.6f).coerceIn(0f, 1f)
+                    val hasGeometry = dockGeometry != null && capsuleWidthPx > 0f
+                    val sink = if (hasGeometry) {
+                        // 常态胶囊中心 → 底栏中心的垂直落差（胶囊锚定 BottomCenter、
+                        // padding 92dp；底栏 top = 父高 - 16dp - 高度）
+                        val capsuleCenterY = size.height / 2f + with(density) { 92.dp.toPx() }
+                        val dockCenterY = dockGeometry.topPx + dockGeometry.heightPx / 2f
+                        (dockCenterY - capsuleCenterY).coerceAtLeast(0f)
+                    } else {
+                        sinkDistancePx
+                    }
+                    val dockWidthRatio = if (hasGeometry) {
+                        (dockGeometry.widthPx / capsuleWidthPx).coerceIn(0.2f, 1f)
+                    } else {
+                        0.2f
+                    }
+                    translationY = sink * settle
+                    scaleX = 1f + (dockWidthRatio - 1f) * settle
+                    scaleY = 1f + (dockWidthRatio - 1f) * settle
                     translationX = dragX
-                    alpha = ((1f - sinkProgress.value) / 0.3f).coerceIn(0f, 1f) *
+                    alpha = (1f - ((p - 0.6f) / 0.4f).coerceIn(0f, 1f)) *
                         (1f - (kotlin.math.abs(dragX) / (dragDismissThresholdPx * 1.6f)).coerceIn(0f, 0.7f))
                 }
                 .pointerInput(Unit) {
