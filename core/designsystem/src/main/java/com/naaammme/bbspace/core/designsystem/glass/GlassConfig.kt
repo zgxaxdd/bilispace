@@ -4,19 +4,20 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 
 /**
- * 玻璃用户设置模型（方案 1.3）：玻璃是挂在 iOS 风格上的**材质包**，不是新的
- * 风格维度。MATERIAL 下不生效并在设置页置灰。
+ * 玻璃用户设置模型（终版方案 3.1）：三档材质。
+ * OFF = iOS 定稿纯半透明 + 细描边；FROSTED = 磨砂（默认）；LIQUID = 液态玻璃
+ * （Haze 模糊 + AGSL 折射 + Fresnel 高光边 + 外发光 + 饱和度补偿）。
+ * minSdk 33 后 LIQUID 无需任何版本降级。
  */
 @Immutable
 data class GlassConfig(
-    val enabled: Boolean = false,
-    val style: GlassStyle = GlassStyle.STABLE
+    val material: GlassMaterial = GlassMaterial.FROSTED
 )
 
-/** 强度档：STABLE 稳态省电（低等级模糊），RICH 更接近完整液态玻璃观感。 */
-enum class GlassStyle {
-    STABLE,
-    RICH
+enum class GlassMaterial {
+    OFF,
+    FROSTED,
+    LIQUID
 }
 
 val LocalGlassConfig = staticCompositionLocalOf { GlassConfig() }

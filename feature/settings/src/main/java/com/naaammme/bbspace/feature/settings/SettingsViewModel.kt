@@ -313,15 +313,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun updateGlassEnabled(enabled: Boolean) {
+    fun updateGlassMaterial(material: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial) {
         viewModelScope.launch {
-            appSettings.updateGlassEnabled(enabled)
-        }
-    }
-
-    fun updateGlassStyle(style: com.naaammme.bbspace.core.designsystem.glass.GlassStyle) {
-        viewModelScope.launch {
-            appSettings.updateGlassStyle(style)
+            appSettings.updateGlassMaterial(material)
         }
     }
 

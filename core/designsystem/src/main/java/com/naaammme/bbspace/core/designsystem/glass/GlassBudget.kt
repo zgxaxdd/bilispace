@@ -47,17 +47,19 @@ fun resolveGlassBudget(
     isTransitionRunning: Boolean,
     forceLowBudget: Boolean = false
 ): GlassBudget {
+    // 底栏提档（终版方案 3.4，有意偏离 BiliPai 常量）：BiliPai 压最低档是因
+    // 其铺了 71 处；bbspace 白名单仅 5 处。gfxinfo 不达标则回退 BOTTOM_BAR=1。
     var maxBlurLevel = when (surfaceType) {
         GlassSurfaceType.HEADER -> 2
         GlassSurfaceType.DRAWER_OR_SHEET -> 2
-        GlassSurfaceType.BOTTOM_BAR -> 1
+        GlassSurfaceType.BOTTOM_BAR -> 2
         GlassSurfaceType.OVERLAY -> 1
         GlassSurfaceType.GENERIC -> 1
     }
     var backgroundAlphaMultiplier = when (surfaceType) {
         GlassSurfaceType.HEADER -> 1.00f
         GlassSurfaceType.DRAWER_OR_SHEET -> 1.00f
-        GlassSurfaceType.BOTTOM_BAR -> 0.95f
+        GlassSurfaceType.BOTTOM_BAR -> 0.88f
         GlassSurfaceType.OVERLAY -> 0.92f
         GlassSurfaceType.GENERIC -> 0.95f
     }
@@ -99,7 +101,7 @@ fun resolveGlassInputScale(
     return when (surfaceType) {
         GlassSurfaceType.HEADER -> 0.88f
         GlassSurfaceType.DRAWER_OR_SHEET -> 0.84f
-        GlassSurfaceType.BOTTOM_BAR -> 0.82f
+        GlassSurfaceType.BOTTOM_BAR -> 0.86f
         GlassSurfaceType.OVERLAY -> 0.84f
         GlassSurfaceType.GENERIC -> 0.84f
     }

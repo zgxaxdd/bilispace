@@ -155,7 +155,8 @@ fun CapsuleIndicator(
                         Modifier.glassEffect(
                             state = capsuleGlassState,
                             surfaceType = GlassSurfaceType.OVERLAY,
-                            shape = capsuleShape
+                            shape = capsuleShape,
+                            isScrolling = dragX != 0f
                         )
                     } else {
                         Modifier

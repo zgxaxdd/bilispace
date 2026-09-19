@@ -28,7 +28,7 @@ import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
-import com.naaammme.bbspace.core.designsystem.glass.GlassStyle
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.component.BiliTopBar
 import com.naaammme.bbspace.core.designsystem.component.rememberBiliLargeTitleScrollState
 import com.naaammme.bbspace.feature.settings.components.SettingSwitch
@@ -121,10 +121,8 @@ fun AppearanceSettingsScreen(
             item {
                 GlassSection(
                     isIOS = isIOS,
-                    enabled = config.glassEnabled,
-                    style = config.glassStyle,
-                    onEnabledChange = viewModel::updateGlassEnabled,
-                    onStyleChange = viewModel::updateGlassStyle
+                    material = config.glassMaterial,
+                    onMaterialChange = viewModel::updateGlassMaterial
                 )
             }
 
@@ -730,10 +728,8 @@ private fun CornerStyleSelector(
 @Composable
 private fun GlassSection(
     isIOS: Boolean,
-    enabled: Boolean,
-    style: GlassStyle,
-    onEnabledChange: (Boolean) -> Unit,
-    onStyleChange: (GlassStyle) -> Unit
+    material: GlassMaterial,
+    onMaterialChange: (GlassMaterial) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -748,37 +744,33 @@ private fun GlassSection(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "仅 iOS 风格下生效：Dock、首页顶栏与播放胶囊使用背板模糊材质（API 31 以下自动回退半透明）",
+                "仅 iOS 风格下生效：Dock、首页顶栏与播放胶囊使用背板模糊材质（minSdk 33，全设备完整生效）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            SettingSwitch(
-                title = "玻璃材质",
-                subtitle = if (isIOS) "悬浮表面使用液态玻璃材质" else "需先选择 iOS 界面风格",
-                checked = enabled,
-                onCheckedChange = onEnabledChange,
-                enabled = isIOS
             )
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilterChip(
-                    modifier = Modifier.weight(1f),
-                    selected = style == GlassStyle.STABLE,
-                    onClick = { onStyleChange(GlassStyle.STABLE) },
-                    enabled = isIOS && enabled,
-                    label = { Text("稳定", maxLines = 1) }
-                )
-                FilterChip(
-                    modifier = Modifier.weight(1f),
-                    selected = style == GlassStyle.RICH,
-                    onClick = { onStyleChange(GlassStyle.RICH) },
-                    enabled = isIOS && enabled,
-                    label = { Text("浓郁", maxLines = 1) }
-                )
+                GlassMaterial.entries.forEach { m ->
+                    FilterChip(
+                        modifier = Modifier.weight(1f),
+                        selected = material == m,
+                        onClick = { onMaterialChange(m) },
+                        enabled = isIOS,
+                        label = {
+                            Text(
+                                when (m) {
+                                    GlassMaterial.OFF -> "关闭"
+                                    GlassMaterial.FROSTED -> "磨砂"
+                                    GlassMaterial.LIQUID -> "液态"
+                                },
+                                maxLines = 1
+                            )
+                        }
+                    )
+                }
             }
         }
     }

@@ -57,8 +57,10 @@ class AppSettings @Inject constructor(
     private val frameRateModeKey = stringPreferencesKey("frame_rate_mode")
     private val cornerStyleKey = stringPreferencesKey("corner_style")
     private val uiStyleKey = stringPreferencesKey("ui_style")
-    private val glassEnabledKey = booleanPreferencesKey("glass_enabled")
-    private val glassStyleKey = stringPreferencesKey("glass_style")
+    private val glassMaterialKey = stringPreferencesKey("glass_material")
+    // 旧版两键保留读取用于迁移，不再写入
+    private val glassEnabledLegacyKey = booleanPreferencesKey("glass_enabled")
+    private val glassStyleLegacyKey = stringPreferencesKey("glass_style")
     private val hdFeedKey = booleanPreferencesKey("hd_feed")
     private val personalizedRcmdKey = booleanPreferencesKey("personalized_rcmd")
     private val lessonsModeKey = booleanPreferencesKey("lessons_mode")
@@ -96,10 +98,7 @@ class AppSettings @Inject constructor(
             // 将来翻转默认风格（MATERIAL → IOS）时本文件零改动。
             uiStyle = prefs[uiStyleKey]?.let { UiStyle.valueOf(it) }
                 ?: defaultThemeConfig.uiStyle,
-            glassEnabled = prefs[glassEnabledKey] ?: defaultThemeConfig.glassEnabled,
-            glassStyle = prefs[glassStyleKey]
-                ?.let { com.naaammme.bbspace.core.designsystem.glass.GlassStyle.valueOf(it) }
-                ?: defaultThemeConfig.glassStyle
+            glassMaterial = resolveGlassMaterial(prefs)
         )
     }.distinctUntilChanged()
 
@@ -163,12 +162,32 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.edit { it[uiStyleKey] = style.name }
     }
 
-    suspend fun updateGlassEnabled(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[glassEnabledKey] = enabled }
+    suspend fun updateGlassMaterial(material: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial) {
+        context.appSettingsDataStore.edit { it[glassMaterialKey] = material.name }
     }
 
-    suspend fun updateGlassStyle(style: com.naaammme.bbspace.core.designsystem.glass.GlassStyle) {
-        context.appSettingsDataStore.edit { it[glassStyleKey] = style.name }
+    /**
+     * 三档材质读取与旧值迁移（终版方案 3.1）：新 key 缺失时由旧两键推导——
+     * 开+STABLE→FROSTED、开+RICH→LIQUID、关→OFF；全新安装默认 FROSTED。
+     */
+    private fun resolveGlassMaterial(
+        prefs: androidx.datastore.preferences.core.Preferences
+    ): com.naaammme.bbspace.core.designsystem.glass.GlassMaterial {
+        prefs[glassMaterialKey]?.let { raw ->
+            return com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.entries
+                .firstOrNull { it.name == raw }
+                ?: defaultThemeConfig.glassMaterial
+        }
+        val legacyEnabled = prefs[glassEnabledLegacyKey] ?: false
+        val legacyStyle = prefs[glassStyleLegacyKey]
+        return when {
+            !legacyEnabled ->
+                com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.OFF
+            legacyStyle == "RICH" ->
+                com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.LIQUID
+            else ->
+                com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.FROSTED
+        }
     }
 
     val hdFeed: Flow<Boolean> = context.appSettingsDataStore.data.map { it[hdFeedKey] ?: false }

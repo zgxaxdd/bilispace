@@ -302,7 +302,8 @@ private fun HomeTopBar(
                 when {
                     isIOS && topGlassOn -> Modifier.glassEffect(
                         state = topGlassState,
-                        surfaceType = GlassSurfaceType.HEADER
+                        surfaceType = GlassSurfaceType.HEADER,
+                        isScrolling = topBarOffsetPxProvider() > 0f
                     )
                     isIOS -> Modifier.background(
                         MaterialTheme.colorScheme.background.copy(

@@ -185,7 +185,7 @@ fun BiliTheme(
 
     CompositionLocalProvider(
         LocalUiStyle provides config.uiStyle,
-        LocalGlassConfig provides GlassConfig(config.glassEnabled, config.glassStyle),
+        LocalGlassConfig provides GlassConfig(config.glassMaterial),
         LocalGlassGuard provides glassGuardTracker.policy
     ) {
         ProvideAnimations(config.animationSpeed) {

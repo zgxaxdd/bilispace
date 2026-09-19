@@ -29,11 +29,10 @@ data class ThemeConfig(
     // 默认 MATERIAL 是风险面决策：iOS 化覆盖全部 feature 模块，先作为可选项发布，
     // 真机走查干净后翻转默认值只改这一行（读取路径以 defaultThemeConfig 兜底）。
     val uiStyle: UiStyle = UiStyle.MATERIAL,
-    // 液态玻璃材质包（挂在 iOS 风格上，非新风格维度）：MATERIAL 下不生效且置灰。
-    // 默认关闭——玻璃只在白名单表面生效，先走查再默认。
-    val glassEnabled: Boolean = false,
-    val glassStyle: com.naaammme.bbspace.core.designsystem.glass.GlassStyle =
-        com.naaammme.bbspace.core.designsystem.glass.GlassStyle.STABLE
+    // 液态玻璃材质包（挂在 iOS 风格上，非新风格维度）：三档 OFF/FROSTED/LIQUID，
+    // 默认 FROSTED（磨砂）。MATERIAL 下不生效且置灰。
+    val glassMaterial: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial =
+        com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.FROSTED
 )
 
 const val DEFAULT_PULL_REFRESH_DISTANCE_DP = 80f

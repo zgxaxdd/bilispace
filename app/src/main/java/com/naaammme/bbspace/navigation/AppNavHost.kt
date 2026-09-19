@@ -822,7 +822,8 @@ private fun TopLevelFloatingNavigation(
             isIOS && glassOn -> Modifier.glassEffect(
                 state = glassState,
                 surfaceType = GlassSurfaceType.BOTTOM_BAR,
-                shape = toolbarShape
+                shape = toolbarShape,
+                isScrolling = visibilityController.hidden
             )
             isIOS -> {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
