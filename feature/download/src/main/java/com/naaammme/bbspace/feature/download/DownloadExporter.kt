@@ -161,20 +161,6 @@ class DownloadExporter @Inject constructor(
         fileName: String,
         mime: String
     ): String {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED
-            ) error("需要存储权限才能导出文件，请在系统设置中授予存储权限")
-            val dir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                ALBUM
-            )
-            if (!dir.exists() && !dir.mkdirs()) error("创建下载目录失败")
-            val out = File(dir, fileName)
-            source.copyTo(out, overwrite = true)
-            MediaScannerConnection.scanFile(context, arrayOf(out.absolutePath), arrayOf(mime), null)
-            return out.absolutePath
-        }
         val resolver = context.contentResolver
         val values = pendingDownloadValues(fileName, mime)
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)

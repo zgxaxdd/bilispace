@@ -94,9 +94,8 @@ class VideoDetailActivity : ComponentActivity() {
                 darkScrim = Color.TRANSPARENT
             )
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
+        // minSdk 33：无需判版本
+        window.isNavigationBarContrastEnforced = false
         // 窗口过渡帧兜底：无缝打开/返回瞬间系统可能露出一帧窗口背景，
         // 深色与播放器区域同色，避免浅色主题下闪白（正常内容始终盖在背景之上）
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))

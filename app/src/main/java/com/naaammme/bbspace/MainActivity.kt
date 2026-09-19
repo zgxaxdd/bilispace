@@ -120,9 +120,8 @@ class MainActivity : ComponentActivity() {
                 darkScrim = Color.TRANSPARENT
             )
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
+        // minSdk 33：无需判版本
+        window.isNavigationBarContrastEnforced = false
         setContent {
             val themeConfig by appSettings.themeConfig.collectAsState(initial = ThemeConfig())
 

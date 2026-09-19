@@ -61,7 +61,6 @@ fun Modifier.glassEffect(
     if (!enabled || !config.enabled) return this
     if (LocalUiStyle.current != UiStyle.IOS) return this
     if (state == null) return this
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return this
 
     val budget = remember(surfaceType, guard.effectiveMotionTier, guard.forceLowBlurBudget) {
         resolveGlassBudget(
@@ -116,7 +115,6 @@ fun isGlassActive(state: HazeState?): Boolean {
     return config.enabled &&
         LocalUiStyle.current == UiStyle.IOS &&
         state != null &&
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
         guard.effectiveMotionTier != MotionTier.Reduced &&
         context is Activity
 }

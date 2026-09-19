@@ -21,10 +21,11 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
 
             extensions.configure<ApplicationExtension> {
                 namespace = "com.naaammme.bbspace"
-                compileSdk = 36
+                compileSdk = 37
 
                 defaultConfig {
-                    minSdk = 24
+                    // minSdk 33：与 library 约定插件一致（Liquid Glass 下限，门控清零）
+                    minSdk = 33
                     targetSdk = 36
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                 }

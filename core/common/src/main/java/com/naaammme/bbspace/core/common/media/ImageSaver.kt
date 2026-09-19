@@ -37,13 +37,11 @@ object ImageSaver {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        "${Environment.DIRECTORY_PICTURES}/$album"
-                    )
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
+                put(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_PICTURES}/$album"
+                )
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val savedUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 ?: error("创建图片失败")
@@ -53,12 +51,10 @@ object ImageSaver {
                     input.copyTo(output)
                 } ?: error("打开图片文件失败")
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val done = ContentValues().apply {
-                    put(MediaStore.MediaColumns.IS_PENDING, 0)
-                }
-                resolver.update(savedUri, done, null, null)
+            val done = ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
             }
+            resolver.update(savedUri, done, null, null)
             savedUri
         }.onFailure {
             outUri?.let { resolver.delete(it, null, null) }

@@ -15,12 +15,11 @@ import androidx.compose.ui.graphics.toArgb
 /**
  * AGSL 边缘折射（移植自 BiliPai `LiquidGlassShader.kt` / `FullBarLiquidGlassModifier.kt`，
  * 方案 1.2 L4）。仅 API 33+（RuntimeShader / AGSL 门槛，见 1.5 分档表）；
- * 调用方无需自行判版本，modifier 内部门控。
+ * minSdk 33 起 AGSL 全量可用，无需版本门控。
  *
  * 对元素自身绘制内容做**边缘采样偏移**：底色由调用方绘制，着色器只折射边缘，
  * 避免双重染色。用于 Dock / 胶囊等玻璃表面的"液态"边缘质感。
  */
-@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 fun Modifier.liquidGlassEdge(
     refractIntensity: Float = 0.2f,
     backgroundColor: Color = Color.Transparent

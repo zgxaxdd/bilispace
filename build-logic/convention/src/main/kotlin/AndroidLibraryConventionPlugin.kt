@@ -26,10 +26,12 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
             extensions.configure<LibraryExtension> {
                 namespace = derivedNamespace()
-                compileSdk = 36
+                compileSdk = 37
 
                 defaultConfig {
-                    minSdk = 24
+                    // minSdk 33：Liquid Glass 全量生效的下限（AGSL = API 33），
+                    // 全仓 12 处 API 功能性门控随之清零，无降级分支
+                    minSdk = 33
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                 }
 

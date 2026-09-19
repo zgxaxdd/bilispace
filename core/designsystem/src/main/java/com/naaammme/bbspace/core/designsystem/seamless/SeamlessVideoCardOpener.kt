@@ -225,9 +225,7 @@ class SeamlessCardOpener(
         }
         Log.d(TAG, "cover bitmap found, config=${cached.config}")
         // 系统返回阶段快照为软件画布：硬件位图必须转软件配置，否则绘制抛异常
-        val safeBitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            cached.config == Bitmap.Config.HARDWARE
-        ) {
+        val safeBitmap = if (cached.config == Bitmap.Config.HARDWARE) {
             runCatching { cached.copy(Bitmap.Config.ARGB_8888, false) }
                 .getOrNull()
                 ?.also { Log.d(TAG, "hardware bitmap copied to software") }

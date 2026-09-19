@@ -140,7 +140,7 @@ fun BiliTheme(
             UiStyle.MATERIAL -> {
                 val base = when {
                     config.paletteStyle == PaletteStyle.MONOCHROME -> createMonochromeColorScheme(darkTheme)
-                    config.useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    config.useDynamicColor -> {
                         if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
                     }
                     else -> createSeedColorScheme(config.seedColor, darkTheme)

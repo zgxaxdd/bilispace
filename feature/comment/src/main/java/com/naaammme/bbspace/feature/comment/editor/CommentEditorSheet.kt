@@ -304,33 +304,15 @@ private fun loadStaticPreview(
     context: Context,
     uri: Uri
 ): ImageBitmap? {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        val source = ImageDecoder.createSource(context.contentResolver, uri)
-        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-            decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE)
-            var sample = 1
-            while (info.size.width / sample > PREVIEW_SIZE_PX || info.size.height / sample > PREVIEW_SIZE_PX) {
-                sample = sample shl 1
-            }
-            decoder.setTargetSampleSize(sample)
-        }.asImageBitmap()
-    } else {
-        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, boundsOpts)
-        } ?: return null
+    val source = ImageDecoder.createSource(context.contentResolver, uri)
+    return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+        decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE)
         var sample = 1
-        while (boundsOpts.outWidth / sample > PREVIEW_SIZE_PX || boundsOpts.outHeight / sample > PREVIEW_SIZE_PX) {
+        while (info.size.width / sample > PREVIEW_SIZE_PX || info.size.height / sample > PREVIEW_SIZE_PX) {
             sample = sample shl 1
         }
-        val bitmapOpts = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.RGB_565
-        }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, bitmapOpts)?.asImageBitmap()
-        }
-    }
+        decoder.setTargetSampleSize(sample)
+    }.asImageBitmap()
 }
 
 private const val PREVIEW_SIZE_PX = 144
