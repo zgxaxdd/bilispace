@@ -84,7 +84,7 @@ class IOSColorSchemeTest {
     @Test
     fun `BiliRadius card 与 player 同值`() {
         assertEquals(BiliRadius.card, BiliRadius.player)
-        assertEquals(12.dp, BiliRadius.card)
+        assertEquals(16.dp, BiliRadius.card)
     }
 
     // ===== iOS 排版阶梯 =====
