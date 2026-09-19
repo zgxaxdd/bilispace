@@ -343,12 +343,6 @@ class VideoViewModel @Inject constructor(
         }
     }
 
-    fun updateInAppMiniPlayer(enabled: Boolean) {
-        viewModelScope.launch {
-            playerSettings.setInAppMiniPlayer(enabled)
-        }
-    }
-
     fun updateSeamlessTransition(enabled: Boolean) {
         viewModelScope.launch {
             playerSettings.setSeamlessTransition(enabled)

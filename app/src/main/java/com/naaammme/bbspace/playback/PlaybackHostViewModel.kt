@@ -9,6 +9,7 @@ import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.navigation.VideoDetailNavBus
+import com.naaammme.bbspace.playback.capsule.CapsuleIndicatorState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -25,6 +26,7 @@ class PlaybackHostViewModel @Inject constructor(
     private val videoPlaybackController: VideoPlaybackController,
     playerSettings: AppSettings,
     private val hostState: PlaybackHostState,
+    val capsuleState: CapsuleIndicatorState,
     val videoDetailNavBus: VideoDetailNavBus
 ) : ViewModel() {
 
@@ -48,22 +50,15 @@ class PlaybackHostViewModel @Inject constructor(
             initialValue = true
         )
 
-    // hostMode / miniPlayerAvailable / expand / minimize / close 的唯一状态源是
-    // PlaybackHostState（进程级单例）：视频详情迁到独立 Activity 后两窗口共享，
-    // 这里仅做转发，保持原公开属性名与签名，调用方零改动。
+    // hostMode / expand / close 的唯一状态源是 PlaybackHostState（进程级单例）：
+    // 视频详情迁到独立 Activity 后两窗口共享，这里仅做转发。
     val hostMode: PlaybackHostMode
         get() = hostState.hostMode
-    val miniPlayerAvailable: StateFlow<Boolean>
-        get() = hostState.miniPlayerAvailable
 
     private var shouldResumeAfterBackgroundPause = false
 
     fun expand() {
         hostState.expand()
-    }
-
-    fun minimize() {
-        hostState.minimize()
     }
 
     fun openLive(route: LiveRoute) {

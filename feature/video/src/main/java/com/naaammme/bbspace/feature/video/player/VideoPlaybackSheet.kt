@@ -115,6 +115,7 @@ internal fun VideoPlaybackSheet(
     // 悬浮面板形态：sheet 本体透明，内容为四周留边的圆角卡片（自带投影），
     // 与屏幕边缘脱开产生"浮起"感；下拉关闭手势仍由 ModalBottomSheet 承接
     ModalBottomSheet(
+        scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         dragHandle = null,
@@ -345,13 +346,6 @@ private fun PlaybackSettingsSection(
         subtitle = "退出页面或切到后台后继续播放，并显示系统通知",
         checked = settingsState.playback.backgroundPlayback,
         onCheckedChange = viewModel::updateBackgroundPlayback
-    )
-
-    SheetSwitchCard(
-        title = "应用内小窗",
-        subtitle = "允许把视频和直播缩成应用内小窗继续播放",
-        checked = settingsState.playback.inAppMiniPlayer,
-        onCheckedChange = viewModel::updateInAppMiniPlayer
     )
 
     SheetSwitchCard(

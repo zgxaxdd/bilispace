@@ -30,6 +30,7 @@ import com.naaammme.bbspace.navigation.EXTRA_FROM_SEAMLESS
 import com.naaammme.bbspace.navigation.VideoDetailNavBus
 import com.naaammme.bbspace.navigation.VideoTargetSerializer
 import com.naaammme.bbspace.playback.PlaybackHostState
+import com.naaammme.bbspace.playback.capsule.CapsuleIndicatorState
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -58,6 +59,9 @@ class VideoDetailActivity : ComponentActivity() {
     lateinit var hostState: PlaybackHostState
 
     @Inject
+    lateinit var capsuleState: CapsuleIndicatorState
+
+    @Inject
     lateinit var navBus: VideoDetailNavBus
 
     @Inject
@@ -80,6 +84,8 @@ class VideoDetailActivity : ComponentActivity() {
         }
         // 上一次返回动画遗留的延迟关停还没执行时，本次打开立即取消，避免误杀新会话
         hostState.cancelPendingClose()
+        // 进入新视频详情：胶囊隐藏，新详情接管（方案 2.3 状态机）
+        capsuleState.deactivate()
         // 与 MainActivity 一致的 edge-to-edge 适配
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
@@ -177,9 +183,9 @@ class VideoDetailActivity : ComponentActivity() {
             SeamlessTransitionState.beginReturn()
         }
         SeamlessTransitionState.markClosing()
-        if (hostState.miniPlayerAvailable.value) {
-            hostState.minimize()
-        } else {
+        // 胶囊等价替换（方案 2.3）：视频目标 → 激活胶囊（播放继续）；
+        // 直播/空目标 → 原关停分支。胶囊无 PlayerView，收起动画期间可立即出现。
+        if (!capsuleState.activateForVideoTarget()) {
             hostState.closeAfterReturnAnimation()
         }
         finish()
@@ -197,9 +203,7 @@ class VideoDetailActivity : ComponentActivity() {
             SeamlessTransitionState.endReturn()
         }
         SeamlessTransitionState.markClosing()
-        if (hostState.miniPlayerAvailable.value) {
-            hostState.minimize()
-        } else {
+        if (!capsuleState.activateForVideoTarget()) {
             hostState.close()
         }
         finish()

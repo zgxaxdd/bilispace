@@ -48,17 +48,6 @@ class PlaybackHostState @Inject constructor(
     val hostMode: PlaybackHostMode
         get() = _hostMode.value
 
-    val miniPlayerAvailable: StateFlow<Boolean> = playerSettings.state
-        .map { it.playback.inAppMiniPlayer }
-        .combine(playbackSession.currentTarget) { enabled, target ->
-            enabled && target != null
-        }
-        .stateIn(
-            scope = scope,
-            started = SharingStarted.Eagerly,
-            initialValue = false
-        )
-
     /** VideoDetailActivity 实例是否存在于返回栈中（onCreate → onDestroy 的真实存活性）。 */
     @Volatile
     var videoDetailAlive: Boolean = false
@@ -70,16 +59,10 @@ class PlaybackHostState @Inject constructor(
         private set
 
     init {
-        // 目标消失即收起；迷你不可用（设置关闭）时不得停留在 Mini。
+        // 目标消失即收起（悬浮胶囊激活与 hostMode 无关，目标消失必然无处可回）。
         scope.launch {
-            combine(currentTarget, miniPlayerAvailable) { target, enabled ->
-                target to enabled
-            }.collect { (target, enabled) ->
+            currentTarget.collect { target ->
                 if (target == null) {
-                    _hostMode.value = PlaybackHostMode.Hidden
-                    return@collect
-                }
-                if (_hostMode.value == PlaybackHostMode.Mini && !enabled) {
                     _hostMode.value = PlaybackHostMode.Hidden
                 }
             }
@@ -90,12 +73,6 @@ class PlaybackHostState @Inject constructor(
         cancelPendingClose()
         isUserClosedVideo = false
         _hostMode.value = PlaybackHostMode.Expanded
-    }
-
-    fun minimize() {
-        if (!miniPlayerAvailable.value) return
-        if (currentTarget.value == null) return
-        _hostMode.value = PlaybackHostMode.Mini
     }
 
     fun close() {

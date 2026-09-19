@@ -1,17 +1,28 @@
 package com.naaammme.bbspace.navigation
 
 import android.os.Bundle
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.FilledIconButton
@@ -35,8 +46,12 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -57,8 +72,15 @@ import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRa
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
+import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
+import com.naaammme.bbspace.core.designsystem.glass.glassEffect
+import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.theme.buildNavTransitions
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
 import com.naaammme.bbspace.core.model.HistoryTarget
@@ -67,6 +89,8 @@ import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import androidx.compose.runtime.CompositionLocalProvider
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import com.naaammme.bbspace.core.model.VideoSrc
 import com.naaammme.bbspace.core.model.VideoTarget
 
@@ -122,6 +146,8 @@ import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.playback.PlaybackHost
 import com.naaammme.bbspace.playback.PlaybackHostMode
 import com.naaammme.bbspace.playback.PlaybackHostViewModel
+import com.naaammme.bbspace.playback.capsule.CapsuleIndicator
+import com.naaammme.bbspace.playback.capsule.CapsuleIndicatorState
 
 private const val MAIN_ROUTE = "main"
 private val topLevelNavEdgePadding = 16.dp
@@ -151,9 +177,8 @@ fun AppNavHost(
         playbackHostViewModel.close()
     }
     val dismissPlaybackHost: () -> Unit = {
-        if (playbackHostViewModel.miniPlayerAvailable.value) {
-            playbackHostViewModel.minimize()
-        } else {
+        // 胶囊等价替换（方案 2.3）：视频目标 → 激活胶囊；直播/空目标 → 原关停
+        if (!playbackHostViewModel.capsuleState.activateForVideoTarget()) {
             when (playbackHostViewModel.currentTarget.value) {
                 is StreamPlaybackTarget.Video -> closeVideoHost()
                 is StreamPlaybackTarget.Live, null -> playbackHostViewModel.close()
@@ -162,14 +187,11 @@ fun AppNavHost(
     }
     val collapseExpandedPlayback = {
         if (hostMode == PlaybackHostMode.Expanded) {
-            forcedDismissMode = if (
-                playbackHostViewModel.miniPlayerAvailable.value &&
-                playbackHostViewModel.currentTarget.value != null
-            ) {
-                PlaybackHostMode.Mini
-            } else {
-                PlaybackHostMode.Hidden
+            // 胶囊承接播放（仅视频）；直播/空目标直接 Hidden
+            if (!playbackHostViewModel.capsuleState.activateForVideoTarget()) {
+                playbackHostViewModel.close()
             }
+            forcedDismissMode = PlaybackHostMode.Hidden
         }
     }
     val openSpaceFromVideo: (SpaceRoute) -> Unit = { route ->
@@ -220,6 +242,7 @@ fun AppNavHost(
                 playbackHostViewModel.warmOpen(target)
                 openVideoActivity(target, coverUrl, coverLarge, bundle)
             } else {
+                playbackHostViewModel.capsuleState.deactivate()
                 playbackHostViewModel.expand()
                 videoViewModel.openRoot(target)
             }
@@ -272,7 +295,10 @@ fun AppNavHost(
         rootNavController.navigateToListenDetail(oid, itemType, subId, title, author, cover)
     }
     val openArticle: (String, Int) -> Unit = { opusId, opusType ->
-        playbackHostViewModel.minimize()
+        // 打开专栏：视频播放继续 → 胶囊承接；直播/无目标 → 原关停
+        if (!playbackHostViewModel.capsuleState.activateForVideoTarget()) {
+            playbackHostViewModel.close()
+        }
         rootNavController.navigateToDynamicDetail(opusId, opusType)
     }
     val transitions = remember(themeConfig.transitionStyle, themeConfig.animationSpeed) {
@@ -353,6 +379,12 @@ fun AppNavHost(
                 MainTabsScaffold(
                     currentTab = currentTab,
                     onTabChange = { currentTab = it },
+                    capsuleState = playbackHostViewModel.capsuleState,
+                    onCapsuleOpen = {
+                        (playbackHostViewModel.capsuleState.sessionState.value.target
+                            as? StreamPlaybackTarget.Video)?.let { openVideo(it.target) }
+                    },
+                    onCapsuleTogglePlay = playbackHostViewModel::togglePlayPause,
                     onBottomNavOcclusionChanged = { bottomNavOcclusionRatio = it },
                     onNavigateToSearch = { rootNavController.navigateToSearch() },
                     onNavigateToSettings = { rootNavController.navigate(SETTINGS_ROUTE) },
@@ -511,21 +543,6 @@ fun AppNavHost(
         PlaybackHost(
             mode = playbackMode,
             playbackHostViewModel = playbackHostViewModel,
-            onExpand = {
-                // 视频可能在独立详情 Activity 中切换过：以会话当前目标重置本地目标栈。
-                // openVideoInternal 对同一 target 短路返回，不会打断播放。
-                (playbackHostViewModel.currentTarget.value as? StreamPlaybackTarget.Video)
-                    ?.let { videoViewModel.openRoot(it.target) }
-                playbackHostViewModel.expand()
-            },
-            onTogglePlay = playbackHostViewModel::togglePlayPause,
-            onClose = {
-                when (playbackHostViewModel.currentTarget.value) {
-                    is StreamPlaybackTarget.Video -> closeVideoHost()
-                    is StreamPlaybackTarget.Live -> playbackHostViewModel.close()
-                    null -> Unit
-                }
-            },
             onDismissExpanded = dismissPlaybackHost,
             onGoHome = goHomeFromVideo,
             onOpenSpace = openSpaceFromVideo,
@@ -542,6 +559,9 @@ fun AppNavHost(
 private fun MainTabsScaffold(
     currentTab: TopLevelRoute,
     onTabChange: (TopLevelRoute) -> Unit,
+    capsuleState: CapsuleIndicatorState,
+    onCapsuleOpen: () -> Unit,
+    onCapsuleTogglePlay: () -> Unit,
     onBottomNavOcclusionChanged: (Float) -> Unit = {},
     onNavigateToSearch: () -> Unit,
     onNavigateToSettings: () -> Unit,
@@ -566,6 +586,11 @@ private fun MainTabsScaffold(
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val fixBottomBar by settingsViewModel.fixBottomBar.collectAsStateWithLifecycle()
     val navVisibilityController = rememberTopLevelNavVisibilityController(fixBottomBar)
+    val anim = LocalAnimations.current
+
+    // 玻璃背景源：页面内容（含各 Tab 页）作为 hazeSource，Dock / 胶囊在其上采样
+    val glassState = remember { HazeState() }
+    val glassOn = isGlassActive(glassState)
 
     Box(
         modifier = Modifier
@@ -573,42 +598,60 @@ private fun MainTabsScaffold(
             .background(MaterialTheme.colorScheme.background)
             .nestedScroll(navVisibilityController.connection)
     ) {
-        TopLevelRoute.entries.forEach { tab ->
-            if (currentTab == tab) {
-                saveableStateHolder.SaveableStateProvider(tab.route) {
-                    when (tab) {
-                        TopLevelRoute.HOME -> HomeScreen(
-                            onNavigateToSearch = onNavigateToSearch,
-                            onNavigateToProfile = { onTabChange(TopLevelRoute.PROFILE) },
-                            profileAvatar = userState.user?.avatar,
-                            onOpenVideo = onNavigateToVideo,
-                            onOpenSpace = onNavigateToSpace,
-                            onOpenLive = onNavigateToLive,
-                            onOpenDynamic = onNavigateToDynamicDetail,
-                            onOpenArticle = onNavigateToArticle,
-                            onOpenListenItem = onNavigateToListenDetail
-                        )
-                        TopLevelRoute.DYNAMIC -> DynamicScreen(
-                            onOpenVideo = onNavigateToVideo,
-                            onOpenSpace = onNavigateToSpace,
-                            onOpenLive = onNavigateToLive,
-                            onOpenDynamic = onNavigateToDynamicDetail
-                        )
-                        TopLevelRoute.MESSAGE -> ImScreen(
-                            onOpenConversation = onNavigateToImConversation,
-                            onOpenMsgFeed = onNavigateToMsgFeed
-                        )
-                        TopLevelRoute.PROFILE -> UserScreen(
-                            onNavigateToAccount = onNavigateToAccount,
-                            onNavigateToSettings = onNavigateToSettings,
-                            onNavigateToBbSpace = onNavigateToBbSpace,
-                            onNavigate = onNavigateFromUser,
-                            onNavigateToDownload = onNavigateToDownload,
-                            onOpenSpace = onNavigateToSpace
-                        )
-                    }
+        // A1：主 Tab 内容切换 Crossfade（200ms Standard）。各 Tab 状态仍由
+        // rememberSaveableStateHolder 保留，过渡期间新旧页面短暂并存。
+        Crossfade(
+            targetState = currentTab,
+            modifier = if (glassOn) Modifier.hazeSource(glassState) else Modifier,
+            animationSpec = tween(durationMillis = anim.medium, easing = anim.standard),
+            label = "mainTabCrossfade"
+        ) { tab ->
+            saveableStateHolder.SaveableStateProvider(tab.route) {
+                when (tab) {
+                    TopLevelRoute.HOME -> HomeScreen(
+                        onNavigateToSearch = onNavigateToSearch,
+                        onNavigateToProfile = { onTabChange(TopLevelRoute.PROFILE) },
+                        profileAvatar = userState.user?.avatar,
+                        onOpenVideo = onNavigateToVideo,
+                        onOpenSpace = onNavigateToSpace,
+                        onOpenLive = onNavigateToLive,
+                        onOpenDynamic = onNavigateToDynamicDetail,
+                        onOpenArticle = onNavigateToArticle,
+                        onOpenListenItem = onNavigateToListenDetail
+                    )
+                    TopLevelRoute.DYNAMIC -> DynamicScreen(
+                        onOpenVideo = onNavigateToVideo,
+                        onOpenSpace = onNavigateToSpace,
+                        onOpenLive = onNavigateToLive,
+                        onOpenDynamic = onNavigateToDynamicDetail
+                    )
+                    TopLevelRoute.MESSAGE -> ImScreen(
+                        onOpenConversation = onNavigateToImConversation,
+                        onOpenMsgFeed = onNavigateToMsgFeed
+                    )
+                    TopLevelRoute.PROFILE -> UserScreen(
+                        onNavigateToAccount = onNavigateToAccount,
+                        onNavigateToSettings = onNavigateToSettings,
+                        onNavigateToBbSpace = onNavigateToBbSpace,
+                        onNavigate = onNavigateFromUser,
+                        onNavigateToDownload = onNavigateToDownload,
+                        onOpenSpace = onNavigateToSpace
+                    )
                 }
             }
+        }
+
+        // 悬浮播放胶囊：内容层之后、底栏之前（z 序低于底栏，方案 2.8）
+        CompositionLocalProvider(LocalGlassHazeState provides glassState) {
+            CapsuleIndicator(
+                capsuleState = capsuleState,
+                onOpen = onCapsuleOpen,
+                onTogglePlay = onCapsuleTogglePlay,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 92.dp)
+                    .zIndex(0.5f)
+            )
         }
 
         TopLevelFloatingNavigation(
@@ -639,8 +682,16 @@ private fun TopLevelFloatingNavigation(
     onNavigateToSearch: () -> Unit,
     onOcclusionChanged: (Float) -> Unit = {}
 ) {
-    val toolbarShape = MaterialTheme.shapes.extraLarge
+    val isIOS = LocalUiStyle.current == UiStyle.IOS
+    val toolbarShape = if (isIOS) {
+        // iOS：Dock 圆角刻意由 32dp（extraLarge@ROUNDED）收紧至 28dp（方案 2.5）
+        RoundedCornerShape(BiliRadius.dock)
+    } else {
+        MaterialTheme.shapes.extraLarge
+    }
     val anim = LocalAnimations.current
+    val glassState = LocalGlassHazeState.current
+    val glassOn = isGlassActive(glassState)
     val edgePaddingPx = with(LocalDensity.current) { topLevelNavEdgePadding.toPx() }
     var hiddenDistancePx by remember { mutableFloatStateOf(0f) }
     val animatedOffsetPx by animateFloatAsState(
@@ -669,19 +720,76 @@ private fun TopLevelFloatingNavigation(
             translationY = animatedOffsetPx
         }
     val tabs: @Composable () -> Unit = {
-        TopLevelRoute.entries.forEach { tab ->
-            TopLevelFloatingNavigationItem(
-                tab = tab,
-                selected = currentTab == tab,
-                onClick = { onTabChange(tab) }
-            )
+        if (isIOS) {
+            // iOS：Segmented 胶囊滑块 + 阻尼回弹（方案 3.2 #1，对标 BiliPai BottomBar）
+            val entries = TopLevelRoute.entries
+            val selectedIndex = entries.indexOf(currentTab).coerceAtLeast(0)
+            val itemSize = 48.dp
+            Box {
+                val pillX by animateDpAsState(
+                    targetValue = itemSize * selectedIndex,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "dockPillX"
+                )
+                Box(
+                    modifier = Modifier
+                        .offset(x = pillX + 4.dp)
+                        .padding(4.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                )
+                Row(modifier = Modifier.padding(4.dp)) {
+                    entries.forEach { tab ->
+                        val selected = tab == currentTab
+                        Box(
+                            modifier = Modifier
+                                .size(itemSize)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { onTabChange(tab) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = tab.icon,
+                                contentDescription = tab.label,
+                                tint = if (selected) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            TopLevelRoute.entries.forEach { tab ->
+                TopLevelFloatingNavigationItem(
+                    tab = tab,
+                    selected = currentTab == tab,
+                    onClick = { onTabChange(tab) }
+                )
+            }
         }
     }
     val searchFab: @Composable () -> Unit = {
         FloatingActionButton(
             onClick = onNavigateToSearch,
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            containerColor = if (isIOS) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.tertiaryContainer
+            },
+            contentColor = if (isIOS) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onTertiaryContainer
+            },
             elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp)
         ) {
             Icon(
@@ -695,9 +803,50 @@ private fun TopLevelFloatingNavigation(
         modifier = animatedModifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // iOS：纯半透明色 + 细描边 + 轻环境阴影（不做模糊，方案 2.5）；
+        // Material 维持 surfaceContainer 实色、无描边。
+        val dockColor = when {
+            // 玻璃生效：Haze 染色接管，容器底透明
+            glassOn -> Color.Transparent
+            isIOS -> {
+                val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                if (dark) {
+                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.90f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.92f)
+                }
+            }
+            else -> MaterialTheme.colorScheme.surfaceContainer
+        }
+        val dockModifier = when {
+            isIOS && glassOn -> Modifier.glassEffect(
+                state = glassState,
+                surfaceType = GlassSurfaceType.BOTTOM_BAR,
+                shape = toolbarShape
+            )
+            isIOS -> {
+                val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                val borderColor = if (dark) {
+                    Color.White.copy(alpha = 0.10f)
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+                }
+                Modifier
+                    .shadow(
+                        elevation = 3.dp,
+                        shape = toolbarShape,
+                        clip = false,
+                        ambientColor = Color.Black.copy(alpha = 0.08f),
+                        spotColor = Color.Black.copy(alpha = 0.30f)
+                    )
+                    .border(1.dp, borderColor, toolbarShape)
+            }
+            else -> Modifier
+        }
         Surface(
+            modifier = dockModifier,
             shape = toolbarShape,
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            color = dockColor,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
         ) {
             Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), content = { tabs() })
