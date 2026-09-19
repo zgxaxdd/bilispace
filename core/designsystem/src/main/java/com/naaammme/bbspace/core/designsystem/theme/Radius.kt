@@ -20,12 +20,11 @@ import androidx.compose.ui.unit.dp
  */
 object BiliRadius {
     /**
-     * 视频卡片圆角。**一个角色只有一个来源**：首页卡容器、卡片封面、无缝打开的锚点
-     * 与动画半径，全部取这个值。此前这四处各用各的（容器随主题 24dp、双列封面固定
-     * 12dp、单列封面是直角、动画又是另一套），导致卡片自身圆角不一致、且与播放器
-     * 动画圆角对不上——用户可见的"割裂感"即来源于此。
+     * 视频卡片圆角（iOS 26 大圆角语言 12→16dp，终版方案 5.1）。**一个角色只有
+     * 一个来源**：首页卡容器、卡片封面、无缝打开的锚点与动画半径，全部取这个值。
+     * [player] 刻意与本值相等（无缝 morph 两端同值不跳变），改这里必须两端同步。
      */
-    val card = 12.dp
+    val card = 16.dp
 
     /**
      * 详情页播放器（展开态）圆角。
@@ -46,13 +45,12 @@ object BiliRadius {
      */
     val groupedList = 16.dp
 
-    /** 弹层（BottomSheet / Dialog）顶部圆角。 */
-    val sheetTop = 20.dp
+    /** 弹层（BottomSheet / Dialog）顶部圆角（iOS 26 大圆角语言，终版方案 五）。 */
+    val sheetTop = 28.dp
 
     /**
-     * 悬浮 Dock（底部导航容器）圆角。iOS 模式下由 32dp（shapes.extraLarge@ROUNDED）
-     * 刻意收紧至 28dp：容器改半透明后视觉体量更轻，32dp 显得过圆。
+     * 悬浮 Dock（底部导航容器）圆角。iOS 26 大圆角语言定 32dp（终版方案 五）。
      * 注意 Material 模式仍取 MaterialTheme.shapes.extraLarge，勿改回。
      */
-    val dock = 28.dp
+    val dock = 32.dp
 }

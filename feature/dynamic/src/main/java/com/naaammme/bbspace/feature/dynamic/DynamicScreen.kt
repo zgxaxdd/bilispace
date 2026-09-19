@@ -251,7 +251,7 @@ private fun DynamicPublishSheet(
     ModalBottomSheet(
         // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
         shape = if (LocalUiStyle.current == UiStyle.IOS) {
-            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
         } else {
             BottomSheetDefaults.ExpandedShape
         },
