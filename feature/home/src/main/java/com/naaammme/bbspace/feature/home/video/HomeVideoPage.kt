@@ -1,7 +1,12 @@
 package com.naaammme.bbspace.feature.home.video
 
+import android.graphics.Bitmap
 import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,16 +30,27 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -43,6 +59,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.SingletonImageLoader
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.designsystem.color.LocalHomeCardDynamicTintEnabled
+import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
+import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAdaptiveContentColors
+import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawSpec
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
 import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
@@ -57,10 +81,22 @@ import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
 import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
+import com.naaammme.bbspace.core.designsystem.seamless.recordCardLayer
+import com.naaammme.bbspace.core.designsystem.seamless.sharedContentKey
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
+import com.naaammme.bbspace.core.designsystem.glass.liquid.lens
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.blur
+import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -69,6 +105,11 @@ import com.naaammme.bbspace.core.model.ThreePointReason
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.home.LOAD_MORE_THRESHOLD
 import com.naaammme.bbspace.feature.home.rememberHomeFlingBehavior
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,6 +138,10 @@ fun HomeVideoPage(
 ) {
     val context = LocalContext.current
     val gridState = rememberLazyStaggeredGridState()
+    // 预加载用的封面 URL 列表。单独派生而不是直接用 items：预加载只需要 URL，
+    // 而 items 里任何字段变化（播放量、点赞数刷新）都不该重启预加载 effect。
+    // key 用 List 的 equals——只有真正换了内容才会变。
+    val preloadCoverUrls = remember(items) { items.map { it.cover } }
     val homeFling = rememberHomeFlingBehavior()
     var wasRefreshing by remember { mutableStateOf(false) }
     val currentItems by rememberUpdatedState(items)
@@ -126,6 +171,54 @@ fun HomeVideoPage(
             }
         }
     }
+    // ── 封面预加载（移植自 BiliPai 上游 HomeScreen 的 snapshotFlow + debounce 方案）──
+    // 为什么需要：滚动时新进入视口的封面要现场走「网络/磁盘 → 解码 → 上传纹理」，
+    // 解码发生在滚动帧里就是可见的抖动。提前把**即将进入视口**的封面解码好，
+    // 进视口时直接命中内存缓存。
+    //
+    // 三个关键设计（照搬上游，缺一不可）：
+    // 1. **debounce(180)**：惯性滑动时 layoutInfo 每帧都变，不 debounce 会变成
+    //    每帧一批请求的请求风暴。180ms 约等于"手指停下/惯性将尽"的窗口。
+    // 2. **滚动态门控**：正在滚动时直接跳过。滚动中抢解码反而会与当前帧争 CPU/带宽。
+    // 3. **只预取视口之后的一小段**，不贪多——预取太多等于把后面的解码提前做，
+    //    白白占用内存与流量（用户可能根本不滑到那里）。
+    LaunchedEffect(gridState, preloadCoverUrls) {
+        if (preloadCoverUrls.isEmpty()) return@LaunchedEffect
+        snapshotFlow {
+            val info = gridState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.maxOfOrNull { it.index } ?: -1
+            lastVisible to gridState.isScrollInProgress
+        }
+            .distinctUntilChanged()
+            // 见设计点 1：合并惯性滑动期间爆发的布局更新
+            .debounce(COVER_PRELOAD_DEBOUNCE_MS)
+            .collect { (lastVisible, scrolling) ->
+                // 见设计点 2：滚动中不抢解码
+                if (scrolling || lastVisible < 0) return@collect
+                val from = lastVisible + 1
+                val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCoverUrls.lastIndex)
+                if (from > to) return@collect
+                val urls = (from..to).mapNotNull { preloadCoverUrls.getOrNull(it) }
+                if (urls.isEmpty()) return@collect
+                // 见设计点 3：解码在 IO 线程，绝不占主线程
+                withContext(Dispatchers.IO) {
+                    val loader = SingletonImageLoader.get(context)
+                    urls.forEach { url ->
+                        loader.enqueue(
+                            ImageRequest.Builder(context)
+                                .data(url)
+                                // 与卡片实际展示尺寸同档（双列 ≈ 半屏宽、4:3），
+                                // 尺寸对不上会让预加载的解码结果无法命中卡片请求
+                                .size(COVER_PRELOAD_WIDTH_PX, COVER_PRELOAD_HEIGHT_PX)
+                                .memoryCachePolicy(CachePolicy.ENABLED)
+                                .diskCachePolicy(CachePolicy.ENABLED)
+                                .build()
+                        )
+                    }
+                }
+            }
+    }
+
     // 返回动画末端遮挡渐隐参数：顶栏（含状态栏）遮挡区占屏比 + 底部悬浮导航栏遮挡比。
     // 底部比例由 App 层实测后经 LocalBottomNavOcclusionRatio 下发（见 ListCoverRatio.kt）；
     // 底部被 Tab 栏/FAB 盖住的卡片，返回动画末端会做 alpha 渐隐，不再被"切一刀"。
@@ -201,19 +294,63 @@ private fun FeedCard(
 ) {
     val isDisliked = dislikedReason != null
     val isDynamic = item.cardGoto == "dynamic"
+    // 角标玻璃：iOS 风格 + LIQUID 档时，封面时长/播放量角标走真模糊
+    val badgeGlassOn = LocalUiStyle.current == UiStyle.IOS &&
+        LocalGlassConfig.current.material == GlassMaterial.LIQUID
     val canOpen = !isDisliked && (item.target != null || item.liveRoute != null || isDynamic)
     var showMoreMenu by remember(item) { mutableStateOf(false) }
+    // ── 封面动态取色（移植自 BiliPai 上游「卡片动态取色」）────────────────────────
+    // 缓存键用封面 URL 本身：同一张封面在任意卡片/任意次滚动里都命中同一份取色结果。
+    // 用 `remember(coverKey)` 而非 `remember(item)`：列表复用 slot 时 item 变而
+    // coverKey 不变的情况（同一视频换推荐位）不该重置颜色。
+    val coverTintKey = item.cover.orEmpty()
+    val dynamicTintEnabled = LocalHomeCardDynamicTintEnabled.current
+    val tintScope = rememberCoroutineScope()
+    var coverTint by remember(coverTintKey) {
+        mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverTintKey))
+    }
+    // 异步提取回来时，若卡片已被复用给别的封面，必须丢弃这次结果（上游同款防串色）
+    val activeCoverTintKey by rememberUpdatedState(coverTintKey)
+    // 取色结果渐变入场：直接跳变会让整张卡片"啪"地换色，350ms 过渡读起来是"光渗进来"
+    val animatedCoverTint by animateColorAsState(
+        targetValue = coverTint ?: Color.Transparent,
+        animationSpec = tween(durationMillis = 350),
+        label = "videoCardCoverTint"
+    )
+    val tintSource = if (animatedCoverTint.alpha > 0f) animatedCoverTint else null
     val containerColor = if (singleColumn) {
         MaterialTheme.colorScheme.surfaceContainerLow
     } else {
         // 双列参考 PiliPlus-Max：无卡片底色，封面与文字直接落在页面背景上
         Color.Transparent
     }
+    val defaultOnSurface = MaterialTheme.colorScheme.onSurface
+    val defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    // 深浅判据与全站一致：以主题背景亮度为准（跟随主题模式，不直接问系统）
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // 浅色主题 + 深色封面时正文翻白，否则被染深的卡片上深色字会失去对比度
+    val adaptiveContentColors = remember(
+        tintSource, darkTheme, defaultOnSurface, defaultOnSurfaceVariant, dynamicTintEnabled
+    ) {
+        resolveVideoCardAdaptiveContentColors(
+            coverTint = tintSource,
+            isDarkTheme = darkTheme,
+            defaultOnSurface = defaultOnSurface,
+            defaultOnSurfaceVariant = defaultOnSurfaceVariant,
+            dynamicTintEnabled = dynamicTintEnabled
+        )
+    }
     // 卡片圆角：**单一来源**。容器、封面、无缝动画锚点三者共用同一个 shape，
     // 避免出现"容器 24dp / 封面 12dp / 单列封面直角"这种卡片自身就不一致的观感。
     // 单列本可用更大的圆角，但普通 HomeVideoPage 只有双列；排行榜/搜索等页在单列下
     // 也用卡片圆角，保持全局一致。
     val cardShape = RoundedCornerShape(BiliRadius.card)
+    // 卡片是「封面 + 信息区」两块拼成的。两块**分别**只圆上/下两角，
+    // 接缝处都保持直角 → 拼合无缝，读作一张卡片；若两块都用全圆角，
+    // 接缝会各圆各的、中间露出一道背景，看起来像"图 + 贴在下面的小面板"。
+    // 整卡最终由 BiliCardSurface 的 cardShape 收圆。
+    val coverShape = remember(cardShape) { BiliRadius.topRounded(BiliRadius.card) }
+    val infoShape = remember(cardShape) { BiliRadius.bottomRounded(BiliRadius.card) }
     // 无缝动画参数：圆角取卡片自身 shape；兜底色即卡片所在区域的底色
     val seamlessSpec = rememberSeamlessCardSpec(
         shape = cardShape,
@@ -232,24 +369,126 @@ private fun FeedCard(
         item.target != null &&
         item.liveRoute == null
 
+    // ── 卡片动态染色（移植自 BiliPai 上游）────────────────────────────────
+    // **染色铺满整卡**（封面 + 信息区），不是只染信息区。
+    // 只染信息区时，封面是照片、下面是色块，中间会有一道明确的分界，
+    // 读起来像两块东西；铺满整卡后封面色与信息区同源，卡片才是一个整体。
+    //
+    // 分层：BiliCardSurface 的 containerColor 出整卡染色底 → 信息区再叠一道
+    // 封面同调的竖向渐变，让封面下沿的颜色"渗"进文字区（上游 coverGlow 同款），
+    // 最后 0.5dp 描边勾出玻璃棱镜边。
+    // 无封面色时（未加载完 / 提取失败 / 开关关闭）全部退化：底色原样、无渐变、
+    // 中性白描边，视觉与移植前一致。
+    val infoDrawSpec = if (dynamicTintEnabled) {
+        resolveVideoCardAmbientDrawSpec(
+            coverTint = tintSource,
+            isDarkTheme = darkTheme,
+            defaultContainerColor = containerColor,
+            defaultBorderColor = if (darkTheme) Color.White.copy(alpha = 0.25f)
+            else Color.White.copy(alpha = 0.40f)
+        )
+    } else {
+        null
+    }
+    val showCoverGlow = infoDrawSpec != null &&
+        infoDrawSpec.coverGlowAlpha > 0f &&
+        tintSource != null
+    // 信息区自身**不再铺底色**（底色已由整卡容器承担），只叠渐变与描边：
+    // 再铺一层会让接缝处出现"双层色"的色阶断层。
+    val infoModifier = Modifier
+        .then(
+            if (showCoverGlow && tintSource != null) {
+                Modifier.drawBehind {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                tintSource.copy(alpha = infoDrawSpec!!.coverGlowAlpha),
+                                tintSource.copy(alpha = infoDrawSpec.coverGlowAlpha * 0.35f),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = size.height * 0.85f
+                        )
+                    )
+                }
+            } else {
+                Modifier
+            }
+        )
+        .then(
+            if (infoDrawSpec != null) {
+                Modifier.border(width = 0.5.dp, color = infoDrawSpec.borderColor, shape = infoShape)
+            } else {
+                Modifier
+            }
+        )
+        .padding(horizontal = 8.dp, vertical = 6.dp)
+
+    // ── 无缝过渡期间整卡内容的可见性 ────────────────────────────────────────
+    // 锚点已铺满整卡（见 fullCardOverlay），且**不再用封面位图装饰**，因此框架
+    // 在打开与返回两个方向都要捕获锚点所在区域的**实时像素**。
+    //
+    // 由此推出一条硬约束：**卡片内容在整个过渡期间必须保持不透明**。
+    // 一旦把卡片淡到 alpha=0，框架捕获到的就是一张全透明的卡片——
+    // 实测表现正是"返回过程中预览图和简介部分是黑色的"。
+    //
+    // 所以这里**不做任何淡出**。过渡的视觉由系统 morph 承担（它就是整卡 → 播放器
+    // 的形变），原卡片会在 Activity 切换时被盖住，无需应用自己处理。
+    //
+    // 历史教训（勿重蹈）：
+    // 1. 早期用"锚点只覆盖封面 + 卡片淡出"来模拟"整卡一起走"，结果是简介区不参与
+    //    过渡、且返回时卡片已透明 → 黑色；
+    // 2. 用封面位图装饰整卡大小的锚点，会被拉伸铺满（预览图盖住简介区）。
+    // 正确做法就是现在这样：锚点铺满整卡 + 不装饰 + 不淡出。
+    val seamlessSourceKey = item.target?.sharedContentKey()
+    val sourceCardFadeModifier = Modifier
+    // 封面区域高度（px）。合成兜底预览时用。
+    var coverHeightPx by remember(item) { mutableIntStateOf(0) }
+
     BiliCardSurface(
         onClick = {
             val target = item.target
-            if (
-                target != null &&
-                canSeamless &&
-                // 共享无缝执行器：锚点零绘制（框架取景/绘制真实封面像素）、
-                // 注册失败返回 false 走降级（详见 SeamlessCardOpener）
-                seamlessOpener.tryOpen(
-                    anchor = anchorState.anchor,
-                    target = target,
-                    coverUrl = item.cover,
-                    coverLarge = singleColumn,
-                    anchorRadiusPx = seamlessSpec.radiusPx,
-                    listCover = listCover
-                )
-            ) {
-                // 无缝注册成功：起飞矩形即封面，不再快照幽灵来源
+            // 无缝路径：**先发起一次 PixelCopy** 截取整卡真实像素（含简介文字），
+            // 在其回调里完成 tryOpen + startActivity。
+            //
+            // 为什么是"截屏"而不是"每帧录制 GraphicsLayer"：
+            // 后者会让每张可见卡片每帧多一次离屏渲染，实测 jank 1.27% → 4.06%。
+            // PixelCopy 只在点击这一次截一块卡片大小的区域，与滚动帧率无关。
+            //
+            // 时序：官方要求 `setSeamlessView` 在 `startActivity(intent, bundle)` 之前。
+            // 截屏回调里两者仍是先后紧邻执行的，契约成立；截取耗时毫秒级。
+            val anchorView = anchorState.anchor
+            if (target != null && canSeamless && anchorView != null) {
+                val opener = seamlessOpener ?: return@BiliCardSurface
+                opener.captureCardBitmap(anchorView) { captured ->
+                    val opened = opener.tryOpen(
+                        anchor = anchorView,
+                        target = target,
+                        coverUrl = item.cover,
+                        coverLarge = singleColumn,
+                        anchorRadiusPx = seamlessSpec.radiusPx,
+                        listCover = listCover,
+                        sourceCardKey = seamlessSourceKey,
+                        coverHeightPx = coverHeightPx,
+                        cardBitmap = captured,
+                        // 官方 BUNDLE_COLOR：view 之外区域的填充色。不传则由框架取色，
+                        // 取错时表现为打开/返回瞬间闪一下白（实测踩过）。
+                        fallbackColor = seamlessSpec.fallbackColor,
+                        keepAnchorVisible = true
+                    )
+                    if (!opened) {
+                        // 注册失败：释放截图并走普通跳转
+                        captured?.recycle()
+                        if (item.liveRoute == null) {
+                            CoverExpandOrigin.record(
+                                target = item.target,
+                                coverUrl = item.cover,
+                                coverLarge = singleColumn
+                            )
+                        }
+                        onClick()
+                    }
+                }
                 return@BiliCardSurface
             }
             // 降级路径：快照来源封面，供详情覆盖层做封面展开 morph；直播卡不参与
@@ -269,8 +508,24 @@ private fun FeedCard(
         },
         enabled = canOpen,
         shape = cardShape,
-        containerColor = containerColor,
-        modifier = Modifier.fillMaxWidth()
+        // 整卡染色底：有封面色时是与封面同调的半透明色，无封面色时原样返回
+        // containerColor（双列即 Transparent），行为不变。
+        // 铺在**整卡**上而不是信息区，是"卡片与简介成为一个整体"的关键。
+        containerColor = infoDrawSpec?.containerColor ?: containerColor,
+        modifier = Modifier.fillMaxWidth(),
+        // 无缝动画锚点铺满**整张卡片**（封面 + 简介区）。
+        //
+        // 依据：OPPO 无缝动画里**锚点矩形就是过渡的几何范围**。官方 B 站客户端
+        // 的卡片过渡是"封面 + 简介一起动"，要复刻这一点，锚点就必须覆盖整卡；
+        // 只覆盖封面时简介区不进入过渡（此前用户反馈的"简介没被带上"）。
+        //
+        // 放在 fullCardOverlay 而不是内容里：内容装在 Column（要用 weight），
+        // 而 matchParentSize 是 BoxScope 限定修饰符，放 Column 里会被当成真实子项。
+        fullCardOverlay = if (canSeamless) {
+            { SeamlessAnchor(anchorState, Modifier.matchParentSize()) }
+        } else {
+            null
+        }
     ) {
         // 无缝动画锚点：与封面同边界的零绘制透明 View，起飞矩形即封面自身。
         // 必须放在封面内容**之前**（z 序在下）：锚点的过渡位图画在自身
@@ -280,48 +535,101 @@ private fun FeedCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (singleColumn) 16f / 9f else 4f / 3f)
+                // 上报封面高度，供无缝过渡合成"整卡预览图"用（见 coverHeightPx）
+                .onSizeChanged { coverHeightPx = it.height }
                 // 封面节点上报窗口坐标：幽灵从封面本身起飞，与所见像素连续
                 .coverExpandTrack(item.target.takeIf { item.liveRoute == null })
+                // 无缝过渡期间与简介区一起淡出（详见 sourceCardAlpha 注释）
+                .then(sourceCardFadeModifier)
         ) {
-            if (canSeamless) {
-                SeamlessAnchor(anchorState, Modifier.matchParentSize())
-            }
+            // 锚点已移到 BiliCardSurface 的 fullCardOverlay（铺满整卡）。
+            //
+            // **关键：不要再用封面位图装饰锚点**（decorateAnchor = false）。
+            // 锚点现在是整卡大小（比例近 1:1），而封面是 4:3；若仍把封面位图设为
+            // 锚点的 background/foreground，`RoundedBitmapDrawable` 会把它**拉伸铺满
+            // 整卡**——表现为"点击后预览图先盖住简介区，再开始动画"（返回方向同理）。
+            // 不装饰时框架会去捕获锚点所在区域的**真实像素**，即整卡（封面+简介），
+            // 这正是官方 B 站的效果。
+            // 角标玻璃（LIQUID 档）：封面内容录进专用背板供角标采样。封面是静态
+            // 内容（只在图片加载时重绘），录制一次即可，无逐帧开销。角标作为
+            // 兄弟节点画在录制子树之外，避免采样到自身（反馈回路）。
+            //
+            // **必须条件化**：`rememberLayerBackdrop()` 内部默认参数会调
+            // `rememberGraphicsLayer()`，即持有一个 RenderNode 级离屏层。无条件创建
+            // 时，默认配置（GlassConfig 默认 FROSTED、badgeGlassOn=false）下每张可见
+            // 卡片都会白创建一个离屏层，且随滚动不断创建/释放。
+            // 条件调用 composable 是合法的（分支稳定，不会破坏槽位顺序）。
+            val coverBackdrop = if (badgeGlassOn) rememberLayerBackdrop() else null
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = cardShape,
+                // 封面只圆上两角，下沿直角与信息区无缝拼接（详见 coverShape 注释）
+                shape = coverShape,
                 coverLarge = singleColumn,
                 coverFourThree = !singleColumn,
-                modifier = Modifier.matchParentSize()
-            ) {
-                // 封面左下：时长/竖屏等标记；右下：播放量（保留官方角标风格）
-                if (dislikedReason != null) {
-                    DislikedOverlay(
-                        reason = dislikedReason,
-                        onUndo = { onCancelDislike(item) },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                // 取色挂在 Coil 解码成功回调上：**复用已解码位图**，不额外发请求、
+                // 不额外解码。已有颜色时跳过（滚动回来命中缓存，无需重复提取）。
+                onImageLoaded = if (dynamicTintEnabled && coverTint == null) {
+                    { bitmap ->
+                        VideoCardCoverColorStore.extractColorAsync(
+                            cacheKey = coverTintKey,
+                            bitmap = bitmap,
+                            scope = tintScope
+                        ) { extracted ->
+                            // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
+                            if (activeCoverTintKey == coverTintKey) {
+                                coverTint = extracted
+                                // 诊断：仅 debug 构建输出。取色是"看不见的"功能，
+                                // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
+                                // 本模块未开启 buildConfig 生成，故用 Logger.isDebug 门控。
+                                if (Logger.isDebug) {
+                                    android.util.Log.i(
+                                        "BbDynamicTint",
+                                        "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
+                                            "key=${coverTintKey.takeLast(28)} dark=$darkTheme"
+                                    )
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    item.coverLeftText1?.let { text ->
-                        CoverBadge(
-                            text = text,
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(BiliSpacing.sm)
-                        )
-                    }
-                    item.coverRightText?.let { text ->
-                        CoverBadge(
-                            text = text,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(BiliSpacing.sm)
-                        )
-                    }
+                    null
+                },
+                modifier = Modifier
+                    .matchParentSize()
+                    .then(coverBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier)
+            )
+            // 封面左下：时长/竖屏等标记；右下：播放量（保留官方角标风格）
+            if (dislikedReason != null) {
+                DislikedOverlay(
+                    reason = dislikedReason,
+                    onUndo = { onCancelDislike(item) },
+                    modifier = Modifier.matchParentSize()
+                )
+            } else {
+                item.coverLeftText1?.let { text ->
+                    CoverBadge(
+                        text = text,
+                        backdrop = coverBackdrop,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(BiliSpacing.sm)
+                    )
+                }
+                item.coverRightText?.let { text ->
+                    CoverBadge(
+                        text = text,
+                        backdrop = coverBackdrop,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(BiliSpacing.sm)
+                    )
                 }
             }
         }
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        // 染色底/微光/描边三条由上方 infoModifier 统一承载（定义在 BiliCardSurface 之前，
+        // 因为容器底色也要用同一份 drawSpec）。无缝过渡期间随封面一起淡出。
+        Column(modifier = infoModifier.then(sourceCardFadeModifier)) {
             val spaceRoute = remember(item.args, item.target) {
                 item.args?.let { args ->
                     if (args.upId <= 0L && args.upName.isNullOrBlank()) {
@@ -341,6 +649,9 @@ private fun FeedCard(
                 // 双列压缩标题为 1 行，给图片更多空间；单列大图保留 2 行
                 maxLines = if (singleColumn) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
+                // 浅色主题 + 深色封面时翻白（resolveVideoCardAdaptiveContentColors），
+                // 否则被染深的卡片上深色标题会糊成一片
+                color = adaptiveContentColors.titleColor,
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontSize = 14.sp,
                     lineHeight = 18.sp,
@@ -362,7 +673,7 @@ private fun FeedCard(
                         Text(
                             text = upName,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = adaptiveContentColors.subtitleColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = if (spaceRoute == null || isDisliked) {
@@ -400,11 +711,19 @@ private fun FeedCard(
 }
 
 @Composable
-private fun CoverBadge(text: String, modifier: Modifier = Modifier) {
+private fun CoverBadge(
+    text: String,
+    backdrop: LayerBackdrop? = null,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(8.dp)
+    val glass = backdrop != null
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = Color.Black.copy(alpha = 0.62f)
+        modifier = modifier.then(
+            if (backdrop != null) Modifier.glassBadgeSurface(backdrop, shape) else Modifier
+        ),
+        shape = shape,
+        color = if (glass) Color.Transparent else Color.Black.copy(alpha = 0.62f)
     ) {
         Text(
             text = text,
@@ -414,6 +733,27 @@ private fun CoverBadge(text: String, modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * 角标玻璃：采样所在卡片封面的背板，blur + 轻折射 + 深色染色（白字可读）。
+ * 角标小、封面内容静态，采样成本低。
+ */
+private fun Modifier.glassBadgeSurface(backdrop: LayerBackdrop, shape: RoundedCornerShape): Modifier =
+    drawBackdrop(
+        backdrop = backdrop,
+        shape = { shape },
+        effects = {
+            blur(4.dp.toPx(), 4.dp.toPx())
+            lens(
+                refractionHeight = 4.dp.toPx(),
+                refractionAmount = 3.dp.toPx(),
+                chromaticAberration = 0f
+            )
+        },
+        onDrawSurface = {
+            drawRect(Color.Black.copy(alpha = 0.45f))
+        }
+    )
 
 @Composable
 private fun FeedCardSkeleton(singleColumn: Boolean = false) {
@@ -535,3 +875,15 @@ private fun DislikedOverlay(
 private fun FeedItem.actionKey(): String {
     return "$goto|$param|$idx"
 }
+
+// ── 封面预加载参数（见 HomeVideoPage 内 preload effect 的注释）────────────────
+/** 合并惯性滑动期间爆发的布局更新；约等于"手指停下/惯性将尽"的窗口。 */
+private const val COVER_PRELOAD_DEBOUNCE_MS = 180L
+/** 视口之后预取几张。只取一小段：预取太多等于替用户提前解码他可能看不到的内容。 */
+private const val COVER_PRELOAD_AHEAD = 4
+/**
+ * 预加载解码尺寸，必须与卡片实际展示尺寸同档（双列 ≈ 半屏宽、4:3），
+ * 否则预加载出来的位图无法命中卡片的 ImageRequest，等于白做。
+ */
+private const val COVER_PRELOAD_WIDTH_PX = 640
+private const val COVER_PRELOAD_HEIGHT_PX = 480

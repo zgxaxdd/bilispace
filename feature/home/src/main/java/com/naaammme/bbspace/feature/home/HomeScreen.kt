@@ -32,12 +32,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -54,10 +56,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.CompositionLocalProvider
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
+import com.naaammme.bbspace.core.designsystem.glass.GlassSourceRefresher
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassRefresher
+import com.naaammme.bbspace.core.designsystem.glass.LocalLiquidBackdrop
 import com.naaammme.bbspace.core.designsystem.glass.glassEffect
+import com.naaammme.bbspace.core.designsystem.glass.glassFrameRefresh
 import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import dev.chrisbanes.haze.HazeState
@@ -163,24 +174,38 @@ fun HomeScreen(
         topBarOffsetPx = 0f
     }
 
-    // 首页玻璃：独立 HazeState，源 = Pager 内容（顶栏不在源内，避免自采样鬼影）
+    // 首页玻璃：独立 HazeState，源 = Pager 内容（顶栏不在源内，避免自采样鬼影）。
+    // 与主框架同理：录制节点与顶栏玻璃都不随列表滚动自动重录/重采样，需要
+    // GlassSourceRefresher 逐帧 tick（滚动衔接处残影修复，见 GlassRefresher.kt）。
     val homeGlassState = remember { HazeState() }
     val homeGlassOn = isGlassActive(homeGlassState)
+    val homeGlassRefresher = remember { GlassSourceRefresher() }
+    // 顶栏官方液态：Pager 内容录进 miuix 背板（顶栏是悬浮兄弟节点，无自采样），
+    // 由 LocalLiquidBackdrop 下发给顶栏的 glassEffect（LIQUID 档走 drawBackdrop）
+    val homeLiquidBackdrop = rememberLayerBackdrop()
+    val homeLiquidOn = LocalGlassConfig.current.material == GlassMaterial.LIQUID && homeGlassOn
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             // 监听内容滚动，驱动顶栏同步平移
             .nestedScroll(topBarScrollConnection)
+            .nestedScroll(homeGlassRefresher.nestedScrollConnection)
     ) {
         // 内容全屏：延伸到状态栏之后，滚动时卡片可上探到状态栏区域
         HorizontalPager(
             state = pagerState,
-            modifier = if (homeGlassOn) {
-                Modifier.fillMaxSize().hazeSource(homeGlassState)
-            } else {
-                Modifier.fillMaxSize()
-            }
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    // 读滚动 tick：滚动帧强制本节点重绘（重录 haze 源）
+                    homeGlassRefresher.frame
+                    drawContent()
+                }
+                .then(if (homeGlassOn) Modifier.hazeSource(homeGlassState) else Modifier)
+                .then(if (homeLiquidOn) Modifier.layerBackdrop(homeLiquidBackdrop) else Modifier)
+                // 底色画进录制链内（理由同 AppNavHost Crossfade：文字区透明不能进背板）
+                .background(MaterialTheme.colorScheme.background)
         ) { page ->
             when (page) {
                 0 -> ListenHomePage(
@@ -248,11 +273,30 @@ fun HomeScreen(
         // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏。
         // 偏移量以 provider 延迟读取：滚动期间每个滚动 tick 只触发顶栏 offset 块重布局，
         // 不再重组 HomeScreen 整个 scope（含 HorizontalPager 分支与全部子项参数比对）。
-        CompositionLocalProvider(LocalGlassHazeState provides homeGlassState) {
+        CompositionLocalProvider(
+            LocalGlassHazeState provides homeGlassState,
+            LocalGlassRefresher provides homeGlassRefresher,
+            LocalLiquidBackdrop provides homeLiquidBackdrop
+        ) {
+        // 顶栏"是否正在滚动"必须用 derivedStateOf 收成**布尔**再进组合。
+        //
+        // 直接写 `isScrolling = topBarOffsetPxProvider() > 0f` 会在 HomeTopBar 的
+        // 组合期读取 `topBarOffsetPx`（Float state）——它每个滚动像素都变（快滑时=每帧），
+        // 于是 HomeTopBar 的整个 restart scope 每帧重组一次，连带每次重组都重新执行
+        // `glassEffect(...)` 这个 @Composable modifier 工厂（LIQUID 档下会让 miuix
+        // 丢弃并重建玻璃绘制缓存）。
+        //
+        // 这恰好把本文件 :310 的设计意图抵消了：那里刻意用 provider 延迟到布局期读，
+        // 就是为了"滚动时只重布局、不重组"。derivedStateOf 让组合期只订阅布尔，
+        // 只有"开始滚动/停止滚动"这一次翻转才失效。
+        val topBarScrolling by remember {
+            derivedStateOf { topBarOffsetProvider() > 0f }
+        }
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
             singleColumn = singleColumn,
             topBarOffsetPxProvider = topBarOffsetProvider,
+            isScrolling = topBarScrolling,
             onToggleSingleColumn = viewModel::toggleHomeSingleColumn,
             onNavigateToSearch = onNavigateToSearch,
             onNavigateToProfile = onNavigateToProfile,
@@ -280,6 +324,9 @@ private fun HomeTopBar(
     singleColumn: Boolean,
     // 偏移量延迟读取：offset 块内取值，滚动时只重布局顶栏、不重组上游 scope
     topBarOffsetPxProvider: () -> Float,
+    // 是否正在滚动。由调用方用 derivedStateOf 收成布尔后传入 —— 不要在组合期直接读
+    // 像素级 offset state（详见调用点注释）。
+    isScrolling: Boolean,
     onToggleSingleColumn: () -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToProfile: () -> Unit,
@@ -291,6 +338,13 @@ private fun HomeTopBar(
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val topGlassState = LocalGlassHazeState.current
     val topGlassOn = isGlassActive(topGlassState)
+    // 顶栏玻璃形状：**上边两角保持直角、下边两角倒大圆角**。
+    // 上角倒圆会在状态栏两侧漏出背后滚动的内容；下角倒圆才让顶栏读作
+    // "从内容上方浮出的一张玻璃片"，与底栏 Dock(32dp) 同一套大圆角语汇。
+    // 形状由 `BiliRadius.topBarShape` 单一来源提供，且**必须传 CornerBasedShape**：
+    // LIQUID 档 `liquidGlassSurface` 的 `lens()` 折射依赖角半径，传 0dp 直角
+    // 会让折射沿整个矩形边"平推"，正是用户看到的"顶栏下方液态模糊有点奇怪"。
+    val topBarShape = BiliRadius.topBarShape
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -300,21 +354,27 @@ private fun HomeTopBar(
             // 既随顶栏 1:1 滑动，又铺满含状态栏的整条（走查发现的两个层级问题）
             .then(
                 when {
-                    isIOS && topGlassOn -> Modifier.glassEffect(
-                        state = topGlassState,
-                        surfaceType = GlassSurfaceType.HEADER,
-                        isScrolling = topBarOffsetPxProvider() > 0f
-                    )
+                    isIOS && topGlassOn -> Modifier
+                        .glassFrameRefresh(LocalGlassRefresher.current)
+                        .glassEffect(
+                            state = topGlassState,
+                            surfaceType = GlassSurfaceType.HEADER,
+                            shape = topBarShape,
+                            isScrolling = isScrolling
+                        )
                     isIOS -> Modifier.background(
                         MaterialTheme.colorScheme.background.copy(
                             alpha = if (dark) 0.85f else 0.92f
-                        )
+                        ),
+                        topBarShape
                     )
                     else -> Modifier
                 }
             )
             .statusBarsPadding()
-            .padding(top = 4.dp)
+            // 上 4dp 给大标题留呼吸；下 10dp 让玻璃片在下角圆角之外留出"玻璃厚度"，
+            // 否则圆角会紧贴 Tab 行底边，读不出"浮起一片"的感觉。
+            .padding(top = 4.dp, bottom = 10.dp)
     ) {
         if (isIOS) {
             // iOS 大标题：当前分区名，随顶栏 1:1 滚动收起
@@ -328,17 +388,19 @@ private fun HomeTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp),
+                // 与底栏 Dock 的 12dp 外边距对齐到同一栅格：顶栏搜索胶囊与 Dock
+                // 左右边缘同列，页面纵向 chrome 才有统一的视觉中线。
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Card(
                 onClick = onNavigateToSearch,
                 modifier = Modifier.weight(1f),
-                // 跟随主题圆角 token：此前硬编码 RoundedCornerShape(26.dp)，绕过了主题，
-                // 用户在设置里切换「圆角/圆形」风格时，搜索页/历史搜索/直播/设置/发布记录
-                // 五处搜索框都会跟着变，唯独首页这条永远 26dp —— 是不一致的真实来源。
-                // 取值与项目其他卡片表面一致（MaterialTheme.shapes.large）。
-                shape = if (isIOS) RoundedCornerShape(10.dp) else MaterialTheme.shapes.large,
+                // 现代大圆角语言：顶栏搜索胶囊与底栏 Dock（32dp）同属一套语汇，
+                // 取高度一半得全圆端。此前 iOS 用 10dp、Material 用
+                // `MaterialTheme.shapes.large`（随 CornerStyle 漂移），同一顶栏
+                // 在不同设置下圆角不一致，且与底栏大圆角割裂。
+                shape = RoundedCornerShape(BiliRadius.searchPill),
                 colors = CardDefaults.cardColors(
                     if (isIOS) {
                         // iOS 搜索胶囊：onSurfaceVariant@12%（≈ #767680 12%，方案 2.3）
