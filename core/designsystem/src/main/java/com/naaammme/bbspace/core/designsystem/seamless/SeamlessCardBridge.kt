@@ -7,9 +7,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
@@ -61,7 +63,18 @@ fun SeamlessAnchor(state: SeamlessAnchorState, modifier: Modifier = Modifier) {
             }
         },
         update = { state.anchor = it },
-        onRelease = { if (state.anchor === it) state.anchor = null },
+        onRelease = {
+            if (state.anchor === it) state.anchor = null
+            // 诊断：锚点 View 被回收的时机。系统的打开与返回**都**要用这个 View：
+            // 返回动画开始时若取不到已 attach 的锚点，会直接放弃 morph 退回 alpha
+            // 交叉淡出（`view not attach to window or error, do alpha anim`）。
+            // 实测曾因详情页过早 `capsuleState.deactivate()` 卸载小横条，在这里打出
+            // `wasAttached=false`，是"返回没有无缝感"的直接证据，故保留这条日志。
+            android.util.Log.i(
+                "OplusViewSeamless",
+                "anchor released (wasAttached=${it.isAttachedToWindow})"
+            )
+        },
     )
 }
 
@@ -70,6 +83,25 @@ data class SeamlessCardSpec(
     val radiusPx: Float,
     val fallbackColor: Int,
 )
+
+/**
+ * 把卡片内容录进 [GraphicsLayer]。
+ *
+ * ⚠️ **不要挂在列表卡片上**（性能红线，实测踩过）：
+ * `GraphicsLayer.record` 每个绘制帧都会执行，等于**每张可见卡片每帧多一次离屏渲染**。
+ * 实测挂到首页卡片后 jank 从 1.27% 涨到 4.06%、`Number Slow issue draw commands`
+ * 从 9 涨到 31 —— 这是典型的"逐帧重录"反模式。
+ *
+ * 目前保留此 API 仅作参考/非列表场景使用；卡片的无缝预览改用
+ * [SeamlessVideoCardOpener.captureCardBitmap]，只在**点击瞬间**截取一次。
+ */
+@Deprecated("挂在列表项上会逐帧离屏渲染，性能红线。卡片请用 captureCardBitmap（点击时截一次）。")
+fun Modifier.recordCardLayer(layer: GraphicsLayer): Modifier = drawWithContent {
+    layer.record {
+        this@drawWithContent.drawContent()
+    }
+    drawContent()
+}
 
 /**
  * 由圆角 token 与卡片底色解析过渡参数。默认值对齐媒体卡片：

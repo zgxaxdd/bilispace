@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
@@ -32,7 +33,13 @@ import com.naaammme.bbspace.navigation.VideoTargetSerializer
 import com.naaammme.bbspace.playback.PlaybackHostState
 import com.naaammme.bbspace.playback.capsule.CapsuleIndicatorState
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
+
+/** 主题同步预读的超时上限（与 MainActivity 一致）。 */
+private const val THEME_PRELOAD_TIMEOUT_MS = 300L
 
 /**
  * 视频详情独立 Activity（ColorOS「View 无缝动画」路径的宿主）。
@@ -84,8 +91,25 @@ class VideoDetailActivity : ComponentActivity() {
         }
         // 上一次返回动画遗留的延迟关停还没执行时，本次打开立即取消，避免误杀新会话
         hostState.cancelPendingClose()
-        // 进入新视频详情：胶囊隐藏，新详情接管（方案 2.3 状态机）
-        capsuleState.deactivate()
+        // 进入新视频详情：胶囊隐藏，新详情接管（方案 2.3 状态机）。
+        //
+        // **无缝打开时必须延后到本 Activity 销毁**（不是延后到打开动画结束）：
+        // 胶囊（联动底栏的小横条）是**打开与返回两个方向**的系统过渡锚点宿主。
+        // `deactivate()` 会让 nowPlayingContent 变 null → 小横条整块从组合中移除 →
+        // 锚点 View 从 window detach。系统随后取锚点内容时拿到已 detach 的 View，
+        // 直接放弃 morph 退回 alpha 交叉淡出：
+        //   OplusViewSeamlessRemoteManager: view not attach to window or error, do alpha anim
+        //   post onTransitionFinish, reason: alpha exception finish
+        // 实测：只在打开动画结束后隐藏，打开方向就正常了，但**返回方向仍然退回
+        // alpha**（日志 `anchor released (wasAttached=false)` 出现在返回动画开始之前）。
+        // 因此这里全程保留胶囊，只把底栏的小横条**隐藏**（`nowPlayingVisible=false`，
+        // 由 `PlaybackHostState.videoDetailAlive` 驱动），锚点留在 window 上；
+        // 真正的 `deactivate()` 交给返回路径（`finishWithHostState` 里重新激活）
+        // 或本 Activity 销毁时的兜底。
+        // 非无缝路径（搜索/历史/深链）没有锚点，立即隐藏即可。
+        if (!pendingSeamlessLaunch) {
+            capsuleState.deactivate()
+        }
         // 与 MainActivity 一致的 edge-to-edge 适配
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
@@ -100,8 +124,20 @@ class VideoDetailActivity : ComponentActivity() {
         // 深色与播放器区域同色，避免浅色主题下闪白（正常内容始终盖在背景之上）
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         setContent {
-            val themeConfig by appSettings.themeConfig.collectAsState(initial = ThemeConfig())
-            BiliTheme(config = themeConfig) {
+            // 首帧主题必须**同步预读真实配置**，不能用 `collectAsState(initial = ThemeConfig())`。
+            //
+            // 为什么：`ThemeConfig()` 的默认值是 MATERIAL + 动态取色（浅色系），而用户
+            // 真实配置可能是 IOS + LIQUID + 深色。异步到达后界面风格、玻璃材质、配色
+            // 整体翻一次 —— 在**无缝打开动画期间**这表现为"详情页打开瞬间是白的"。
+            // 与 MainActivity 的 preloadThemeConfig 是同一修法（那边注释里有完整实测）。
+            //
+            // 为什么可以同步：AppSettings 是进程内单例、DataStore 已初始化，首次读盘只是
+            // 读一个已 mmap 的小文件（个位数毫秒）；仍带超时兜底，异常时回退默认值。
+            val themeConfigState = remember { mutableStateOf(preloadThemeConfig()) }
+            LaunchedEffect(Unit) {
+                appSettings.themeConfig.collect { themeConfigState.value = it }
+            }
+            BiliTheme(config = themeConfigState.value) {
                 LaunchedEffect(pendingTarget) {
                     pendingTarget?.let(videoViewModel::openRoot)
                 }
@@ -139,6 +175,20 @@ class VideoDetailActivity : ComponentActivity() {
         setIntent(intent)
         consumeIntent(intent)
     }
+
+    /**
+     * 同步预读真实主题配置，作为首帧初值。与 MainActivity 的同名方法同源。
+     *
+     * 详情页是**独立 Activity**，有自己的一次 setContent，所以必须自己预读一次；
+     * 否则无缝打开动画期间会先渲染 MATERIAL 浅色，再翻成用户真实主题 —— 观感是白闪。
+     */
+    private fun preloadThemeConfig(): ThemeConfig = runCatching {
+        runBlocking {
+            withTimeoutOrNull(THEME_PRELOAD_TIMEOUT_MS) {
+                appSettings.themeConfig.first()
+            }
+        }
+    }.getOrNull() ?: ThemeConfig()
 
     override fun onDestroy() {
         // 实例确已离开返回栈：恢复判定随之解除（含系统清栈/后台回收等一切移出方式）

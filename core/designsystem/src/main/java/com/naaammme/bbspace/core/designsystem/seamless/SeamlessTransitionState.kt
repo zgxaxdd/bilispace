@@ -70,18 +70,103 @@ object SeamlessTransitionState {
     var returnRunning by mutableStateOf(false)
         private set
 
+    /** 返回阶段的绝对截止时刻（[isReturnRunning] 的自愈依据）。 */
+    private var returnDeadline = 0L
+
+    /**
+     * 返回动画是否**当前仍在进行**（供 UI 读取，带截止时刻自愈）。
+     *
+     * 与裸读 [returnRunning] 的区别：系统的 `onEnd` 回调在部分固件上会丢失，
+     * 那时 [returnRunning] 会永久停在 true。调用方（底栏小横条按它决定内容是否可见）
+     * 若直接读裸值，回调丢失后小横条会永久留在"返回中"的显示状态。
+     * 这里以 [returnDeadline] 兜底：超过返回动画硬上限即视为已结束。
+     */
+    val isReturnRunning: Boolean
+        get() = returnRunning && System.currentTimeMillis() < returnDeadline
+
     /** 打开阶段的绝对截止时刻：awaitOpenEnd 以此为准，与等待者何时调用无关。 */
     private var openDeadline = 0L
+
+    /**
+     * 源侧卡片是否应当淡出自身内容（封面 + 简介区）。
+     *
+     * ## 为什么需要这个信号
+     *
+     * 系统 morph 的是**锚点 View 的矩形**，而锚点本身是零绘制透明的——它只提供几何，
+     * 不提供像素。卡片真正的像素（封面图 + 简介区）留在应用窗口里，**既不参与 morph、
+     * 也不会自动消失**。于是动画期间能看到「封面在放大飞走，简介区却原地不动」的割裂，
+     * 这正是用户反馈的「简介没被带上」。
+     *
+     * ## 为什么不能把锚点扩到整卡
+     *
+     * 卡片是「4:3 封面 + 简介区」（整卡接近 1:1），而详情页播放器是 16:9。
+     * 把锚点扩到整卡等于让系统把这个近方形矩形压进 16:9 —— 简介会被严重纵向压扁。
+     * 所以几何必须继续锚在封面，**割裂要靠同步淡出来消除**：卡片内容与 morph 同时淡出，
+     * 视觉上就是「整张卡片一起飞走并融进播放器」。
+     *
+     * ## 为什么不用系统回调
+     *
+     * 官方 `AnimationCallback.animationProgress` 本可做逐帧同步，但**本机实测该回调
+     * 从不送达**（见 [OPEN_DEADLINE_MS] 的实测记录）。因此改用 [openRunning] /
+     * [returnRunning] 这两个由源侧主动置位、可靠得多的信号来驱动同一件事。
+     */
+    val shouldFadeSourceCard: Boolean
+        get() = openRunning || isReturnRunning
+
+    /**
+     * 发起本次无缝过渡的**源卡片标识**（`null` = 无过渡，或来源不是卡片）。
+     *
+     * 为什么需要它：淡出是"整卡级"效果，若只按 [shouldFadeSourceCard] 全局判断，
+     * 那么从小横条（或任何非卡片入口）发起过渡时，**当前可见的所有卡片都会一起淡出**。
+     * 卡片用自己稳定唯一的 key 与此值比对，只有真正发起过渡的那张才淡出。
+     *
+     * 取值约定：卡片传视频目标的稳定标识（见 [HomeVideoPage] 的调用点）；
+     * 小横条等非卡片来源传 `null`，因此不会有任何卡片被淡出。
+     */
+    var sourceCardKey by mutableStateOf<String?>(null)
+        private set
+
+    /** 源卡片应当淡出，且自己就是那张卡。 */
+    fun shouldFadeCard(key: String?): Boolean =
+        shouldFadeSourceCard && key != null && key == sourceCardKey
+
+    /** 记录本次过渡的源卡片标识；与 [beginOpen] 一起调用。 */
+    fun markSourceCard(key: String?) {
+        sourceCardKey = key
+    }
 
     /** 打开阶段的起始时刻：用于判断"打开动画是否早已播完"（回调缺失时唯一可用依据）。 */
     private var openStartedAt = 0L
 
-    /** 返回阶段的绝对截止时刻。 */
-    private var returnDeadline = 0L
+    /**
+     * 系统无缝动画的**实时进度**（0..1，逐帧回调）。
+     *
+     * ## 实测修正（重要）
+     *
+     * 本文件此前记录"该固件 AnimationCallback 从不送达"。**2026-09-21 实机复测推翻了这个结论**：
+     * 干净日志里 `onAnimationStart`（打开与返回各一次）与 `animationProgress`（每帧一次，
+     * 从 0.0 递增到 ~1.0）都正常送达；确实缺失的只有 `onAnimationEnd`。
+     * 因此 [OPEN_DEADLINE_MS] 的时长兜底**仍然必要**（onEnd 不来就得靠它复位），
+     * 但**进度是可用的**——这比按时长猜要准得多。
+     *
+     * ## 用途
+     *
+     * 驱动源卡片内容的淡出：系统 morph 到哪一帧，卡片就淡到哪一帧，
+     * 两者严格同步（按固定时长猜会因设备/负载不同而错位）。
+     * 详见 [shouldFadeCard]。
+     */
+    var progress by mutableStateOf(0f)
+        private set
+
+    /** 记录一帧系统进度。由 [OplusViewSeamlessCompat.AnimationCallback.onProgress] 转发。 */
+    fun onProgress(progress: Float) {
+        this.progress = progress.coerceIn(0f, 1f)
+    }
 
     /** 注册成功 / 打开动画开始：置位打开阶段。 */
     fun beginOpen() {
         openRunning = true
+        progress = 0f
         openStartedAt = System.currentTimeMillis()
         openDeadline = openStartedAt + OPEN_DEADLINE_MS
     }
@@ -89,6 +174,9 @@ object SeamlessTransitionState {
     /** 打开动画结束。 */
     fun endOpen() {
         openRunning = false
+        progress = 0f
+        // 源卡片标识只在过渡窗口内有意义，结束即清，避免下一轮误命中
+        sourceCardKey = null
     }
 
     /**
@@ -109,12 +197,14 @@ object SeamlessTransitionState {
     /** 预期即将开始（或已开始）返回动画：置位返回阶段。 */
     fun beginReturn() {
         returnRunning = true
+        progress = 0f
         returnDeadline = System.currentTimeMillis() + RETURN_DEADLINE_MS
     }
 
     /** 返回动画结束（或确认不会发生）。 */
     fun endReturn() {
         returnRunning = false
+        progress = 0f
     }
 
     /**
@@ -145,6 +235,8 @@ object SeamlessTransitionState {
         }
         val byDeadline = openRunning
         openRunning = false
+        // 回调缺失时的兜底路径也要清源卡片标识，否则它会一直残留到下一次过渡
+        sourceCardKey = null
         if (byDeadline) {
             android.util.Log.w(
                 "OplusViewSeamless",
