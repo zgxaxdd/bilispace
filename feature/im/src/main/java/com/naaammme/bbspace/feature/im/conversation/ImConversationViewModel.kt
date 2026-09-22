@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.im.conversation
+package com.naaammme.bbspace.feature.im.conversation
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -8,6 +8,7 @@ import com.naaammme.bbspace.core.im.ImRepository
 import com.naaammme.bbspace.core.model.ImConversationPage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,11 +55,19 @@ class ImConversationViewModel @Inject constructor(
                 )
                 applyConversation(page)
                 reportAck(page.messages.maxOfOrNull { it.seqNo })
-            } catch (_: Throwable) {
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                // 原来是 `catch (_: Throwable)`：无日志、无提示 —— 弱网下打开会话
+                // 表现为"转圈停住 + 列表空白 + 什么都没有"，且复现时查不到任何线索。
+                // 同文件的 sendMessage 做得完全正确（Logger.e + UserFacingError 上屏），
+                // 这里补齐成一致的处理。
+                Logger.e(TAG, t) { "fetchConversation failed talkerId=$talkerId" }
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        isRefreshing = false
+                        isRefreshing = false,
+                        loadErrorMessage = UserFacingError.messageOf(t)
                     )
                 }
             }
@@ -82,8 +91,17 @@ class ImConversationViewModel @Inject constructor(
                     beforeSeqNo = beforeSeqNo
                 )
                 applyOlderMessages(page)
-            } catch (_: Throwable) {
-                _uiState.update { it.copy(isLoadingMore = false) }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                // 翻页失败原先是静默的（只关掉 loading），用户看到"滑到底就不动了"。
+                Logger.e(TAG, t) { "fetchOlderMessages failed beforeSeqNo=$beforeSeqNo" }
+                _uiState.update {
+                    it.copy(
+                        isLoadingMore = false,
+                        loadErrorMessage = UserFacingError.messageOf(t)
+                    )
+                }
             }
         }
     }
@@ -137,11 +155,25 @@ class ImConversationViewModel @Inject constructor(
     private fun reportAck(seqNo: Long?) {
         val ackSeqNo = seqNo?.takeIf { it > 0L } ?: return
         viewModelScope.launch {
-            imRepo.updateAck(
-                talkerId = talkerId,
-                sessionType = sessionType,
-                ackSeqNo = ackSeqNo
-            )
+            // 已读回执是 **best-effort**：失败不该影响任何东西，更不能崩。
+            //
+            // 这里原本没有 try/catch，而 `ImRepository.updateAck` 内部走
+            // `BiliGrpcClient.call`，那是 **throw 语义**（不是返回 Result）。
+            // `viewModelScope` 是 SupervisorJob + Main.immediate，未捕获异常会冒到
+            // 全局处理器；项目没有装 CoroutineExceptionHandler，BiliApplication 的
+            // 处理器只是记日志后转交默认处理器 —— 即照样崩溃。
+            // 触发路径很普通：弱网/断网下打开一个未读会话。
+            try {
+                imRepo.updateAck(
+                    talkerId = talkerId,
+                    sessionType = sessionType,
+                    ackSeqNo = ackSeqNo
+                )
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Logger.w(TAG) { "updateAck failed talkerId=$talkerId ack=$ackSeqNo: ${t.message}" }
+            }
         }
     }
 

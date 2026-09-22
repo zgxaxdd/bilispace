@@ -7,6 +7,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.naaammme.bbspace.core.model.LoginState
 import com.naaammme.bbspace.core.auth.AuthRepository
+import com.naaammme.bbspace.core.common.log.Logger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -82,9 +83,10 @@ class LoginViewModel @Inject constructor(
                         }
                     }
                     .onFailure { error ->
-                        // 协程被取消（退出页面/重启轮询）时 Repo 的 runCatching 会把
-                        // CancellationException 转成 failure，这里不能当作真实轮询失败展示
-                        if (error is kotlinx.coroutines.CancellationException) return@onFailure
+                        // 取消不会再走到这里：AuthRepository 已统一改用
+                        // runCatchingCancellable，CancellationException 会原样重抛
+                        // （此前 repo 用标准 runCatching 把取消吞成 failure，才需要
+                        // 在这里做 `error is CancellationException` 的特判）。
                         _loginState.value = LoginState.Error(error.message ?: "轮询失败")
                         pollJob?.cancel()
                     }
@@ -101,7 +103,16 @@ class LoginViewModel @Inject constructor(
         stopPolling()
     }
 
-    private fun generateQrCode(content: String, size: Int): Bitmap? {
+    /**
+     * 生成二维码位图。失败返回 null（UI 已有 `_qrBitmap == null` 的占位分支）。
+     *
+     * 必须包 runCatching：`QRCodeWriter.encode` 在内容过长/无法编码时 **throw
+     * WriterException**，`Bitmap.createBitmap` 也可能抛 IllegalArgumentException。
+     * 返回类型是 `Bitmap?` 却没有返回 null 的路径 —— 说明本意就是"失败给 null"，
+     * 但实际会把异常抛到调用方的协程里（原来是裸的 `launch(Dispatchers.Default)`，
+     * 未捕获 → 全局处理器 → 崩溃）。服务端返回异常 url 时扫码页一打开就崩。
+     */
+    private fun generateQrCode(content: String, size: Int): Bitmap? = runCatching {
         val writer = QRCodeWriter()
         val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)
         val width = bitMatrix.width
@@ -116,6 +127,12 @@ class LoginViewModel @Inject constructor(
             }
         }
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-        return bitmap
+        bitmap
+    }.onFailure { t ->
+        Logger.w(TAG) { "generateQrCode failed (len=${content.length}, size=$size): ${t.message}" }
+    }.getOrNull()
+
+    private companion object {
+        const val TAG = "LoginViewModel"
     }
 }

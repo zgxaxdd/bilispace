@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.core.auth
 
 import androidx.core.net.toUri
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.model.Cookie
 import com.naaammme.bbspace.core.model.HdAccessGrant
@@ -60,7 +61,7 @@ class AuthRepository @Inject constructor(
             _currentMidFlow.value = if (value) 0L else authStore.mid
         }
 
-    suspend fun getQrCode(): Result<QrCodeData> = runCatching {
+    suspend fun getQrCode(): Result<QrCodeData> = runCatchingCancellable {
         val guestId = cacheManager.guestId
         val sessionId = cacheManager.sessionId
 
@@ -86,7 +87,7 @@ class AuthRepository @Inject constructor(
         QrCodeData(url = data.getString("url"), authCode = data.getString("auth_code"))
     }
 
-    suspend fun pollQrCode(authCode: String): Result<Pair<Int, HdAccessGrant?>> = runCatching {
+    suspend fun pollQrCode(authCode: String): Result<Pair<Int, HdAccessGrant?>> = runCatchingCancellable {
         val ts = System.currentTimeMillis() / 1000
         val loginSessionId = cacheManager.loginSessionId
 
@@ -131,25 +132,47 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    suspend fun logout(credential: LoginCredential): Result<Unit> = runCatching {
-        val ts = System.currentTimeMillis() / 1000
-
-        restClient.postSigned(
-            url = "${BiliConstants.BASE_URL_PASSPORT}$REVOKE_ENDPOINT",
-            params = restParamBuilder.passport(BiliRestProfile.APP, ts, credential.accessToken) + mapOf(
-                "from_access_key" to credential.accessToken,
-                "mid" to credential.mid.toString(),
-                "revoke_type" to "2"
-            ),
-            profile = BiliRestProfile.APP
-        )
-
-        Logger.d(TAG) { "退出登录成功" }
-
+    /**
+     * 退出登录：**本地清理先行**，服务端撤销 best-effort。
+     *
+     * 原实现把 `clearCredential/clearUserInfo/cacheManager.clearSession/legalRegionCache.clear`
+     * 全排在 `restClient.postSigned(...)` **之后**，而后者会抛异常。于是断网点退出时：
+     * - 服务端 token **未撤销**（安全语义失效，该 access_token 在有效期内仍可用）；
+     * - 本地清理也**根本没执行**（runCatching 直接跳出）；
+     * - 且全程静默，没有提示也没有重试。
+     *
+     * 当时之所以看起来正常，是因为调用方 `AccountViewModel.logout` 紧接着又调了
+     * `removeAccount(mid)`，而 `AuthStore.removeAccount` 内部有
+     * `if (this.mid == mid) clearCredential()` 兜住了 —— 属于**巧合性补偿**：
+     * 一旦有人调整调用顺序就会变成"退出登录后仍是登录态"。
+     *
+     * 现在本地登出**不依赖网络**（幂等、先执行），服务端撤销失败只留痕，不影响登出结果。
+     */
+    suspend fun logout(credential: LoginCredential): Result<Unit> {
+        // 1) 本地立刻登出 —— 这是用户点"退出"的实质语义，绝不能因网络失败而跳过
         authStore.clearCredential()
         authStore.clearUserInfo(credential.mid)
         cacheManager.clearSession()
         legalRegionCache.clear()
+
+        // 2) 服务端撤销：失败不阻断本地登出，但必须可观测（便于后续补撤销/重试）
+        return runCatchingCancellable {
+            val ts = System.currentTimeMillis() / 1000
+            restClient.postSigned(
+                url = "${BiliConstants.BASE_URL_PASSPORT}$REVOKE_ENDPOINT",
+                params = restParamBuilder.passport(BiliRestProfile.APP, ts, credential.accessToken) + mapOf(
+                    "from_access_key" to credential.accessToken,
+                    "mid" to credential.mid.toString(),
+                    "revoke_type" to "2"
+                ),
+                profile = BiliRestProfile.APP
+            )
+            Logger.d(TAG) { "退出登录成功（服务端已撤销）" }
+        }.onFailure { t ->
+            Logger.w(TAG) {
+                "服务端撤销 token 失败（本地已登出）：mid=${credential.mid} ${t.message}"
+            }
+        }
     }
 
     fun saveHdAccessKey(mid: Long, key: String, expiresIn: Long) =
@@ -170,7 +193,7 @@ class AuthRepository @Inject constructor(
     fun getUserInfo(): User? = authStore.getUserInfo()
     fun getAllUserInfos(): Map<Long, User> = authStore.getAllUserInfos()
 
-    suspend fun fetchMyInfo(credential: LoginCredential): Result<User> = runCatching {
+    suspend fun fetchMyInfo(credential: LoginCredential): Result<User> = runCatchingCancellable {
         val ts = System.currentTimeMillis() / 1000
         val json = restClient.getSigned(
             url = "${BiliConstants.BASE_URL_APP}$MY_INFO_ENDPOINT",
@@ -204,7 +227,7 @@ class AuthRepository @Inject constructor(
         user
     }
 
-    suspend fun fetchMineInfo(credential: LoginCredential): Result<User> = runCatching {
+    suspend fun fetchMineInfo(credential: LoginCredential): Result<User> = runCatchingCancellable {
         val ts = System.currentTimeMillis() / 1000
         val json = restClient.getSigned(
             url = "${BiliConstants.BASE_URL_APP}$MINE_IPAD_ENDPOINT",
@@ -236,7 +259,7 @@ class AuthRepository @Inject constructor(
         tel: String, cid: Int,
         geeValidate: String = "", geeSeccode: String = "",
         geeChallenge: String = "", recaptchaToken: String = ""
-    ): Result<SmsCodeResult> = runCatching {
+    ): Result<SmsCodeResult> = runCatchingCancellable {
         val ts = System.currentTimeMillis() / 1000
         val loginSessionId = generateLoginSessionId()
         cacheManager.saveSession(cacheManager.guestId, cacheManager.sessionId, loginSessionId)
@@ -310,7 +333,7 @@ class AuthRepository @Inject constructor(
 
     suspend fun loginBySms(
         tel: String, cid: Int, code: String, captchaKey: String
-    ): Result<LoginCredential> = runCatching {
+    ): Result<LoginCredential> = runCatchingCancellable {
         val ts = System.currentTimeMillis() / 1000
         val loginSessionId = cacheManager.loginSessionId
 
@@ -372,7 +395,7 @@ class AuthRepository @Inject constructor(
         )
     }
 
-    suspend fun getCountryCodes(): Result<CountryListResponse> = runCatching {
+    suspend fun getCountryCodes(): Result<CountryListResponse> = runCatchingCancellable {
         val ts = System.currentTimeMillis() / 1000
         val json = restClient.getSigned(
             url = "${BiliConstants.BASE_URL_PASSPORT}$COUNTRY_CODE_ENDPOINT",
