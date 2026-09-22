@@ -75,8 +75,39 @@ class FrameBudgetLintTest {
      */
     private val maxRunBlocking = 3
 
-    /** `animate*AsState`：值在**组合期**读取 → 动画每帧重组宿主 composable。 */
-    private val maxAnimateAsState = 10
+    /**
+     * `animate*AsState`：值在**组合期**读取 → 动画每帧重组宿主 composable。
+     *
+     * **上限 10 → 8 的变更记录（2026-09-22，T4）**：逐一审查了全部调用点，
+     * 砍掉 2 处组合期读值，并把剩下 8 处的去向逐个记在这里。
+     *
+     * 已修掉：
+     * - `IOSControls.IOSSwitch` 的滑块：`animateDpAsState` + `offset(x = )` → 改为
+     *   `Animatable<Float>`（px）+ `offset { }`，切换的 spring 过程不再按帧重组。
+     *   换写法时唯一有坑的是**初值**：animateXAsState 首次组合直接吸附，
+     *   Animatable 会从初值动画过去，所以必须 `Animatable(if (checked) travel else 0f)`，
+     *   否则设置页里"默认开"的开关会在首帧集体滑一遍。
+     * - `FilledTabRow` 分段滑块：改为 `offset { }` 布局期读取（本项由 T3 完成，
+     *   它仍是 animateDpAsState 所以只减少重组、不减计数）。
+     *
+     * 剩下 8 处的去向（**不要再无脑往下砍**，其中三类是合规的）：
+     * 1. `AppNavHost:805` 顶层导航位移 —— 值在 `graphicsLayer { }` 内读，**合规**。
+     * 2. `BiliCardSurface:68` 按压缩放 —— 同样在 `graphicsLayer { }` 内读，**合规**。
+     *    （这两处被本正则计数，是因为正则只能看到调用点、看不到读取阶段。）
+     * 3. `FilledTabRow:164` 分段滑块 —— 已保留 State 引用、在 `offset { }` 内读，**合规**。
+     * 4. `FilledTabRow:186` / `DynamicFeed:235` / `VideoDetailSummary:472` /
+     *    `VideoDetailSummary:481` —— 都是**颜色**渐变，喂给 `Text(color=)` /
+     *    `Icon(tint=)`。这两个参数本身就是组合期入参，没有等价的绘制期写法
+     *    （除非换成自定义 draw 修饰符），且重组范围只到那一个叶子 Icon/Text。
+     *    为省一次叶子重组而引入 colorFilter 层，代价大于收益。
+     * 5. `HomeVideoPage:316` 封面取色 350ms 淡入 —— **这是剩下 8 处里唯一真正的
+     *    宿主级组合期读值**（值变化会让整张卡片重组，并连带重算 adaptiveContentColors
+     *    与 infoDrawSpec）。刻意**暂不**处理：它只在"图片解码完、取色回来"那一刻触发
+     *    一次 350ms 过渡，**不在滚动路径上**，与本轮要压的滚动 jank 无关；
+     *    真要修得先把卡片的颜色管线改成"底色由绘制期承担"，那是重构不是调优。
+     *    → 见交付报告的遗留项。
+     */
+    private val maxAnimateAsState = 8
 
     /** `BlurEffect(`：不比较半径就重建 = 每帧重编着色器。 */
     private val maxBlurEffect = 0

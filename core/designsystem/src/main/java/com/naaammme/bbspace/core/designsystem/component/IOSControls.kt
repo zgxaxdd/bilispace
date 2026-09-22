@@ -1,7 +1,7 @@
 package com.naaammme.bbspace.core.designsystem.component
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,9 +27,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
+import kotlin.math.roundToInt
 
 /**
  * iOS 风格开关（方案 2.3）：51×31dp 轨道、27dp 圆形拇指带细微投影、
@@ -45,15 +48,25 @@ fun IOSSwitch(
     val trackOn = MaterialTheme.colorScheme.primary
     val trackOff = MaterialTheme.colorScheme.surfaceContainerHighest
     val thumbColor = Color.White
-    val thumbTravel = 20.dp
-    val thumbOffset by animateDpAsState(
-        targetValue = if (checked) thumbTravel else 0.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "iosSwitchThumb"
-    )
+    val density = LocalDensity.current
+    // 用 px（Float）而不是 Dp 驱动动画：Animatable 要 VectorConverter，Float 的是现成的
+    // （CoverExpand 的 progress 同款），且顺带去掉动画期间每帧一个新的 Dp 对象。
+    val thumbTravelPx = remember(density) { with(density) { 20.dp.roundToPx() } }.toFloat()
+    // **初值必须取当前状态，不能写 0f**。这是 animateXAsState → Animatable 换写法时
+    // 最容易踩的坑：animateDpAsState 在首次组合时是**直接吸附**到 targetValue 的
+    // （不播动画），而 Animatable 会**从初值动画过去**。写成 0f 的话，设置页里那些
+    // "默认就是开"的开关会在首帧把滑块从左滑到右 —— 一屏开关同时滑一遍。
+    // 下面 LaunchedEffect 首次也会跑，但目标值与初值相同，animateTo 立即完成。
+    val thumbOffsetPx = remember { Animatable(if (checked) thumbTravelPx else 0f) }
+    LaunchedEffect(checked, thumbTravelPx) {
+        thumbOffsetPx.animateTo(
+            targetValue = if (checked) thumbTravelPx else 0f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
+    }
     val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
@@ -75,7 +88,9 @@ fun IOSSwitch(
         Box(
             modifier = Modifier
                 .padding(start = 2.dp)
-                .offset(x = thumbOffset)
+                // 布局期读偏移：`offset(x = )` 读的是组合期的动画值，开关每次切换的
+                // spring 过程都会按帧重组这个 Box。改成 `offset { }` 后每帧只改变换。
+                .offset { IntOffset(thumbOffsetPx.value.roundToInt(), 0) }
                 .size(27.dp)
                 .shadow(elevation = 1.dp, shape = CircleShape, clip = false)
                 .background(thumbColor, CircleShape)
