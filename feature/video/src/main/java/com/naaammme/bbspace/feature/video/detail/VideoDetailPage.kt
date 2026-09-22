@@ -105,7 +105,9 @@ import com.naaammme.bbspace.feature.video.FavFolderSheetState
 import com.naaammme.bbspace.feature.video.VideoInteractionState
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.formatDuration
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -140,6 +142,10 @@ internal fun VideoDetailPage(
     val context = LocalContext.current
     val interaction by viewModel.interaction.collectAsStateWithLifecycle()
     val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
+    // 余额经 StateFlow 下发（见 VideoViewModel.coinBalance 的注释）：
+    // 早先是 `coinBalance = viewModel.coinBalance()` 直接当实参调用，
+    // 那会在 UI 线程读 SharedPreferences + 解析 JSON，且每次重组都读一遍。
+    val coinBalance by viewModel.coinBalance.collectAsStateWithLifecycle()
 
     val handleAction: (VideoDetailUiAction) -> Unit = { action ->
         when (action) {
@@ -147,8 +153,12 @@ internal fun VideoDetailPage(
             VideoDetailUiAction.Triple -> viewModel.triple()
             VideoDetailUiAction.Coin -> sheet = DetailSheet.Coin
             VideoDetailUiAction.Favorite -> {
-                viewModel.openFavSheet()
-                sheet = DetailSheet.Fav
+                // 必须由 openFavSheet 的返回值决定要不要弹：未登录时它只弹 toast
+                // 并返回 false，而原先这里无条件 `sheet = DetailSheet.Fav`，
+                // 于是一个空的"暂无收藏夹，新建一个吧"面板被盖在了"请先登录"上面。
+                if (viewModel.openFavSheet()) {
+                    sheet = DetailSheet.Fav
+                }
             }
             VideoDetailUiAction.Share -> {
                 val pgcEp = ids.epId.takeIf { it > 0L }
@@ -171,11 +181,22 @@ internal fun VideoDetailPage(
 
     fun closeSheet(afterClose: (() -> Unit)? = null) {
         scope.launch {
-            if (sheetState.isVisible) {
-                sheetState.hide()
+            try {
+                if (sheetState.isVisible) {
+                    sheetState.hide()
+                }
+            } finally {
+                // `sheetState.hide()` 是挂起点，而 `scope` 是 rememberCoroutineScope()。
+                // 宿主离开组合（切全屏、外层 AnimatedVisibility 收起）会取消这个协程，
+                // 于是原先写在 hide **之后**的两行根本不执行 —— 用户点分P/选集时
+                // 看到的就是"点了没反应"，而且没有任何日志。
+                // 收起动画只是装饰，导航才是这次交互的实质结果，所以放进
+                // NonCancellable 保证一定跑到；对已销毁组合里的 state 赋值是无害的。
+                withContext(NonCancellable) {
+                    sheet = null
+                    afterClose?.invoke()
+                }
             }
-            sheet = null
-            afterClose?.invoke()
         }
     }
 
@@ -280,7 +301,7 @@ internal fun VideoDetailPage(
 
                 is DetailSheet.Coin -> {
                     CoinSheetContent(
-                        coinBalance = viewModel.coinBalance(),
+                        coinBalance = coinBalance,
                         copyright = detail?.copyright,
                         userCoinCount = interaction.userState?.coinCount ?: 0,
                         busy = interaction.busy,

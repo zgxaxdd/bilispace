@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -157,7 +158,7 @@ fun VideoScreen(
     // ——播放器与布局尺寸全程不变。以视频 ids（aid/cid）为键，避免连续打开
     // 同源封面视频时错误复用上次的遮罩状态。
     val anim = LocalAnimations.current
-    val seamlessIdsKey = videoState.ids
+    val videoIdsKey = videoState.ids
     // ── 为什么这里**没有**详情区遮罩了 ──────────────────────────────────────
     //
     // 旧实现用一层不透明遮罩（纯主题背景色）盖住详情区，等到"打开动画播完 + 播放器
@@ -404,13 +405,23 @@ fun VideoScreen(
 
         // 封面垫底：绘制在最上层但无点击语义（触摸穿透到下方内容），
         // 铺在播放器区域内，首帧渲染后淡出露出视频。
-        coverBackdropUrl?.let { url ->
-            CoverSettleBackdrop(
-                coverUrl = url,
-                coverLarge = coverBackdropLarge,
-                frame = coverBackdropFrame,
-                firstFrameRendered = videoState.hasRenderedFirstFrame
-            )
+        //
+        // **必须按视频 ids 归键**（上方注释早已声明这个契约，但一直没被执行）：
+        // CoverSettleBackdrop 内部的 `dismissed` / `alpha` 是无 key 的 remember，
+        // 而页内切分P / 切选集 / 相关推荐都让 VideoScreen 留在组合里、不重置记忆。
+        // 于是第 1 条视频淡出完成后 dismissed=true、alpha=0，第 2 条视频的垫底
+        // 直接是个透明层 —— 打开动画期间播放器区域露出黑帧。
+        // 用 ids 而不是 coverUrl 归键，正是为了"连续打开同源封面视频"这种
+        // URL 相同、但应当重新走一遍垫底流程的情况。
+        key(videoIdsKey) {
+            coverBackdropUrl?.let { url ->
+                CoverSettleBackdrop(
+                    coverUrl = url,
+                    coverLarge = coverBackdropLarge,
+                    frame = coverBackdropFrame,
+                    firstFrameRendered = videoState.hasRenderedFirstFrame
+                )
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.core.playback
 
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.danmaku.VodDanmakuRepository
 import com.naaammme.bbspace.core.model.DanmakuSessionState
 import com.naaammme.bbspace.core.model.DanmakuWindow
@@ -7,7 +8,6 @@ import com.naaammme.bbspace.core.model.ResolvedVideoIds
 import com.naaammme.bbspace.core.model.VodDanmakuRequest
 import com.naaammme.bbspace.core.model.danmakuWindowStartMs
 import com.naaammme.bbspace.core.model.toDanmakuWindowId
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,7 +95,10 @@ internal class VodDanmakuSession(
         clearError()
 
         loadingJob = scope.launch {
-            runCatching {
+            // runCatchingCancellable 让取消原样向上传播，因此下面那句手写的
+            // `if (error is CancellationException) return@onFailure` 特判不再需要
+            // —— 它本来就是为了让这条路径不弹错误提示而打的补丁。
+            runCatchingCancellable {
                 repository.fetchSegment(request)
             }.onSuccess { segment ->
                 if (segment.request.ids != currentIds || windowId != currentWindowId) {
@@ -115,7 +118,6 @@ internal class VodDanmakuSession(
                     )
                 }
             }.onFailure { error ->
-                if (error is CancellationException) return@onFailure
                 if (request.ids != currentIds || windowId != currentWindowId) {
                     return@onFailure
                 }

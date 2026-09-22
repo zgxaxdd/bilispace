@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.core.playback
 
 import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.BiliConstants
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
@@ -60,7 +61,11 @@ class RemotePlaybackReporter @Inject constructor(
         url: String,
         params: Map<String, String>
     ): JSONObject? {
-        return runCatching {
+        // 包挂起调用必须用 runCatchingCancellable：标准库 runCatching 会把
+        // CancellationException 也吞成 failure，于是"上报协程被取消"会走进下面的
+        // onFailure 打一条假的 "report failed" 日志，且调用方拿到 null 而不是异常，
+        // 结构化并发的取消传播在这里被截断。
+        return runCatchingCancellable {
             restClient.postSignedRaw(url, params, BiliRestProfile.APP).also { json ->
                 val code = json.optInt("code", 0)
                 if (code != 0) {

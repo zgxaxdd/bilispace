@@ -4,6 +4,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.video.VideoDetailRepository
@@ -384,7 +385,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
                 // 应用时序不变——仍等 setSource 完成后落地（setMediaMetadata 需要媒体项就绪）。
                 val detailJob = if (reuseDetail == null) {
                     async(Dispatchers.IO) {
-                        runCatching {
+                        runCatchingCancellable {
                             detailRepository.fetchVideoDetail(
                                 ids = request.ids,
                                 src = target.src
@@ -929,7 +930,8 @@ class StreamPlaybackSessionImpl @Inject constructor(
     }
 
     private suspend fun reportRoomEntryAction(roomId: Long, jumpFrom: Int) {
-        runCatching {
+        // 见 RemotePlaybackReporter 的同款注释：包挂起调用不能吞掉取消。
+        runCatchingCancellable {
             liveRepository.reportRoomEntryAction(roomId = roomId, jumpFrom = jumpFrom)
         }.onFailure { error ->
             Logger.w(TAG) {

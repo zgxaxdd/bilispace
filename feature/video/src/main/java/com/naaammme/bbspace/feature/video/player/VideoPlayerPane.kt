@@ -56,6 +56,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -1018,6 +1019,17 @@ private fun PlayerCtrlBarHost(
     modifier: Modifier = Modifier
 ) {
     val progress by viewModel.playbackProgress.collectAsStateWithLifecycle()
+    // dragMs 存在**外层**（浮层之上、活得比控制条久）的作用域里，而原本只有
+    // onSeekDone 会清它。本 host 挂在控制条的 AnimatedVisibility 内：手指还按在
+    // 进度条上时控件自动隐藏、或另一根手指点视频区把控制条关掉，pointerInput 就
+    // 随组合一起消失，onSeekEnd/onSeekCancel 永不触发 →
+    // `barMs = dragSeekMs ?: ...` 从此永久停在拖动位置，进度条看起来"卡死"。
+    // 离开组合时兜底清一次。回调用 rememberUpdatedState 取最新实例，
+    // 免得 DisposableEffect(Unit) 捕获到第一次组合时的旧闭包。
+    val latestClearDragMs = rememberUpdatedState(onDragMsChange)
+    DisposableEffect(Unit) {
+        onDispose { latestClearDragMs.value(null) }
+    }
     val durationMs = player?.duration
         ?.takeIf { it > 0L }
         ?: progress.durationMs.takeIf { it > 0L }

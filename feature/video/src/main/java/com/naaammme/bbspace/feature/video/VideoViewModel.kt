@@ -34,6 +34,8 @@ import com.naaammme.bbspace.core.video.VideoActionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -222,6 +224,19 @@ class VideoViewModel @Inject constructor(
 
                         else -> Unit
                     }
+                }
+
+                SbSkipType.SHOW_OVERLAY -> {
+                    // **刻意不跳**，但也要刻意写出来：这一档原本靠最后的 `else` 兜住，
+                    // 于是"仅显示"与"禁用"在行为上完全等价（审查报告点出的正是这个）。
+                    //
+                    // 复核后的事实：进度条上的片段标记由 `VideoPlayerPane` 的 `sbMarks`
+                    // 画（`sbState.segments.map { ... }`，受 `markersEnabled` 单独控制），
+                    // **与 skipType 无关** —— 所以"仅显示"想要的效果其实已经存在。
+                    // 这一档真正缺的是"它与 DISABLED 应有不同的下游语义"这个产品定义
+                    // （例如 DISABLED 连标记都不画），那要改 sbMarks 的过滤规则，
+                    // 属设计决策、不在本轮盲改。这里显式列出，是为了让这个分支不再
+                    // 是一个"看起来像漏写"的隐式 fall-through。
                 }
 
                 else -> Unit
@@ -541,6 +556,8 @@ class VideoViewModel @Inject constructor(
                     )
                 }
                 _msg.tryEmit("投币成功")
+                // 余额真的变了，显式刷新（见 [coinBalance] 的注释：不再靠每次重组读盘）
+                refreshCoinBalance()
             },
             onFailure = { emitActionError(it, "投币失败") }
         )
@@ -565,10 +582,23 @@ class VideoViewModel @Inject constructor(
         _msg.tryEmit(message)
     }
 
-    fun openFavSheet() {
+    /**
+     * 准备收藏夹面板数据，**返回是否真的可以打开**。
+     *
+     * 为什么要有返回值：调用方 `VideoDetailPage.handleAction` 原先是无条件两行
+     * ```
+     * viewModel.openFavSheet()
+     * sheet = DetailSheet.Fav
+     * ```
+     * 而未登录分支只弹了 toast 就早退、**没有动 _favSheet**，于是 sheet 照样弹出来，
+     * 渲染的是默认空状态 —— 用户看到的是"暂无收藏夹，新建一个吧"，
+     * 而"请先登录"那条 toast 被盖在下面。把"能不能打开"作为返回值交回调用方，
+     * 是唯一能让两边不再各说各话的写法。
+     */
+    fun openFavSheet(): Boolean {
         if (!loggedIn()) {
             _msg.tryEmit("请先登录")
-            return
+            return false
         }
         _favSheet.value = FavFolderSheetState(loading = true)
         viewModelScope.launch {
@@ -590,11 +620,14 @@ class VideoViewModel @Inject constructor(
                     )
                 },
                 onFailure = { error ->
-                    _favSheet.value = FavFolderSheetState()
+                    // 同一个理由：拉取失败时也不要留着一个空面板。置 dismissRequest
+                    // 让既有的收起链路把它关掉，错误提示由 emitActionError 负责。
+                    _favSheet.value = FavFolderSheetState(dismissRequest = true)
                     emitActionError(error, "获取收藏夹失败")
                 }
             )
         }
+        return true
     }
 
     fun toggleFavFolder(fid: Long) {
@@ -628,9 +661,20 @@ class VideoViewModel @Inject constructor(
         }
         _favSheet.update { it.copy(submitting = true) }
         viewModelScope.launch {
-            val (rid, type) = favRidType()
-            runCatchingCancellable { favoriteRepository.dealFav(rid, type, addIds, delIds) }.fold(
+            // 与 openFavSheet 同理：favRidType() 会 throw，必须在 runCatching 里面。
+            // 这里虽然上游有 `if (aid <= 0L) return` 挡着、当前不可达，但依赖调用方
+            // 的守卫来保证一个 throw 型工具函数不崩，是会在哪天改动中失效的约定。
+            runCatchingCancellable {
+                val (rid, type) = favRidType()
+                favoriteRepository.dealFav(rid, type, addIds, delIds)
+            }.fold(
                 onSuccess = {
+                    // **用提交前的快照算结果，不是重读当前 state**（本轮复核过，
+                    // 审查报告建议的"`onSuccess` 内重读 `_favSheet.value`"是错的）：
+                    // 服务端应用的是 addIds/delIds，而它们正是由这份快照算出来的，
+                    // 所以"服务器现在的状态"就等于 `sheet.selectedIds`。
+                    // 若改读实时 state，用户在请求期间改了勾选，就会把**从未发出去**的
+                    // 选择当成已生效去更新收藏态与计数 —— 那才是真 bug。
                     val favedNow = sheet.selectedIds.isNotEmpty()
                     val favedBefore = sheet.initialFavedIds.isNotEmpty()
                     _interaction.update {
@@ -660,8 +704,31 @@ class VideoViewModel @Inject constructor(
         }
     }
 
-    /** 硬币余额（来自缓存的账号信息，可能为空） */
-    fun coinBalance(): Double? = authStore.getUserInfo()?.coins
+    /**
+     * 硬币余额（来自缓存的账号信息，可能为空）。
+     *
+     * **必须是 StateFlow，不能是函数** —— 原先写成
+     * `fun coinBalance(): Double? = authStore.getUserInfo()?.coins`，
+     * 并被当作 composable 实参调用（`VideoDetailPage` 里 `coinBalance = viewModel.coinBalance()`）。
+     * 而 `getUserInfo()` 走 SharedPreferences（进程内首次访问该文件会**同步读盘**）
+     * 并解析 JSONObject，于是每次 `VideoDetailPage` 重组都在 UI 线程做一遍磁盘读。
+     * 与上一轮修掉的 `UserViewModel` 是同一类问题（那次 StrictMode 实测 195ms）。
+     *
+     * 改成 StateFlow 后顺带解决了"什么时候刷新"：投币成功点显式 refresh，
+     * 而不是靠每次重组都重读一遍磁盘来碰运气。
+     */
+    private val _coinBalance = MutableStateFlow<Double?>(null)
+    val coinBalance: StateFlow<Double?> = _coinBalance.asStateFlow()
+
+    private fun refreshCoinBalance() {
+        viewModelScope.launch {
+            _coinBalance.value = withContext(Dispatchers.IO) { authStore.getUserInfo()?.coins }
+        }
+    }
+
+    init {
+        refreshCoinBalance()
+    }
 
     private fun withInteraction(action: suspend (VideoInteractionState, Long) -> Unit) {
         if (!loggedIn()) {
