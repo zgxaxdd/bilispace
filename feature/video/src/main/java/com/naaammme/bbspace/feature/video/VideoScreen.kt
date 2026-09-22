@@ -70,15 +70,17 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.media3.common.util.UnstableApi
 import androidx.compose.material3.BottomSheetDefaults
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
+import com.naaammme.bbspace.core.designsystem.component.VideoDetailInfoSkeleton
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
@@ -141,7 +143,7 @@ fun VideoScreen(
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
-    val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
+    val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val isExpandedWidth = windowSizeClass.isWidthAtLeastBreakpoint(840)
     val themeUsesDarkSystemBarIcons = MaterialTheme.colorScheme.background.luminance() > 0.5f
     var isFull by rememberSaveable { mutableStateOf(false) }
@@ -156,33 +158,20 @@ fun VideoScreen(
     // 同源封面视频时错误复用上次的遮罩状态。
     val anim = LocalAnimations.current
     val seamlessIdsKey = videoState.ids
-    var detailMaskOn by remember(seamlessIdsKey) {
-        mutableStateOf(coverBackdropUrl != null && SeamlessTransitionState.openRunning)
-    }
-    // 遮罩放行：打开动画播完后，等「播放器首帧」或「宽限期」二者先到者。
-    // - 首帧先到（常见）：画面与详情同步出现，最理想。
-    // - 宽限期先到（起播慢，真机实测首帧 616~847ms）：放行**早已组合好的**详情内容，
-    //   不再让纯色遮罩继续盖着可读内容。代价是详情区可能先露骨架/占位再被真实数据替换，
-    //   这是有意的取舍：可读内容优先于等待视频就绪。播放器区域的封面垫底
-    //   （CoverSettleBackdrop）仍独立守在首帧才淡出，视频画面本身不受影响。
-    // 幂等放行：effect 以 ids 为键，详情数据到达（cid 补全）会重跑本块，遮罩已放行时不再重复动作。
-    LaunchedEffect(seamlessIdsKey) {
-        if (coverBackdropUrl == null) return@LaunchedEffect
-        if (!SeamlessTransitionState.openRunning) {
-            detailMaskOn = false
-            return@LaunchedEffect
-        }
-        SeamlessTransitionState.awaitOpenAnimDone()
-        // 已经出首帧 → 立即放行；否则最多再等宽限期。withTimeoutOrNull 比手写轮询精确：
-        // 首帧一到就返回，不必等满宽限期，也不会像 while(delay) 那样产生空转。
-        if (!videoState.hasRenderedFirstFrame) {
-            withTimeoutOrNull(MASK_FIRST_FRAME_GRACE_MS) {
-                snapshotFlow { videoState.hasRenderedFirstFrame }.first { it }
-            }
-        }
-        if (!detailMaskOn) return@LaunchedEffect
-        detailMaskOn = false
-    }
+    // ── 为什么这里**没有**详情区遮罩了 ──────────────────────────────────────
+    //
+    // 旧实现用一层不透明遮罩（纯主题背景色）盖住详情区，等到"打开动画播完 + 播放器
+    // 首帧/宽限期"再淡出。它的原始目的是"不露骨架/占位闪变"。
+    //
+    // 但那与现在的目标冲突，而且会**跳动**：详情区下方本来就已经渲染着真实的列表骨架
+    // （`detailItems` 的 else 分支，`detailLoading` 默认 true）。遮罩里再画一份骨架 =
+    // 两份骨架叠加，淡出时两层不同步 → 肉眼可见的跳动。
+    //
+    // 现在直接**不盖**：骨架从打开动画的第一帧就露出来（正是需求），遮罩移除后
+    // 不存在"骨架 → 骨架"的交接，跳动随之消失。
+    //
+    // 遮罩原本还有一个副作用是"防止详情区出现重复封面"——这一点由播放器区域的
+    // `CoverSettleBackdrop` 独立负责（它只铺播放器区域，不碰详情区），因此移除安全。
     val isPortraitVideo = remember(videoState.currentStream) {
         val stream = videoState.currentStream ?: return@remember false
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
@@ -339,7 +328,6 @@ fun VideoScreen(
                             onOpenEpisode = switchEpisode,
                             onSwitchPage = switchPage
                         )
-                        SeamlessDetailMask(visible = detailMaskOn, fadeMillis = anim.short)
                     }
                 }
             }
@@ -401,7 +389,6 @@ fun VideoScreen(
                             onOpenEpisode = switchEpisode,
                             onSwitchPage = switchPage
                         )
-                        SeamlessDetailMask(visible = detailMaskOn, fadeMillis = anim.short)
                     }
                 }
             }
@@ -466,30 +453,6 @@ private fun Shape.cornerPxOrNull(density: Density): BackdropCornerPx? {
         bottomEnd = corners.bottomEnd.toPx(Size.Unspecified, density),
         bottomStart = corners.bottomStart.toPx(Size.Unspecified, density)
     )
-}
-
-/**
- * 详情区打开遮罩：系统无缝打开动画期间盖住详情区域（不露骨架/占位闪变），
- * 动画结束后按主题 token 时长淡出。遮罩只铺主题背景色——系统无缝动画把封面
- * 展开到**播放器区域**，详情区若再绘制一份同图封面，就会在播放器下方露出一块
- * 重复的预览图；封面连续性仅由播放器区域的 CoverSettleBackdrop 负责。
- */
-@Composable
-private fun SeamlessDetailMask(
-    visible: Boolean,
-    fadeMillis: Int
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = EnterTransition.None,
-        exit = fadeOut(tween(durationMillis = fadeMillis))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-        )
-    }
 }
 
 /**

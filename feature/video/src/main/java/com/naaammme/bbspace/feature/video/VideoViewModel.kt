@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.naaammme.bbspace.core.auth.AuthStore
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
@@ -35,6 +36,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -101,6 +104,21 @@ class VideoViewModel @Inject constructor(
     val videoState: StateFlow<VideoPlaybackState> = playbackController.videoState
     val playbackProgress: StateFlow<PlaybackProgress> = playbackController.playbackProgress
     val settingsState = playerSettings.state
+
+    /**
+     * 播放页控件模糊开关（设置 → 外观设计）。浮层组件不持有 ViewModel，由
+     * [com.naaammme.bbspace.feature.video.player.VideoPlayerPane] 收集后经
+     * CompositionLocal 下发到叶子控件。
+     */
+    val playerControlsBlur: StateFlow<Boolean> = playerSettings.playerControlsBlur
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    /**
+     * 播放页控件玻璃材质（磨砂 / 液态），设置里独立于全局材质。
+     * 同 [playerControlsBlur]，经 CompositionLocal 下发到浮层叶子控件。
+     */
+    val playerControlsMaterial: StateFlow<GlassMaterial> = playerSettings.playerControlsMaterial
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GlassMaterial.FROSTED)
 
     // ===== 空降助手 =====
     private val _sbState = MutableStateFlow(SponsorBlockUiState())

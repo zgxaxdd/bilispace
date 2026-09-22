@@ -52,11 +52,14 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,11 +69,36 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.drawWithContent
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.blur
+import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -87,7 +115,13 @@ import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
+import com.naaammme.bbspace.core.designsystem.glass.liquid.lens
+import com.naaammme.bbspace.core.designsystem.glass.liquid.vibrancy
 import com.naaammme.bbspace.feature.video.R
 import com.naaammme.bbspace.feature.video.SponsorBlockUiState
 import com.naaammme.bbspace.feature.video.VideoViewModel
@@ -145,17 +179,38 @@ private val PlayerPlayButtonBorder = Color.White.copy(alpha = 0.18f)
 /** 手势气泡 / 提示胶囊的底盘（深底保证白字在任意画面上可读）。 */
 private val PlayerToastScrim = Color.Black.copy(alpha = 0.72f)
 
-/** 进度条当前轨道。 */
-private val PlayerSliderActiveTrack = Color.White.copy(alpha = 0.24f)
+/** 进度条**已播**轨道：实心白。此前与未播同为 `White 0.24`，进度条等于看不出进度。 */
+private val PlayerSliderActiveTrack = Color.White
 
-/** 进度条未激活轨道。 */
-private val PlayerSliderInactiveTrack = Color.White.copy(alpha = 0.24f)
+/** 进度条**未播**轨道：白 0.22。压在模糊玻璃之上，太实会把模糊盖死。 */
+private val PlayerSliderInactiveTrack = Color.White.copy(alpha = 0.22f)
 
 /** 进度条停用态轨道。 */
 private val PlayerSliderDisabledTrack = Color.White.copy(alpha = 0.1f)
 
 /** 进度条停用态滑块。 */
 private val PlayerSliderDisabledThumb = Color.White.copy(alpha = 0.24f)
+
+/** 拖动时滑块底盘的染色（玻璃生效时叠在模糊之上，否则即纯色底盘）。 */
+private val PlayerSliderThumbScrim = Color.Black.copy(alpha = 0.32f)
+
+/** 拖动时跟随滑块的时间预览气泡底色。 */
+private val PlayerSliderPreviewScrim = Color.Black.copy(alpha = 0.72f)
+
+// —— 进度条尺寸规范（细线语言）——
+// 轨道 6dp、滑块 16dp。4dp 在 560dpi 实机上偏"发丝"，拖动命中感弱。
+private val PlayerSliderTrackHeight = 6.dp
+private val PlayerSliderThumbSize = 16.dp
+
+/**
+ * 进度条轨道几何（px）。轨道两端按滑块半径内缩，滑块中心才能走到 0%/100% 不越界。
+ * 抽出来是因为玻璃层与轨道 Canvas 是**两个兄弟节点**，必须共用同一份几何才不错位。
+ */
+private data class TrackGeometry(
+    val left: Float,
+    val width: Float,
+    val filledRight: Float,
+)
 
 /** 控制条按钮选中态底盘。 */
 private val PlayerCtrlButtonOn = Color.White.copy(alpha = 0.16f)
@@ -165,6 +220,101 @@ private val PlayerCtrlButtonOff = Color.White.copy(alpha = 0.10f)
 
 /** 控制条按钮未选中态前景（0.72 而非 0.5：停用也要在亮画面上保持可读）。 */
 private val PlayerCtrlButtonTextOff = Color.White.copy(alpha = 0.72f)
+
+// 播放页玻璃：视频节点（TextureView）录进专用背板，控制条采样它做真模糊。
+// 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick。
+private val LocalVideoBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+private val LocalVideoGlassTick = staticCompositionLocalOf { 0 }
+
+/**
+ * 播放页控件是否采样实时画面做玻璃（设置 → 外观设计「播放页控件模糊」）。
+ * 默认 false：未接线时一律走「黑遮罩 + 白前景」纯色，可读性最稳。
+ */
+private val LocalVideoControlsBlur = staticCompositionLocalOf { false }
+
+/**
+ * 播放页控件的玻璃材质（磨砂 / 液态），设置里**独立于**全局 [LocalGlassConfig]。
+ * 默认 FROSTED：播放控件叠在实时视频画面上，均匀雾面比强折射更稳、更可读。
+ */
+private val LocalVideoControlsMaterial = staticCompositionLocalOf { GlassMaterial.FROSTED }
+
+/** 播放页控件的模糊半径基准（dp），乘玻璃强度后即为实际半径。 */
+private const val PLAYER_CONTROL_BLUR_DP = 14f
+
+/**
+ * 播放页控件的「玻璃底盘」修饰符（进度条 / 中央播放钮 / 控制条按钮 / 胶囊共用）。
+ *
+ * 材质由 [LocalVideoControlsMaterial] 决定，两档是**两套真实的绘制链路**，不是同一份
+ * 模糊换个透明度：
+ *
+ * - **FROSTED（磨砂）**：`blur` + 容器染色。均匀雾面，画面透过率低，任何画面上都稳。
+ * - **LIQUID（液态）**：`blur` + `vibrancy`（饱和度补偿）+ **SDF 边缘折射 `lens()`**
+ *   + **Fresnel 高光边**。与全局液态（Dock / 顶栏）走同一组 miuix 效果，
+ *   只是参数按控件尺寸缩小。
+ *
+ * 折射量自适应：`lens()` 的折射量必须有物理意义（≈ 玻璃厚度）。全局 24dp 是给
+ * 64dp 高的 Dock 调的；播放控件最矮只有 6dp（进度条轨道），直接套会把整条轨道
+ * "吞掉"。这里按 [shapeHeightPx] 取短边的 ~1/3.5 并夹在 2~10dp。
+ *
+ * 生效条件：控件模糊开关打开、材质未关、背板已录制。任一不满足即返回纯色
+ * [scrim]，保证任意组合下都可读。
+ *
+ * 两点必须一起做，否则会出现"光栅冻结"：
+ * 1. 在 `drawWithContent` 里读 [LocalVideoGlassTick] —— 视频逐帧更新，而录制节点
+ *    只在自身重绘时重录；读 tick 把本控件的重绘绑到每一帧画面上；
+ * 2. 模糊半径乘 [GlassConfig.strength]（0.5–2.0），与 `liquidGlassSurface`
+ *    的口径一致——设置里的「玻璃强度」必须同时作用于 Dock/顶栏与播放控件。
+ *
+ * @param shapeHeightPx 控件短边（px），用于把折射量按尺寸自适应。
+ */
+@Composable
+private fun Modifier.playerControlGlass(
+    shape: Shape,
+    scrim: Color,
+    shapeHeightPx: Float,
+): Modifier {
+    val backdrop = LocalVideoBackdrop.current
+    val tick = LocalVideoGlassTick.current
+    val enabled = LocalVideoControlsBlur.current
+    val material = LocalVideoControlsMaterial.current
+    val strength = LocalGlassConfig.current.strength.coerceIn(0.5f, 2f)
+    val isLiquid = material == GlassMaterial.LIQUID
+    if (!enabled || backdrop == null || material == GlassMaterial.OFF) {
+        return this.background(scrim, shape)
+    }
+    val refractionDp = (shapeHeightPx / 3.5f).coerceIn(2f, 10f)
+    return this
+        .drawWithContent {
+            tick
+            drawContent()
+        }
+        .drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                val r = (PLAYER_CONTROL_BLUR_DP * strength).dp.toPx()
+                blur(r, r)
+                if (isLiquid) {
+                    // 液态：饱和补偿 + 边缘折射（透镜感）
+                    vibrancy(1.5f)
+                    lens(
+                        refractionHeight = refractionDp.dp.toPx(),
+                        refractionAmount = refractionDp.dp.toPx(),
+                        chromaticAberration = 0f
+                    )
+                }
+            },
+            highlight = {
+                // 液态才描 Fresnel 高光边：磨砂档描边会读作"硬边框"，不是雾面该有的样子
+                if (isLiquid) Highlight.GlassStrokeBigLight else null
+            },
+            onDrawSurface = {
+                // 磨砂档染色偏透（雾面要轻）；液态档染色偏实（玻璃要有厚度）
+                drawRect(scrim)
+                if (isLiquid) drawRect(Color.White.copy(alpha = 0.05f))
+            }
+        )
+}
 
 
 internal val LocalVideoResizeModeState = compositionLocalOf<MutableState<PlayerVideoResizeMode>> {
@@ -277,6 +427,26 @@ internal fun VideoPlayerPane(
         } else {
             RoundedCornerShape(16.dp)
         }
+        // 播放页专用背板：视频节点录进它，控制条玻璃采样它做真模糊。
+        // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick 强制重录。
+        val videoBackdrop = rememberLayerBackdrop()
+        var videoGlassTick by remember { mutableIntStateOf(0) }
+        LaunchedEffect(state.playWhenReady) {
+            while (state.playWhenReady) {
+                withFrameNanos { }
+                videoGlassTick++
+            }
+        }
+        // 设置项「播放页控件模糊 / 质感」：叶子控件经 CompositionLocal 读取，
+        // 不把 ViewModel 传进浮层组件（见文件顶部约定）。
+        val controlsBlur by viewModel.playerControlsBlur.collectAsStateWithLifecycle()
+        val controlsMaterial by viewModel.playerControlsMaterial.collectAsStateWithLifecycle()
+        CompositionLocalProvider(
+            LocalVideoBackdrop provides videoBackdrop,
+            LocalVideoGlassTick provides videoGlassTick,
+            LocalVideoControlsBlur provides controlsBlur,
+            LocalVideoControlsMaterial provides controlsMaterial
+        ) {
         Box(
             modifier = modifier
                 .clip(playerCornerShape)
@@ -305,6 +475,12 @@ internal fun VideoPlayerPane(
                         translationX = zoomState.offsetX
                         translationY = zoomState.offsetY
                     }
+                    // 读 tick 强制逐帧重录 + 把视频节点录进播放页专用背板
+                    .drawWithContent {
+                        videoGlassTick
+                        drawContent()
+                    }
+                    .layerBackdrop(videoBackdrop)
             )
 
             if (danmakuOverlayState != null) {
@@ -512,6 +688,7 @@ internal fun VideoPlayerPane(
                 limitUnderPlayer = true,
                 onDismiss = { showPlaybackSheet = false }
             )
+        }
         }
     }
 }
@@ -744,7 +921,12 @@ private fun VideoPlayerOverlay(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(72.dp)
-                    .background(color = PlayerPlayButtonScrim, shape = CircleShape)
+                    .clip(CircleShape)
+                    .playerControlGlass(
+                        shape = CircleShape,
+                        scrim = PlayerPlayButtonScrim,
+                        shapeHeightPx = with(LocalDensity.current) { 72.dp.toPx() }
+                    )
                     .border(1.dp, PlayerPlayButtonBorder, CircleShape)
                     .clickable { viewModel.togglePlayPause() },
                 contentAlignment = Alignment.Center
@@ -858,6 +1040,7 @@ private fun PlayerCtrlBarHost(
         fullText = if (isFull) "还原" else "全屏",
         sliderVal = sliderVal,
         sliderOn = durationMs > 0L,
+        durationMs = durationMs,
         marks = sbMarks,
         audioOn = (state.playbackSource?.audios?.size ?: 0) > 1,
         qualityOn = (state.playbackSource?.qualityOptions?.size ?: 0) > 1,
@@ -890,6 +1073,8 @@ private fun PlayerCtrlBar(
     fullText: String,
     sliderVal: Float,
     sliderOn: Boolean,
+    /** 视频总时长，供进度条拖动时间气泡换算；<= 0 时不显示气泡。 */
+    durationMs: Long,
     marks: List<SbMark> = emptyList(),
     audioOn: Boolean,
     qualityOn: Boolean,
@@ -922,53 +1107,22 @@ private fun PlayerCtrlBar(
                 .padding(bottom = 2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Slider(
+            // 进度条：**自绘**，不再复用 Material Slider 默认皮肤。
+            //
+            // 为什么自绘：Slider 的默认轨道高度/圆角/滑块是 Material 的通用形状，
+            // 与播放页浮层（大圆角按钮 + 玻璃胶囊 + 黑遮罩白前景）不是一套语汇；
+            // 且它无法把「已播 / 未播 / 空降标记 / 拖动时间气泡」画在同一层里。
+            PlayerProgressBar(
                 value = sliderVal,
+                enabled = sliderOn,
+                marks = marks,
+                durationMs = durationMs,
                 onValueChange = onSeekChange,
                 onValueChangeFinished = onSeekDone,
-                enabled = sliderOn,
-                valueRange = 0f..1f,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = PlayerSliderInactiveTrack,
-                    disabledThumbColor = PlayerSliderDisabledThumb,
-                    disabledActiveTrackColor = PlayerPillBorder,
-                    disabledInactiveTrackColor = PlayerSliderDisabledTrack
-                ),
-                track = { sliderState ->
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        if (marks.isNotEmpty()) {
-                            // 空降片段标记：细条叠在视频进度条上（垂直居中）
-                            Canvas(modifier = Modifier.matchParentSize()) {
-                                val markerHeight = 5.dp.toPx()
-                                val radius = CornerRadius(markerHeight / 2f)
-                                marks.forEach { mark ->
-                                    val left = size.width * mark.start
-                                    val right = (size.width * mark.end).coerceAtLeast(left + 2.dp.toPx())
-                                    drawRoundRect(
-                                        color = mark.color,
-                                        topLeft = Offset(left, (size.height - markerHeight) / 2f),
-                                        size = Size(right - left, markerHeight),
-                                        cornerRadius = radius
-                                    )
-                                }
-                            }
-                        }
-                        SliderDefaults.Track(
-                            sliderState = sliderState,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = SliderDefaults.colors(
-                                activeTrackColor = Color.White,
-                                inactiveTrackColor = PlayerSliderInactiveTrack,
-                                disabledActiveTrackColor = PlayerPillBorder,
-                                disabledInactiveTrackColor = PlayerSliderDisabledTrack
-                            )
-                        )
-                    }
-                },
                 modifier = Modifier
                     .fillMaxWidth()
+                    // 细线语言的呼吸感来自左右留白：滑块在两端不贴控制条边缘
+                    .padding(horizontal = 10.dp)
             )
 
             Row(
@@ -1019,6 +1173,212 @@ private fun PlayerCtrlBar(
     }
 }
 
+/**
+ * 播放页进度条（自绘）。由下到上的图层：
+ * 1) 整条轨道玻璃（blur 采样实时视频画面）
+ * 2) 轨道 Canvas：未播轨（半透明，让模糊透出）/ 已播轨（实心白）/ 空降标记 / 停用态滑块
+ * 3) 滑块玻璃（圆形模糊 + 深色底盘）
+ * 4) 滑块白环
+ * 5) 拖动时间气泡
+ *
+ * 关键点：miuix `DrawBackdropNode.draw` 的顺序是
+ * `drawContent()` → `drawBlurredBackdrop()` → `onDrawSurface()`，即**模糊盖在
+ * 本节点内容之上**。因此玻璃必须放在轨道**下面**（先画玻璃、再画半透明轨道），
+ * 让轨道的半透明像素把模糊透出来；反过来放会被轨道整块盖死，等于没加模糊。
+ *
+ * 交互用 `pointerInput` + `detectHorizontalDragGestures` 自己实现，而不是包 Slider：
+ * 需要在按下/拖动期间额外显示时间气泡，Slider 的槽位无法在不重复实现手势的情况下
+ * 拿到「正在拖动」这一状态。
+ *
+ * @param value 0f..1f 播放进度
+ * @param enabled false 时轨道与滑块降级为停用配色，且不响应手势
+ * @param marks 空降助手片段标记（比例区间 + 颜色）
+ * @param durationMs 用于拖动气泡的时间换算；<= 0 时不显示气泡
+ */
+@Composable
+private fun PlayerProgressBar(
+    value: Float,
+    enabled: Boolean,
+    marks: List<SbMark>,
+    durationMs: Long,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val safeValue = value.coerceIn(0f, 1f)
+    var dragging by remember { mutableStateOf(false) }
+    val trackPx = with(LocalDensity.current) { PlayerSliderTrackHeight.toPx() }
+    val thumbPx = with(LocalDensity.current) { PlayerSliderThumbSize.toPx() }
+    // 气泡定位要用容器宽度，而 offset{} 的 receiver 是 LayoutCoordinates、不是 BoxScope
+    // ——里面的 `size` 是坐标对象。因此在布局回调里单独记一份宽度。
+    var barWidthPx by remember { mutableIntStateOf(0) }
+
+    Box(
+        modifier = modifier
+            // 触摸区比视觉轨道高得多（细轨只有 6dp，直接用轨道高度做命中区基本点不中）
+            .height(32.dp)
+            .onSizeChanged { barWidthPx = it.width }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        dragging = true
+                        onValueChange((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
+                    },
+                    onDragEnd = {
+                        dragging = false
+                        onValueChangeFinished()
+                    },
+                    onDragCancel = {
+                        dragging = false
+                        onValueChangeFinished()
+                    },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        onValueChange((change.position.x / size.width.toFloat()).coerceIn(0f, 1f))
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        val trackGeometry = remember(safeValue, barWidthPx, thumbPx) {
+            val trackLeft = thumbPx / 2f
+            val trackWidth = (barWidthPx - thumbPx).coerceAtLeast(1f)
+            TrackGeometry(
+                left = trackLeft,
+                width = trackWidth,
+                filledRight = trackLeft + trackWidth * safeValue
+            )
+        }
+        val trackShape = RoundedCornerShape(percent = 50)
+
+        // 1) 整条轨道玻璃
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset { IntOffset(trackGeometry.left.roundToInt(), 0) }
+                .width(with(LocalDensity.current) { trackGeometry.width.toDp() })
+                .height(PlayerSliderTrackHeight)
+                .playerControlGlass(
+                    shape = trackShape,
+                    scrim = Color.Transparent,
+                    shapeHeightPx = trackPx
+                )
+        )
+
+        // 2) 轨道内容
+        Canvas(modifier = Modifier.fillMaxWidth().height(PlayerSliderThumbSize)) {
+            val cy = size.height / 2f
+            val thumbRadius = thumbPx / 2f
+            val trackRadius = CornerRadius(trackPx / 2f)
+            val trackTop = cy - trackPx / 2f
+
+            // 未播轨道：半透明白，模糊从下面透出来
+            drawRoundRect(
+                color = if (enabled) PlayerSliderInactiveTrack else PlayerSliderDisabledTrack,
+                topLeft = Offset(trackGeometry.left, trackTop),
+                size = Size(trackGeometry.width, trackPx),
+                cornerRadius = trackRadius
+            )
+            // 已播轨道：实心白，进度一眼可读
+            if (safeValue > 0f) {
+                drawRoundRect(
+                    color = if (enabled) PlayerSliderActiveTrack else PlayerPillBorder,
+                    topLeft = Offset(trackGeometry.left, trackTop),
+                    size = Size(
+                        (trackGeometry.filledRight - trackGeometry.left).coerceAtLeast(trackPx),
+                        trackPx
+                    ),
+                    cornerRadius = trackRadius
+                )
+            }
+            // 空降助手标记：比轨道略高
+            if (marks.isNotEmpty()) {
+                val markerHeight = trackPx + 3.dp.toPx()
+                marks.forEach { mark ->
+                    val left = trackGeometry.left + trackGeometry.width * mark.start
+                    val right = (trackGeometry.left + trackGeometry.width * mark.end)
+                        .coerceAtLeast(left + 2.dp.toPx())
+                    drawRoundRect(
+                        color = mark.color,
+                        topLeft = Offset(left, cy - markerHeight / 2f),
+                        size = Size(right - left, markerHeight),
+                        cornerRadius = CornerRadius(markerHeight / 2f)
+                    )
+                }
+            }
+            // 停用态滑块（启用态走玻璃层 + 白环层）
+            if (!enabled) {
+                drawCircle(
+                    color = PlayerSliderDisabledThumb,
+                    radius = thumbRadius - 1.5.dp.toPx(),
+                    center = Offset(trackGeometry.filledRight, cy)
+                )
+            }
+        }
+
+        // 3) 滑块玻璃：圆形模糊 + 深色底盘
+        if (enabled) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset {
+                        IntOffset(
+                            x = (trackGeometry.filledRight - thumbPx / 2f).roundToInt(),
+                            y = 0
+                        )
+                    }
+                    .size(PlayerSliderThumbSize)
+                    .playerControlGlass(
+                        shape = CircleShape,
+                        scrim = PlayerSliderThumbScrim,
+                        shapeHeightPx = thumbPx
+                    )
+            )
+        }
+        // 4) 滑块白环
+        if (enabled) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(PlayerSliderThumbSize)) {
+                drawCircle(
+                    color = Color.White,
+                    radius = thumbPx / 2f - 1.5.dp.toPx(),
+                    center = Offset(trackGeometry.filledRight, size.height / 2f),
+                    style = Stroke(width = 2.dp.toPx())
+                )
+            }
+        }
+
+        // 5) 拖动时间气泡：跟随滑块、悬在轨道上方
+        if (dragging && durationMs > 0L && barWidthPx > 0) {
+            val bubbleText = formatPlaybackTime((durationMs * safeValue).toLong(), durationMs)
+            val bubbleWidthPx = with(LocalDensity.current) { 52.dp.toPx() }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset {
+                        val centerX = thumbPx / 2f + (barWidthPx - thumbPx) * safeValue
+                        IntOffset(
+                            x = (centerX - bubbleWidthPx / 2f)
+                                .coerceIn(0f, (barWidthPx - bubbleWidthPx).coerceAtLeast(0f))
+                                .roundToInt(),
+                            y = 0
+                        )
+                    }
+                    .clip(RoundedCornerShape(BiliRadius.playerControl))
+                    .background(PlayerSliderPreviewScrim)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = bubbleText,
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun CtrlBtn(
     text: String,
@@ -1033,12 +1393,15 @@ private fun CtrlBtn(
     } else {
         PlayerCtrlButtonTextOff
     }
+    // 全圆端：高度 34dp 配 17dp 圆角。此前是 15dp 裸字面量，与高度差 2dp，
+    // 两端留下一小段直边，读作"圆角矩形"而非现代胶囊。
+    val shape = RoundedCornerShape(BiliRadius.playerControl)
 
     Box(
         modifier = modifier
-            .heightIn(min = 30.dp)
-            .clip(RoundedCornerShape(15.dp))
-            .background(bg)
+            .heightIn(min = 34.dp)
+            .clip(shape)
+            .playerControlGlass(shape = shape, scrim = bg, shapeHeightPx = with(LocalDensity.current) { 34.dp.toPx() })
             .clickable(enabled = on, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center
@@ -1070,7 +1433,11 @@ private fun PlayerPillChip(
     Box(
         modifier = modifier
             .clip(pillShape)
-            .background(PlayerPillScrim)
+            .playerControlGlass(
+                shape = pillShape,
+                scrim = PlayerPillScrim,
+                shapeHeightPx = with(LocalDensity.current) { 32.dp.toPx() }
+            )
             .border(1.dp, PlayerPillBorder, pillShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),

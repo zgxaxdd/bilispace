@@ -476,15 +476,27 @@ private fun LazyListScope.detailItems(
             }
         }
 
+        // 兜底：**没有详情、也没在报错**时显示骨架，而不是"暂无简介信息"。
+        //
+        // 为什么这条兜底是必要的（原来这里是空状态卡，导致打开瞬间看不到骨架）：
+        // `detailLoading` 由 `StreamPlaybackSessionImpl` 在 `openVideo()` 里设置，
+        // 而 `openRoot()` 是在 `LaunchedEffect` 里调用的 —— **首帧**时
+        // `detail == null && detailLoading == false`，于是 when 落到最后一个分支，
+        // 用户看到的是"暂无简介信息"卡片（或整片空白），而不是骨架。
+        // 语义上"没有数据且没有错误"就等于"还在加载"，所以这里就该给骨架。
         else -> {
             item(
-                key = "detail_empty",
-                contentType = "state"
+                key = "detail_loading_summary",
+                contentType = "skeleton"
             ) {
-                StateMessageCard(
-                    text = "暂无简介信息",
-                    modifier = itemMod
-                )
+                VideoDetailInfoSkeleton(modifier = itemMod)
+            }
+            items(
+                count = DETAIL_RELATE_SKELETON_COUNT,
+                key = { index -> "detail_loading_relate_$index" },
+                contentType = { "skeleton" }
+            ) {
+                VideoRelateCardSkeleton(modifier = itemMod)
             }
         }
     }
