@@ -11,6 +11,14 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
+import com.naaammme.bbspace.memory.COVER_COLOR_HISTORY
+import com.naaammme.bbspace.memory.COVER_COLOR_VISIBLE_WINDOW
+import com.naaammme.bbspace.memory.CoverColorAction
+import com.naaammme.bbspace.memory.ImageCacheAction
+import com.naaammme.bbspace.memory.MemoryTrimPlan
+import com.naaammme.bbspace.memory.TRIM_TO_RATIO
+import com.naaammme.bbspace.memory.planLowMemory
+import com.naaammme.bbspace.memory.planTrimMemory
 import coil3.disk.DiskCache
 import coil3.gif.AnimatedImageDecoder
 import coil3.gif.GifDecoder
@@ -101,73 +109,55 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
     }
 
     /**
-     * 内存分级释放。原则：**只释放"重建便宜"的东西**。
+     * 内存分级释放的**执行端**。原则：只释放"重建便宜"的东西。
      *
      * 绝不在此处做的事（会直接换来卡顿或流量）：
      * - 不清磁盘缓存：清了回看要重新走网络 + 重新解码。
      * - 不碰播放器缓冲：清了立刻卡顿（本项目播放器缓冲由 Media3 自管，此处不介入）。
-     * - **不在 UI_HIDDEN 就 `clear()`**：见下方说明。
      *
-     * ## 为什么 UI_HIDDEN 只 trim 不清空（照搬 BiliPai 上游策略）
-     *
-     * 原实现在 `TRIM_MEMORY_UI_HIDDEN`（**每次切后台**都会收到）直接
-     * `memoryCache.clear()`。代价是：回前台后当前列表里**所有可见封面**都要从磁盘
-     * 缓存重新解码——正是"切后台再回来，封面肉眼可见地重刷一遍"的来源。
-     * UI_HIDDEN 只表示"界面不可见"，不代表内存吃紧（系统完全可能因为用户按了 Home
-     * 就发这一条），此时清空是过度反应。
-     *
-     * 上游策略（BiliPai `BackgroundMemoryTrimPolicy`）把 UI_HIDDEN 映射为**温和的
-     * `trimToSize`**：只按 LRU 淘汰历史项、保留最近使用的可视封面，既让出内存又不
-     * 牺牲回前台的即时性；真正清空只在 BACKGROUND / MODERATE / COMPLETE 这类
-     * "后台且确实吃紧"的档位才做。
-     *
-     * 分级：
-     * - UI_HIDDEN：`trimToSize(50%)` —— 保留可视卡片，淘汰历史。
-     * - BACKGROUND / MODERATE / COMPLETE：`clear()` —— 已在后台且吃紧，重建可接受。
-     * - RUNNING_LOW / RUNNING_CRITICAL：**界面不可见时**才 `clear()`；
-     *   可见时交给系统回收，避免"前台清缓存 → 列表重新加载"的负体验。
+     * "哪个 level 对应 trim 还是 clear、为什么 UI_HIDDEN 绝不能 clear"这张分级表
+     * 连同它的理由一起搬到了 [planTrimMemory]（`memory/MemoryTrimPolicy.kt`）——
+     * 那边是纯函数、有 JVM 单测（MemoryTrimPolicyTest），写在这里时只能靠真机
+     * `am send-trim-memory` 才能验证。**不要在这里重新加分支**，改表请改策略文件，
+     * 否则会绕开那张表的测试。
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        try {
-            when (level) {
-                ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
-                    trimImageMemoryCache("UI_HIDDEN")
-                    // 封面色缓存：只保留最近 16 条（约当前可视卡片量），淘汰已滑走的历史。
-                    // 数量级很小（每条只是一个 Color），但配合图片缓存一起收口更整齐。
-                    VideoCardCoverColorStore.trimToSize(16)
-                }
-
-                ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
-                ComponentCallbacks2.TRIM_MEMORY_MODERATE,
-                ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
-                    clearImageMemoryCache("BACKGROUND")
-                    VideoCardCoverColorStore.trimToSize(8)
-                }
-
-                ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW,
-                ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {
-                    // 界面不可见才清；可见时清了会立刻被重新填充，得不偿失。
-                    if (!isUiVisible) {
-                        clearImageMemoryCache("RUNNING_LOW")
-                        VideoCardCoverColorStore.trimToSize(8)
-                    }
-                }
-            }
-        } catch (e: Throwable) {
-            // onTrimMemory 里抛异常会拖垮应用；降级为静默。
-            Logger.w(TAG) { "onTrimMemory($level) 处理失败: ${e.message}" }
-        }
+        applyTrimPlan(planTrimMemory(level, isUiVisible))
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
         // 系统级内存紧张：一律释放图片内存缓存（此时已无更温和的选项）。
+        applyTrimPlan(planLowMemory())
+    }
+
+    /**
+     * 执行 [MemoryTrimPlan]。只认 plan，不做任何分级判断。
+     *
+     * 封面色缓存与图片缓存一起收口：量级很小（每条只是一个 Color），但漏掉它会让
+     * "已滑走的历史封面"一直挂在进程里。
+     *
+     * 整个执行过程包在 try 里：`onTrimMemory` 里抛异常会直接拖垮应用，
+     * 而这里的动作全是"尽力优化"性质，失败就该静默降级、只留痕。
+     */
+    private fun applyTrimPlan(plan: MemoryTrimPlan) {
         try {
-            clearImageMemoryCache("onLowMemory")
-            VideoCardCoverColorStore.trimToSize(8)
+            when (plan.imageCache) {
+                ImageCacheAction.Nothing -> return
+                ImageCacheAction.Trim -> trimImageMemoryCache(plan.reason, TRIM_TO_RATIO)
+                ImageCacheAction.Clear -> clearImageMemoryCache(plan.reason)
+            }
+            when (plan.coverColors) {
+                CoverColorAction.Keep -> Unit
+                CoverColorAction.TrimToVisibleWindow ->
+                    VideoCardCoverColorStore.trimToSize(COVER_COLOR_VISIBLE_WINDOW)
+
+                CoverColorAction.TrimToHistory ->
+                    VideoCardCoverColorStore.trimToSize(COVER_COLOR_HISTORY)
+            }
         } catch (e: Throwable) {
-            Logger.w(TAG) { "onLowMemory 处理失败: ${e.message}" }
+            Logger.w(TAG) { "onTrimMemory(${plan.reason}) 处理失败: ${e.message}" }
         }
     }
 
