@@ -3,7 +3,9 @@ package com.naaammme.bbspace.infra.player
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import java.util.Collections
 import java.util.IdentityHashMap
+import java.util.WeakHashMap
 
 /**
  * PlayerView ⇄ Player 绑定的唯一管理者（所有权模型）。
@@ -32,7 +34,24 @@ object PlayerViewTargetBinder {
     private val owners = IdentityHashMap<PlayerView, Player>()
 
     /** 已进入释放流程的实例：之后的一切绑定请求一律 no-op。 */
-    private val released = IdentityHashMap<Player, Unit>()
+    // WeakHashMap 而非 IdentityHashMap：语义仍是「按实例身份判等」（Player 未覆写
+    // equals/hashCode，故等价于引用相等），但**不再强引用已释放的 player**。
+    //
+    // 为什么必须改：原实现只写不删，每个被 release 的 ExoPlayer 都被永久钉住。
+    // 已释放实例仍持有 renderer 列表、AnalyticsCollector、audio sink、allocator 等
+    // 整套对象图（数十~数百 KB）。`Media3PlayerEngine.updateConfig`（改缓冲参数 /
+    // 解码模式）与 `recoverSession`（系统级解码错误重建）每次都会重建实例并释放旧的
+    // —— 每次都在这里永久累积，是典型的无界泄漏。
+    //
+    // 用 Weak 是安全的：这个 map 的用途只是「识别迟到的陈旧绑定请求」。一个 player
+    // 若已不可达，就不可能再有携带它的 bind 请求送达（调用方必须持有引用来传参），
+    // 因此条目被 GC 回收不会放过任何真实场景。
+    //
+    // 同时加 synchronizedMap：本对象是进程级单例，而 `AppInitializer` 已在 IO 线程上
+    // 跑播放准备；IdentityHashMap/WeakHashMap 在多线程 rehash 下会丢条目甚至死循环。
+    // 当前 15 个调用点恰好都在主线程，属于「靠调用纪律维持」的约束，这里补上保证。
+    private val released: MutableMap<Player, Unit> =
+        Collections.synchronizedMap(WeakHashMap<Player, Unit>())
 
     /**
      * 把 [view] 绑定为 [player] 的渲染目标；player 为 null 等价于 [unbind]。
@@ -111,11 +130,9 @@ object PlayerViewTargetBinder {
     /**
      * **仅供诊断**：当前 [released] 中滞留的已释放 player 数量。
      *
-     * `released` 是 `IdentityHashMap<Player, Unit>`，只写不删 —— 这是刻意设计
-     * （见类注释第 3 条：迟到的陈旧 StateFlow 快照必须被判为 no-op），但意味着
-     * 每个被释放的 player 实例都会被强引用驻留。
-     *
-     * 本方法只读、无副作用，供 debug 构建量化驻留规模；不要在业务逻辑里使用。
+     * 该 map 已改为 `WeakHashMap`（见字段注释），条目会随 player 不可达而自动回收，
+     * 因此这个计数现在是「仍被外部强引用的已释放实例数」，不再是无界增长量。
+     * 本方法只读、无副作用，供 debug 构建观察；不要在业务逻辑里使用。
      */
     @UnstableApi
     fun releasedCountForDiagnostics(): Int = released.size

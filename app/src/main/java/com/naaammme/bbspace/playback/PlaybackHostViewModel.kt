@@ -55,6 +55,13 @@ class PlaybackHostViewModel @Inject constructor(
     val hostMode: PlaybackHostMode
         get() = hostState.hostMode
 
+    /**
+     * 详情页存活标志（Compose 可观察）。联动底栏按它决定小横条是**隐藏**还是
+     * **卸载**——隐藏保留无缝返回动画的锚点，卸载会让返回退回 alpha 交叉淡出。
+     */
+    val videoDetailAlive: Boolean
+        get() = hostState.videoDetailAlive
+
     private var shouldResumeAfterBackgroundPause = false
 
     fun expand() {

@@ -1,6 +1,8 @@
 package com.naaammme.bbspace.playback
 
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
@@ -48,9 +50,16 @@ class PlaybackHostState @Inject constructor(
     val hostMode: PlaybackHostMode
         get() = _hostMode.value
 
-    /** VideoDetailActivity 实例是否存在于返回栈中（onCreate → onDestroy 的真实存活性）。 */
-    @Volatile
-    var videoDetailAlive: Boolean = false
+    /**
+     * VideoDetailActivity 实例是否存在于返回栈中（onCreate → onDestroy 的真实存活性）。
+     *
+     * Compose 可观察：联动底栏的小横条**必须**在详情页存活期间保持组合（见
+     * [com.naaammme.bbspace.playback.capsule.LinkedNowPlayingRow] 的无缝锚点）——
+     * 锚点 View 一旦 detach，系统的返回动画取不到锚点就会放弃 morph 退回 alpha
+     * 交叉淡出（`view not attach to window or error, do alpha anim`）。
+     * 因此这里不能再用 @Volatile 普通字段：底栏要按它重组来决定"只隐藏、不卸载"。
+     */
+    var videoDetailAlive: Boolean by mutableStateOf(false)
         private set
 
     /** 用户主动收起视频后置位（返回/页内导航/关闭）；重新打开视频时复位。诊断日志读取。 */

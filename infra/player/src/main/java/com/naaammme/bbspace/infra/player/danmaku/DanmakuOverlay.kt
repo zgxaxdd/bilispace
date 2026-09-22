@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.DanmakuSessionState
 import master.flame.danmaku.api.SegmentDanmakuSession
@@ -140,11 +141,18 @@ fun DanmakuLayer(
         }
     }
 
-    // 诊断心跳：低频上报管线状态（无弹幕问题定位用，2s 一条）
+    // 诊断心跳：低频上报管线状态（无弹幕问题定位用，2s 一条）。
+    //
+    // **仅 debug**：原来直接用 android.util.Log（绕过项目 Logger 的 isDebug 门控），
+    // 且无任何构建类型判断 —— release 用户只要在播放页/直播页就每 2 秒一条日志，
+    // 每次还构造 diagnosticState() 字符串。同类诊断（AppInitializer）是显式
+    // `if (!BuildConfig.DEBUG) return` 门控的，这里用 Logger.isDebug 对齐
+    // （本模块未开启 buildConfig 生成，拿不到 BuildConfig）。
     LaunchedEffect(overlayState) {
+        if (!Logger.isDebug) return@LaunchedEffect
         while (true) {
             kotlinx.coroutines.delay(2_000)
-            android.util.Log.i("BbDanmaku", "heartbeat ${overlayState.diagnosticState()}")
+            Logger.i("BbDanmaku") { "heartbeat ${overlayState.diagnosticState()}" }
         }
     }
 
