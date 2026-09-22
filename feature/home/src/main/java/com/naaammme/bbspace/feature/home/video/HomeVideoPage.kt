@@ -71,6 +71,8 @@ import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawS
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
 import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.component.biliImageUrlForVariant
+import com.naaammme.bbspace.core.designsystem.component.feedCoverVariant
 import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonShimmer
 import com.naaammme.bbspace.core.designsystem.component.SkeletonBlock
 import com.naaammme.bbspace.core.designsystem.component.rememberAdaptiveGridColumnCount
@@ -139,10 +141,32 @@ fun HomeVideoPage(
 ) {
     val context = LocalContext.current
     val gridState = rememberLazyStaggeredGridState()
-    // 预加载用的封面 URL 列表。单独派生而不是直接用 items：预加载只需要 URL，
-    // 而 items 里任何字段变化（播放量、点赞数刷新）都不该重启预加载 effect。
-    // key 用 List 的 equals——只有真正换了内容才会变。
-    val preloadCoverUrls = remember(items) { items.map { it.cover } }
+    // 预加载封面 URL 列表。**必须与卡片请求的是同一个 URL**：Coil 的 memory / disk
+    // cache key 都由 ImageRequest.data（这里即解析后的 URL 字符串）派生，
+    // 差一个 `@640w_480h_1e_1c_85q.webp` 后缀就是另一个键。
+    //
+    // 上一轮这里传的是**未解析的 `item.cover`（原图地址）**，于是：
+    // - 预加载解出来的位图，卡片永远取不到 → 预加载 100% 白做；
+    // - 而且它下载的是原图，比不预加载更贵（多一份带宽 + 多一份内存缓存）。
+    // 现在与卡片共用 biliImageUrlForVariant / feedCoverVariant，结构上不可能再分叉。
+    //
+    // 单独派生而不是直接用 items：预加载只需要 URL，而 items 里任何字段变化
+    // （播放量、点赞数刷新）都不该重启预加载 effect。key 用 List 的 equals，
+    // 只有真正换了内容才会变。
+    val preloadVariant = feedCoverVariant(singleColumn)
+    // 解码尺寸必须**不小于**卡片的布局尺寸。Coil 的 memory cache key 不含尺寸
+    // （只有带 transformations 的请求才把 size 写进 key 的 extras），所以命中与否
+    // 取决于 `MemoryCacheService.isCacheValueValidForSize`：它拿已缓存位图的
+    // 实际宽高与本次请求的尺寸比，缓存的图更小就判为不可用、重新解码。
+    // 因此单列大图（Large = 960w_540h）不能沿用双列的 640×480。
+    val preloadSizePx = if (singleColumn) {
+        COVER_PRELOAD_LARGE_WIDTH_PX to COVER_PRELOAD_LARGE_HEIGHT_PX
+    } else {
+        COVER_PRELOAD_WIDTH_PX to COVER_PRELOAD_HEIGHT_PX
+    }
+    val preloadCoverUrls = remember(items, preloadVariant) {
+        items.map { biliImageUrlForVariant(it.cover, preloadVariant) }
+    }
     val homeFling = rememberHomeFlingBehavior()
     var wasRefreshing by remember { mutableStateOf(false) }
     val currentItems by rememberUpdatedState(items)
@@ -172,18 +196,22 @@ fun HomeVideoPage(
             }
         }
     }
-    // ── 封面预加载（移植自 BiliPai 上游 HomeScreen 的 snapshotFlow + debounce 方案）──
+    // ── 封面预加载（移植自 BiliPai 上游的 snapshotFlow 方案，本轮修了三个致命细节）──
     // 为什么需要：滚动时新进入视口的封面要现场走「网络/磁盘 → 解码 → 上传纹理」，
     // 解码发生在滚动帧里就是可见的抖动。提前把**即将进入视口**的封面解码好，
     // 进视口时直接命中内存缓存。
     //
-    // 三个关键设计（照搬上游，缺一不可）：
-    // 1. **debounce(180)**：惯性滑动时 layoutInfo 每帧都变，不 debounce 会变成
-    //    每帧一批请求的请求风暴。180ms 约等于"手指停下/惯性将尽"的窗口。
-    // 2. **滚动态门控**：正在滚动时直接跳过。滚动中抢解码反而会与当前帧争 CPU/带宽。
-    // 3. **只预取视口之后的一小段**，不贪多——预取太多等于把后面的解码提前做，
-    //    白白占用内存与流量（用户可能根本不滑到那里）。
-    LaunchedEffect(gridState, preloadCoverUrls) {
+    // 本轮修正的三点（前两点是"预加载其实没在工作"的根因）：
+    // 1. **URL 必须与卡片一致**（见 preloadCoverUrls 的注释）。原先传的是未解析的
+    //    item.cover，与卡片请求的 @640w_480h… 不是同一个键 → 预加载 100% 白做。
+    // 2. **debounce(180) 在连续滚动下等于"永远不发射"**：snapshotFlow 每帧都在产出
+    //    新值，debounce 每帧都被重置，只有**停下来**才会入队。也就是说整段快速
+    //    fling 期间一个都没预取 —— 而这恰恰是唯一需要预取的时刻（冷缓存的首几轮
+    //    滚动 jank 就来自这里）。改成按滚动态取超时：滚动中 0ms（立即入队跟上节奏），
+    //    静止时仍用 180ms 合并抖动。
+    // 3. 相应地取消"滚动中直接 return"的门控 —— 它和第 2 点合起来让预加载只在
+    //    列表完全静止时才有用。解码始终在 IO 线程，不占主线程。
+    LaunchedEffect(gridState, preloadCoverUrls, preloadSizePx) {
         if (preloadCoverUrls.isEmpty()) return@LaunchedEffect
         snapshotFlow {
             val info = gridState.layoutInfo
@@ -191,26 +219,27 @@ fun HomeVideoPage(
             lastVisible to gridState.isScrollInProgress
         }
             .distinctUntilChanged()
-            // 见设计点 1：合并惯性滑动期间爆发的布局更新
-            .debounce(COVER_PRELOAD_DEBOUNCE_MS)
-            .collect { (lastVisible, scrolling) ->
-                // 见设计点 2：滚动中不抢解码
-                if (scrolling || lastVisible < 0) return@collect
+            // 见修正点 2：滚动中不 debounce，否则整段 fling 一次都不入队
+            .debounce { (_, scrolling) ->
+                if (scrolling) 0L else COVER_PRELOAD_DEBOUNCE_MS
+            }
+            .collect { (lastVisible, _) ->
+                if (lastVisible < 0) return@collect
                 val from = lastVisible + 1
                 val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCoverUrls.lastIndex)
                 if (from > to) return@collect
                 val urls = (from..to).mapNotNull { preloadCoverUrls.getOrNull(it) }
                 if (urls.isEmpty()) return@collect
-                // 见设计点 3：解码在 IO 线程，绝不占主线程
+                // 解码/网络都在 Coil 自己的调度器上，主线程只负责入队
                 withContext(Dispatchers.IO) {
                     val loader = SingletonImageLoader.get(context)
                     urls.forEach { url ->
                         loader.enqueue(
                             ImageRequest.Builder(context)
                                 .data(url)
-                                // 与卡片实际展示尺寸同档（双列 ≈ 半屏宽、4:3），
-                                // 尺寸对不上会让预加载的解码结果无法命中卡片请求
-                                .size(COVER_PRELOAD_WIDTH_PX, COVER_PRELOAD_HEIGHT_PX)
+                                // 与卡片实际展示尺寸同档（见 preloadSizePx 的注释：
+                                // 预加载的位图比卡片需要的小，就会被判不可用而重新解码）
+                                .size(preloadSizePx.first, preloadSizePx.second)
                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                 .diskCachePolicy(CachePolicy.ENABLED)
                                 .build()
@@ -917,13 +946,22 @@ private val FeedCardInfoShape: Shape = BiliRadius.bottomRounded(BiliRadius.card)
 private val CoverBadgeShape = RoundedCornerShape(8.dp)
 
 // ── 封面预加载参数（见 HomeVideoPage 内 preload effect 的注释）────────────────
-/** 合并惯性滑动期间爆发的布局更新；约等于"手指停下/惯性将尽"的窗口。 */
+/** 合并"手指停下/惯性将尽"后的抖动；滚动中不走这个值（见 preload effect 修正点 2）。 */
 private const val COVER_PRELOAD_DEBOUNCE_MS = 180L
-/** 视口之后预取几张。只取一小段：预取太多等于替用户提前解码他可能看不到的内容。 */
-private const val COVER_PRELOAD_AHEAD = 4
 /**
- * 预加载解码尺寸，必须与卡片实际展示尺寸同档（双列 ≈ 半屏宽、4:3），
- * 否则预加载出来的位图无法命中卡片的 ImageRequest，等于白做。
+ * 视口之后预取几张。4 → 8（本轮）：双列一屏约 4 张，4 张只够半屏缓冲，
+ * 快速 fling 一口气就吃掉；而预取窗口现在在滚动中也会推进（不再被 debounce 憋住），
+ * 所以必须大于"一次惯性滑过的屏数"才有意义。
+ * 仍不贪多：预取太多等于替用户提前解码他可能看不到的内容，白占内存与流量。
+ */
+private const val COVER_PRELOAD_AHEAD = 8
+/**
+ * 预加载解码尺寸，必须与卡片实际展示尺寸同档**且不小于它**：
+ * Coil 的 memory cache key 不含尺寸，命中后还要过 `isCacheValueValidForSize`，
+ * 缓存位图比请求尺寸小就会被判不可用、重新解码。
+ * 双列走 BiliCoverSize.Small43（@640w_480h），单列走 Large（@960w_540h）。
  */
 private const val COVER_PRELOAD_WIDTH_PX = 640
 private const val COVER_PRELOAD_HEIGHT_PX = 480
+private const val COVER_PRELOAD_LARGE_WIDTH_PX = 960
+private const val COVER_PRELOAD_LARGE_HEIGHT_PX = 540
