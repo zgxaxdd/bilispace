@@ -246,7 +246,15 @@ fun VideoScreen(
         } else {
             ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
-        onDispose { }
+        // **必须在离开组合时复位**。这个 effect 的 key 里有 fullOn，但 VideoScreen
+        // 还有另一条离开路径：外层把 VideoScreen 包在 AnimatedVisibility 里，
+        // 收胶囊/点 × 会让 target 变 null 而**直接 dispose**，此时 fullOn 仍是 true，
+        // 于是 Activity 被留在 SCREEN_ORIENTATION_SENSOR_LANDSCAPE ——
+        // 表现是"退出全屏后主界面还是横屏"。
+        // 上面那段 systemBars 的兄弟 effect 就正确做了 restore，这里原本是漏的。
+        onDispose {
+            act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     BoxWithConstraints(

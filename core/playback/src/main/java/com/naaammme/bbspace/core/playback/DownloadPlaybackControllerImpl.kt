@@ -95,6 +95,16 @@ class DownloadPlaybackControllerImpl @Inject constructor(
             )
             session.value = DownloadPlaybackSession(task = task)
         } catch (c: CancellationException) {
+            // 取消分支原本只是重抛，于是会话**永久停在 isPreparing = true**
+            // （上面那行已经把"准备中"发进 StateFlow 了）。session 由本类持有、
+            // 活得过这次协程取消，所以表现是下载播放页一直转圈，除非再点开一次别的。
+            //
+            // 复位要带两个条件：仍是本次 task、且仍处于 isPreparing。
+            // 不带条件就会引入另一个 bug —— 晚到的取消会把"更新的一次 open"
+            // 刚发布的状态覆盖掉。
+            if (session.value.task == task && session.value.isPreparing) {
+                session.value = DownloadPlaybackSession(task = task, error = "打开已取消")
+            }
             throw c
         } catch (t: Throwable) {
             session.value = DownloadPlaybackSession(

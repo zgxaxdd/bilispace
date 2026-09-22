@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.naaammme.bbspace.core.auth.AuthStore
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
@@ -499,7 +500,13 @@ class VideoViewModel @Inject constructor(
     /** 点赞/取消点赞 */
     fun toggleLike() = withInteraction { state, aid ->
         val target = !(state.userState?.liked ?: false)
-        runCatching { actionRepository.setLike(aid, target) }.fold(
+        // 本文件里包挂起调用的 runCatching 一律用 runCatchingCancellable：
+        // 标准库版本会把 CancellationException 也吞成 Result.failure，于是
+        // "用户退出页面导致请求被取消"会走 onFailure 分支 → 弹一条
+        // "点赞失败/收藏失败"的假错误提示，并在已清理的 ViewModel 上继续写状态；
+        // 而 tripleFallback 那类"失败就补发剩下两个请求"的分支更会在死掉的 scope 上
+        // 继续发请求。取消就该向上传播，不能与真实失败混为一谈。
+        runCatchingCancellable { actionRepository.setLike(aid, target) }.fold(
             onSuccess = { toast ->
                 _interaction.update {
                     it.copy(
@@ -521,7 +528,7 @@ class VideoViewModel @Inject constructor(
             return@withInteraction
         }
         val likedBefore = state.userState?.liked ?: false
-        runCatching { actionRepository.addCoin(aid, multiply, withLike) }.fold(
+        runCatchingCancellable { actionRepository.addCoin(aid, multiply, withLike) }.fold(
             onSuccess = {
                 _interaction.update {
                     it.copy(
@@ -565,8 +572,15 @@ class VideoViewModel @Inject constructor(
         }
         _favSheet.value = FavFolderSheetState(loading = true)
         viewModelScope.launch {
-            val (rid, type) = favRidType()
-            runCatching { favoriteRepository.fetchCreatedFoldersWithState(rid, type) }.fold(
+            // `favRidType()` 对不支持收藏的 biz 会 **throw**，必须留在 runCatching 里面。
+            // 它在 runCatching 之外时，viewModelScope.launch 没有异常处理器 →
+            // 未捕获协程异常 → 直接崩溃。openFavSheet() 入口只挡了"未登录"，
+            // 没挡 aid<=0（对比 submitFav 有 `if (aid <= 0L) return`），
+            // 所以课程/SCG 这类内容点收藏是会走到的。
+            runCatchingCancellable {
+                val (rid, type) = favRidType()
+                favoriteRepository.fetchCreatedFoldersWithState(rid, type)
+            }.fold(
                 onSuccess = { folders ->
                     val favedIds = folders.filter { it.favState == 1 }.map { it.fid }.toSet()
                     _favSheet.value = FavFolderSheetState(
@@ -594,7 +608,7 @@ class VideoViewModel @Inject constructor(
     /** 在收藏面板内新建收藏夹，成功后刷新面板列表 */
     fun createFolderInSheet(title: String, privacy: Int) {
         viewModelScope.launch {
-            runCatching { favoriteRepository.createFolder(title, privacy) }.fold(
+            runCatchingCancellable { favoriteRepository.createFolder(title, privacy) }.fold(
                 onSuccess = { openFavSheet() },
                 onFailure = { error -> emitActionError(error, "新建收藏夹失败") }
             )
@@ -615,7 +629,7 @@ class VideoViewModel @Inject constructor(
         _favSheet.update { it.copy(submitting = true) }
         viewModelScope.launch {
             val (rid, type) = favRidType()
-            runCatching { favoriteRepository.dealFav(rid, type, addIds, delIds) }.fold(
+            runCatchingCancellable { favoriteRepository.dealFav(rid, type, addIds, delIds) }.fold(
                 onSuccess = {
                     val favedNow = sheet.selectedIds.isNotEmpty()
                     val favedBefore = sheet.initialFavedIds.isNotEmpty()
@@ -716,7 +730,7 @@ class VideoViewModel @Inject constructor(
         val done = mutableListOf<String>()
         val failed = mutableListOf<String>()
         if (!(state.userState?.liked ?: false)) {
-            runCatching { actionRepository.setLike(aid, true) }
+            runCatchingCancellable { actionRepository.setLike(aid, true) }
                 .onSuccess {
                     done += "点赞"
                     markTripleResult(like = true, coin = false, fav = false)
@@ -724,7 +738,7 @@ class VideoViewModel @Inject constructor(
                 .onFailure { failed += "点赞" }
         }
         if ((state.userState?.coinCount ?: 0) == 0) {
-            runCatching { actionRepository.addCoin(aid, 1, selectLike = false) }
+            runCatchingCancellable { actionRepository.addCoin(aid, 1, selectLike = false) }
                 .onSuccess {
                     done += "投币"
                     markTripleResult(like = false, coin = true, fav = false)
@@ -732,7 +746,7 @@ class VideoViewModel @Inject constructor(
                 .onFailure { failed += "投币" }
         }
         if (!(state.userState?.faved ?: false)) {
-            runCatching {
+            runCatchingCancellable {
                 val (rid, type) = favRidType()
                 val folders = favoriteRepository.fetchCreatedFoldersWithState(rid, type)
                 val defaultFolderId = folders.firstOrNull()?.fid

@@ -224,7 +224,17 @@ private val PlayerCtrlButtonTextOff = Color.White.copy(alpha = 0.72f)
 // 播放页玻璃：视频节点（TextureView）录进专用背板，控制条采样它做真模糊。
 // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick。
 private val LocalVideoBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
-private val LocalVideoGlassTick = staticCompositionLocalOf { 0 }
+/**
+ * 逐帧 tick 的 **provider**，不是 tick 的值。
+ *
+ * 为什么必须是 `() -> Int`：`staticCompositionLocalOf<Int>` 交出数值时，提供点
+ * （[VideoPlayerPane] 里那句 `provides`）必须在**组合期**读那个 mutableIntStateOf。
+ * 于是播放期间每帧一次组合失效 → 整块播放器面板每秒重组 60 次，
+ * 而 tick 的唯一用途是让 `drawWithContent` 在绘制期强制重录/重采样。
+ * 改成 provider 后读取全部落在绘制期（消费点在 `drawWithContent { tick() }` 里），
+ * 每帧只重绘、不重组。
+ */
+private val LocalVideoGlassTick = staticCompositionLocalOf<() -> Int> { { 0 } }
 
 /**
  * 播放页控件是否采样实时画面做玻璃（设置 → 外观设计「播放页控件模糊」）。
@@ -285,7 +295,9 @@ private fun Modifier.playerControlGlass(
     val refractionDp = (shapeHeightPx / 3.5f).coerceIn(2f, 10f)
     return this
         .drawWithContent {
-            tick
+            // 绘制期读 tick（见 LocalVideoGlassTick 的注释）：组合期读会让整块
+            // 播放器面板在播放期间每秒重组 60 次。
+            tick()
             drawContent()
         }
         .drawBackdrop(
@@ -432,7 +444,11 @@ internal fun VideoPlayerPane(
         val videoBackdrop = rememberLayerBackdrop()
         var videoGlassTick by remember { mutableIntStateOf(0) }
         LaunchedEffect(state.playWhenReady) {
-            while (state.playWhenReady) {
+            // 条件写在 key 上、不写在循环里：`state` 是 effect 启动时捕获的那一份快照，
+            // 循环体内再读 `state.playWhenReady` 读到的永远是当时的值，
+            // 所以 `while (state.playWhenReady)` 实际就是 `while (true)` ——
+            // 留着它只会让人以为循环能自己停下来。真正的终止手段是 key 翻转取消本协程。
+            while (true) {
                 withFrameNanos { }
                 videoGlassTick++
             }
@@ -443,7 +459,7 @@ internal fun VideoPlayerPane(
         val controlsMaterial by viewModel.playerControlsMaterial.collectAsStateWithLifecycle()
         CompositionLocalProvider(
             LocalVideoBackdrop provides videoBackdrop,
-            LocalVideoGlassTick provides videoGlassTick,
+            LocalVideoGlassTick provides { videoGlassTick },
             LocalVideoControlsBlur provides controlsBlur,
             LocalVideoControlsMaterial provides controlsMaterial
         ) {
