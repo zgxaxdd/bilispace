@@ -17,6 +17,8 @@ fun CoverImage(
     coverLarge: Boolean = false,
     coverFourThree: Boolean = false,
     fallbackContent: (@Composable BoxScope.() -> Unit)? = null,
+    /** 解码成功回调（转发给 [BiliAsyncImage]），供封面代表色提取使用。 */
+    onImageLoaded: ((android.graphics.Bitmap) -> Unit)? = null,
     content: (@Composable BoxScope.() -> Unit)? = null
 ) {
     BiliImagePlaceholder(
@@ -33,7 +35,8 @@ fun CoverImage(
                     coverLarge -> BiliImageVariant.CardCoverLarge
                     coverFourThree -> BiliImageVariant.CardCover43
                     else -> BiliImageVariant.CardCover
-                }
+                },
+                onSuccess = onImageLoaded
             )
         } else {
             fallbackContent?.invoke(this)

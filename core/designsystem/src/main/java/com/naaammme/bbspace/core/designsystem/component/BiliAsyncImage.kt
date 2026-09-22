@@ -1,10 +1,12 @@
 package com.naaammme.bbspace.core.designsystem.component
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import coil3.BitmapImage
 import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
@@ -59,13 +61,24 @@ fun BiliAsyncImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     variant: BiliImageVariant = BiliImageVariant.CardCover,
-    contentScale: ContentScale = ContentScale.Crop
+    contentScale: ContentScale = ContentScale.Crop,
+    /**
+     * 解码成功回调，拿到已加载的 [Bitmap]。
+     *
+     * 用途：推荐页卡片的「封面代表色」提取（[com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore]）。
+     * 复用 Coil 已经解码好的位图，**不额外发一次图片请求**——这是上游的实现方式，
+     * 也是这个功能能做到零额外网络/解码开销的原因。
+     */
+    onSuccess: ((Bitmap) -> Unit)? = null
 ) {
     val request = rememberBiliImageRequest(url = url, variant = variant)
     AsyncImage(
         model = request,
         contentDescription = contentDescription,
         modifier = modifier,
-        contentScale = contentScale
+        contentScale = contentScale,
+        onSuccess = onSuccess?.let { callback ->
+            { state -> (state.result.image as? BitmapImage)?.bitmap?.let(callback) }
+        }
     )
 }

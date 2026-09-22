@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.auth.AuthRepository
 import com.naaammme.bbspace.core.settings.AppSettings
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.theme.AnimationSpeed
 import com.naaammme.bbspace.core.designsystem.theme.CornerStyle
 import com.naaammme.bbspace.core.designsystem.theme.FrameRateMode
@@ -217,6 +218,50 @@ class SettingsViewModel @Inject constructor(
         false
     )
 
+    val topProgressiveFade = appSettings.topProgressiveFade.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        true
+    )
+
+    fun updateTopProgressiveFade(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updateTopProgressiveFade(enabled)
+        }
+    }
+
+    /**
+     * 播放页控件模糊开关。播放器侧不直接读本 ViewModel：经 [AppSettings] 的 Flow
+     * 在 VideoScreen 组合期收集后以参数下发（叶子组件保持无 ViewModel 依赖）。
+     */
+    val playerControlsBlur = appSettings.playerControlsBlur.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        true
+    )
+
+    fun updatePlayerControlsBlur(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updatePlayerControlsBlur(enabled)
+        }
+    }
+
+    /**
+     * 播放页控件玻璃材质（磨砂 / 液态），与全局 [ThemeConfig.glassMaterial] 独立。
+     * 播放控件叠在实时视频画面上，液态强折射在大面积动态画面上容易糊，故可单独选。
+     */
+    val playerControlsMaterial = appSettings.playerControlsMaterial.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        GlassMaterial.FROSTED
+    )
+
+    fun updatePlayerControlsMaterial(material: GlassMaterial) {
+        viewModelScope.launch {
+            appSettings.updatePlayerControlsMaterial(material)
+        }
+    }
+
     val fixBottomBar = appSettings.fixBottomBar.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
@@ -316,6 +361,12 @@ class SettingsViewModel @Inject constructor(
     fun updateGlassMaterial(material: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial) {
         viewModelScope.launch {
             appSettings.updateGlassMaterial(material)
+        }
+    }
+
+    fun updateGlassStrength(strength: Float) {
+        viewModelScope.launch {
+            appSettings.updateGlassStrength(strength)
         }
     }
 

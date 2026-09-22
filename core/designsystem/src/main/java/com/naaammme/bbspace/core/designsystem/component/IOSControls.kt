@@ -98,14 +98,22 @@ fun IOSChevron(
         val w = size.width
         val h = size.height
         val midX = if (pointingRight) w * 0.42f else w * 0.58f
-        val top = Offset(midX, h * 0.12f)
-        val mid = Offset(if (pointingRight) w * 0.88f else w * 0.12f, h * 0.5f)
-        val bottom = Offset(midX, h * 0.88f)
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(top.x, top.y)
-            lineTo(mid.x, mid.y)
-            lineTo(bottom.x, bottom.y)
-        }
-        drawPath(path, color = color, style = stroke)
+        val tipX = if (pointingRight) w * 0.88f else w * 0.12f
+        // 两段线代替 Path：chevron 就是两条直线，drawPath 需要先 new 一个 Path
+        // （绘制 lambda 每帧执行一次 → 每帧一次分配）。drawLine 无分配。
+        drawLine(
+            color = color,
+            start = Offset(midX, h * 0.12f),
+            end = Offset(tipX, h * 0.5f),
+            strokeWidth = stroke.width,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(tipX, h * 0.5f),
+            end = Offset(midX, h * 0.88f),
+            strokeWidth = stroke.width,
+            cap = StrokeCap.Round
+        )
     }
 }

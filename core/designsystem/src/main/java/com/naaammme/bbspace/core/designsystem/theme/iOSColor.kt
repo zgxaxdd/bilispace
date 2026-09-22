@@ -27,21 +27,33 @@ import androidx.compose.ui.graphics.Color
  * 只会让纯黑模式下卡片更难分辨）。
  */
 fun iOSColorScheme(darkTheme: Boolean, tint: Color): ColorScheme {
+    // 色相分化：此前 primary / secondary / secondaryContainer / primaryContainer
+    // **全部是同一个 tint**，界面上所有强调元素同色同调 —— 这正是用户反馈的
+    // "颜色平淡、没有活力"的根因：没有第二色彩维度，也没有 tonal 层次。
+    // 现在把 secondary 绕色相环转 210°（≈ 互补偏冷），与粉调主色形成对冲；
+    // tertiary 保留 iOS 系统绿作第三点。用 [tone] 的 hueShift 一步完成，
+    // 不引入新的色板常量，用户换 tint 时 secondary 仍自动跟随。
+    val secondarySeed = tint.tone(hueShift = 210f, saturationScale = 0.90f, value = 0.95f)
+    // 容器色：此前 tint.mix(White, 0.85f) 只留 15% 色料，几乎看不出是"染色容器"。
+    // 收到 0.78，让 primaryContainer 真正读作一块淡彩色底。
+    val tintContainerMix = 0.78f
+
     return if (darkTheme) {
         val brightTint = tint.tone(saturationScale = 0.85f, value = 1f)
+        val secondary = secondarySeed.tone(saturationScale = 0.80f, value = 1f)
         darkColorScheme(
             primary = brightTint,
             onPrimary = Color.Black,
-            primaryContainer = brightTint.mix(IosDarkSurfaceCard, 0.78f),
+            primaryContainer = brightTint.mix(IosDarkSurfaceCard, 0.72f),
             onPrimaryContainer = brightTint,
             inversePrimary = tint,
-            secondary = brightTint,
+            secondary = secondary,
             onSecondary = Color.Black,
-            secondaryContainer = brightTint.mix(IosDarkSurfaceCard, 0.78f),
-            onSecondaryContainer = brightTint,
+            secondaryContainer = secondary.mix(IosDarkSurfaceCard, 0.72f),
+            onSecondaryContainer = secondary,
             tertiary = Color(0xFF30D158),
             onTertiary = Color.Black,
-            tertiaryContainer = Color(0xFF30D158).mix(IosDarkSurfaceCard, 0.78f),
+            tertiaryContainer = Color(0xFF30D158).mix(IosDarkSurfaceCard, 0.72f),
             onTertiaryContainer = Color(0xFF30D158),
             background = IosDarkGroupedBackground,
             onBackground = Color.White,
@@ -69,19 +81,20 @@ fun iOSColorScheme(darkTheme: Boolean, tint: Color): ColorScheme {
             onErrorContainer = Color(0xFFF9DEDC)
         )
     } else {
+        val secondary = secondarySeed.tone(saturationScale = 0.85f, value = 0.62f)
         lightColorScheme(
             primary = tint,
             onPrimary = Color.White,
-            primaryContainer = tint.mix(Color.White, 0.85f),
-            onPrimaryContainer = tint,
+            primaryContainer = tint.mix(Color.White, tintContainerMix),
+            onPrimaryContainer = tint.tone(value = 0.42f),
             inversePrimary = tint.tone(value = 0.80f),
-            secondary = tint,
+            secondary = secondary,
             onSecondary = Color.White,
-            secondaryContainer = tint.mix(Color.White, 0.85f),
-            onSecondaryContainer = tint,
+            secondaryContainer = secondary.mix(Color.White, tintContainerMix),
+            onSecondaryContainer = secondary.tone(value = 0.38f),
             tertiary = Color(0xFF34C759),
             onTertiary = Color.White,
-            tertiaryContainer = Color(0xFF34C759).mix(Color.White, 0.85f),
+            tertiaryContainer = Color(0xFF34C759).mix(Color.White, tintContainerMix),
             onTertiaryContainer = Color(0xFF248A3D),
             background = IosLightGroupedBackground,
             onBackground = Color.Black,

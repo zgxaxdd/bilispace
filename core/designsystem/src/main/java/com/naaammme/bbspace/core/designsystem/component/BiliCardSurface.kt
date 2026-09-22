@@ -7,6 +7,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.MaterialTheme
@@ -35,9 +37,31 @@ fun BiliCardSurface(
     shape: Shape = MaterialTheme.shapes.medium,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    /**
+     * 铺满**整张卡片**的覆盖层槽位（画在内容之上、Surface 之内）。
+     *
+     * 为什么需要它：卡片内容装在 `Column` 里（因为要用 `Modifier.weight`），
+     * 而 `Modifier.matchParentSize()` 是 `BoxScope` 限定修饰符——放在 Column 里
+     * 会被当成真实布局子项。想让某个元素覆盖整卡（例如 OPPO 无缝动画的锚点
+     * 需要"封面 + 简介"整个矩形作为起飞区域），就必须有一个 Box 层的槽位。
+     *
+     * 传 `null` 时零开销：不会多套一层 Box。
+     */
+    fullCardOverlay: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val clippedModifier = modifier.clip(shape)
+    // 只有需要覆盖层时才多套一层 Box，避免给所有卡片白加一层布局节点
+    val body: @Composable () -> Unit = {
+        if (fullCardOverlay != null) {
+            Box {
+                Column(content = content)
+                fullCardOverlay()
+            }
+        } else {
+            Column(content = content)
+        }
+    }
     if (onClick != null || onLongClick != null) {
         val interactionSource = remember { MutableInteractionSource() }
         val isPressed by interactionSource.collectIsPressedAsState()
@@ -69,7 +93,7 @@ fun BiliCardSurface(
                 color = containerColor,
                 contentColor = contentColor
             ) {
-                Column(content = content)
+                body()
             }
         } else {
             Surface(
@@ -81,7 +105,7 @@ fun BiliCardSurface(
                 contentColor = contentColor,
                 interactionSource = interactionSource
             ) {
-                Column(content = content)
+                body()
             }
         }
     } else {
@@ -91,7 +115,7 @@ fun BiliCardSurface(
             color = containerColor,
             contentColor = contentColor
         ) {
-            Column(content = content)
+            body()
         }
     }
 }
