@@ -285,10 +285,12 @@ fun HomeVideoPage(
         // 首屏不足一屏时自动补一页（额度上限在 HomeViewModel）
         autoFillWhenNotScrollable = true,
         contentPadding = PaddingValues(
-            start = 4.dp,
+            // 与 AdaptiveMediaGrid 的默认边距保持一致（显式传参覆盖了默认值，
+            // 两处不同步就会出现"首页贴边、排行页留白"这种不一致）
+            start = 10.dp,
             top = topContentPadding,
-            end = 4.dp,
-            bottom = 4.dp
+            end = 10.dp,
+            bottom = 12.dp
         ),
         errorMessage = errorMessage,
         onRetry = onRetry,

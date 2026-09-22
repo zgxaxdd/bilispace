@@ -72,14 +72,21 @@ fun <T> AdaptiveMediaGrid(
     autoFillWhenNotScrollable: Boolean = false,
     columns: Int = rememberAdaptiveGridColumnCount(),
     loadingPlaceholderCount: Int = 10,
-    horizontalSpacing: Dp = 6.dp,
-    verticalSpacing: Dp = 6.dp,
+    // 栅格间距：6 → 10/12（2026-09-22 真机截图对比）。
+    // 6dp 是"能塞下就塞下"的密度取向，整屏看过去卡片彼此贴太近、封面色彩直接相邻，
+    // 读作拥挤；现代信息流的呼吸感来自**行距大于列距**（横向 10dp 保证双列不散、
+    // 纵向 12dp 让每张卡与下一张切开）。这两个值是全局默认，排行/搜索/动态页同享，
+    // 所以改这里等于一次性统一全站列表节奏。
+    horizontalSpacing: Dp = 10.dp,
+    verticalSpacing: Dp = 12.dp,
     flingBehavior: FlingBehavior? = null,
     contentPadding: PaddingValues = PaddingValues(
-        start = 4.dp,
+        // 4 → 10/12：屏幕边距必须**大于**列间距（10dp），否则左右两列会被读成
+        // "贴边溢出"，而不是"在页边距里排布"。底部留 12dp 给最后一行收口。
+        start = 10.dp,
         top = 0.dp,
-        end = 4.dp,
-        bottom = 4.dp
+        end = 10.dp,
+        bottom = 12.dp
     ),
     key: (index: Int, item: T) -> Any = { index, _ -> index },
     contentType: (index: Int, item: T) -> Any? = { _, _ -> null },

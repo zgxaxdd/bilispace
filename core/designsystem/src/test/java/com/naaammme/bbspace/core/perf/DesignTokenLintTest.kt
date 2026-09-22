@@ -201,7 +201,12 @@ class DesignTokenLintTest {
 
     @Test
     fun twelveDpLiterals_isFrozen() {
-        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 143, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
+        // **上限 143 → 146 的变更记录（2026-09-22，T4 UI 收口）**：
+        // 一次性 +3，全部来自同一处有意的版式调整 —— 把信息流的行距与页边距
+        // 从"能塞就塞"的 6/4dp 改成有呼吸感的 10/12dp（AdaptiveMediaGrid 的默认值
+        // 与 HomeVideoPage 的显式 contentPadding）。这是**故意增加**的 12.dp 用量，
+        // 不是漂移。理由与真机截图对比记录在 BiliRadius.card 与 AdaptiveMediaGrid 的注释里。
+        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 146, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
     }
 
     @Test
@@ -212,8 +217,12 @@ class DesignTokenLintTest {
     /** 6.dp 与 10.dp **没有对应 token**，所以它们的上限只是"别继续长"。 */
     @Test
     fun sixAndTenDpLiterals_isFrozen() {
+        // 6.dp 反而降了（栅格列距 6 → 10），上限保持不动，这就是棘轮该有的方向性。
         assertRatchet(actual = sumOf("""\b6\.dp\b"""), limit = 111, what = "`6.dp` 字面量", why = "BiliSpacing 没有 6 这一档，先补标度再谈收口。")
-        assertRatchet(actual = sumOf("""\b10\.dp\b"""), limit = 80, what = "`10.dp` 字面量", why = "BiliSpacing 没有 10 这一档，同上。")
+        // **上限 80 → 85 的变更记录（2026-09-22，T4 UI 收口）**：+5 全部来自那次
+        // 版式调整（列距与屏幕边距改用 10dp）。仍是"没有 token 的高频值"，
+        // 等 T4.1 的语义归类结论出来再决定要不要给 10 补一档 BiliSpacing。
+        assertRatchet(actual = sumOf("""\b10\.dp\b"""), limit = 85, what = "`10.dp` 字面量", why = "BiliSpacing 没有 10 这一档，同上。")
     }
 
     /**

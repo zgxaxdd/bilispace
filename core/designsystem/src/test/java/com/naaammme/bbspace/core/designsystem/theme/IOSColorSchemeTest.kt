@@ -83,8 +83,12 @@ class IOSColorSchemeTest {
 
     @Test
     fun `BiliRadius card 与 player 同值`() {
+        // 第 86 行是**不变量**：无缝 morph 两端圆角同值才不跳，这条永远不能松。
         assertEquals(BiliRadius.card, BiliRadius.player)
-        assertEquals(16.dp, BiliRadius.card)
+        // 第 89 行是**快照**：把当前取值钉住，让改动必须是自觉的。
+        // 16 → 20（2026-09-22）：真机截图对比后判定 16dp 在 density 560 下弧长偏短、
+        // 整屏仍偏"方"，与 Dock 32 / 弹层 28 也拉不出半径阶梯。改值请连同这条一起改。
+        assertEquals(20.dp, BiliRadius.card)
     }
 
     // ===== iOS 排版阶梯 =====

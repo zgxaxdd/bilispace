@@ -78,14 +78,23 @@ fun resolveVideoCardAmbientDrawSpec(
         coverTint = coverTint,
     )
 
+    // ── 染色强度：整屏观感的调节旋钮（2026-09-22 真机截图对比后下调）──────────
+    // 原值（浅色 0.34 透明 / 0.75 混色 / 0.38 光晕）在双列信息流上会让**每张卡的
+    // 信息区呈现一块高饱和色带**：米、蓝、绿、黄相邻排布，整屏读作"拼色块"，
+    // 是当前界面最显旧的一处。取色这个功能本身要留（它让卡片与封面同源），
+    // 但应当是一层**淡染**而不是一块色板。
+    // 下调后信息区仍带封面色相，但不再与邻卡争夺注意力；因为底色更浅，
+    // 正文与次要文字的对比度也随之上抬（对 T4.2 的次要文字偏弱是正向的）。
+    // 单测钉的是关系（半透明、光晕>0、深色更强、data saver 更不透明），不钉数值，
+    // 所以这次调参不会让测试假绿。
     val glassTransparency = if (isDarkTheme) {
-        if (isDataSaverActive) 0.65f else 0.38f
+        if (isDataSaverActive) 0.65f else 0.28f
     } else {
-        if (isDataSaverActive) 0.70f else 0.34f
+        if (isDataSaverActive) 0.70f else 0.20f
     }
 
     val baseColor = if (hasValidCoverTint) {
-        val blendFraction = if (isDarkTheme) 0.85f else 0.75f
+        val blendFraction = if (isDarkTheme) 0.72f else 0.58f
         lerp(defaultContainerColor, coverTint!!, blendFraction).copy(alpha = glassTransparency)
     } else {
         // 无壁纸且无封面：保持中性玻璃表面，不要沿用上一张封面的颜色
@@ -93,14 +102,14 @@ fun resolveVideoCardAmbientDrawSpec(
     }
 
     val glowAlpha = if (hasValidCoverTint) {
-        if (isDarkTheme) 0.48f else 0.38f
+        if (isDarkTheme) 0.34f else 0.22f
     } else {
         0f
     }
 
     val finalBorderColor = if (hasValidCoverTint) {
         val borderBlendFraction = if (isDarkTheme) 0.50f else 0.40f
-        val borderAlpha = if (isDarkTheme) 0.30f else 0.45f
+        val borderAlpha = if (isDarkTheme) 0.24f else 0.32f
         val baseBorder = Color.White.copy(alpha = borderAlpha)
         lerp(baseBorder, coverTint!!, borderBlendFraction).copy(alpha = borderAlpha)
     } else {
