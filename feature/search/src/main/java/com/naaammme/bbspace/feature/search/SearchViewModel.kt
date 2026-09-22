@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.search
+package com.naaammme.bbspace.feature.search
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -284,6 +284,16 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun clearSearchState() {
+        // 作废所有在途 search()/loadMore()。
+        //
+        // 为什么必须在这里推进：searchGen 是唯一的"过期结果甄别"机制，而
+        // consumeBack()（返回键）与 submitSearch() 的新关键词分支都会调本函数。
+        // 原先不推进 gen，于是这条路径会漏：
+        //   输入关键词 → 点搜索（请求在途）→ 立刻按返回 → UI 已清空并回到历史页
+        //   → 在途请求返回，gen 仍相等 → keyword/_authors/_videos/filters 全被写回
+        //   → 用户看到"已经退出的搜索页自己跳出了上一次的结果"。
+        // submitSearch 里因为会重新赋值 gen 而侥幸掩盖，back 路径暴露得最明显。
+        searchGen++
         keyword = ""
         next = ""
         order = SearchOrder.DEFAULT
