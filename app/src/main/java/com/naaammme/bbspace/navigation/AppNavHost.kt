@@ -5,40 +5,32 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,20 +38,19 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -73,10 +64,17 @@ import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRa
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
-import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.component.topSolidProgressiveFade
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.designsystem.glass.GlassSourceRefresher
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassRefresher
+import com.naaammme.bbspace.core.designsystem.glass.LocalLiquidBackdrop
 import com.naaammme.bbspace.core.designsystem.glass.glassEffect
 import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import com.naaammme.bbspace.core.designsystem.glass.rememberChromeBackdropSource
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
@@ -147,15 +145,20 @@ import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.playback.PlaybackHost
 import com.naaammme.bbspace.playback.PlaybackHostMode
 import com.naaammme.bbspace.playback.PlaybackHostViewModel
-import com.naaammme.bbspace.playback.capsule.CapsuleIndicator
 import com.naaammme.bbspace.playback.capsule.CapsuleIndicatorState
-import com.naaammme.bbspace.playback.capsule.DockGeometry
-import com.naaammme.bbspace.playback.capsule.LocalDockGeometry
+import com.naaammme.bbspace.playback.capsule.DockNavInnerPadding
+import com.naaammme.bbspace.playback.capsule.DockNavItemWidth
+import com.naaammme.bbspace.playback.capsule.LinkedBottomDock
+import com.naaammme.bbspace.playback.capsule.DockVerticalPadding
+import com.naaammme.bbspace.playback.capsule.LinkedDockState
+import com.naaammme.bbspace.playback.capsule.LinkedNowPlayingRow
 
 private const val MAIN_ROUTE = "main"
-private val topLevelNavEdgePadding = 16.dp
-private val topLevelNavGap = 8.dp
+private val topLevelNavEdgePadding = 22.dp
 private val topLevelNavScrollThreshold = 72.dp
+
+// 联动底栏（官方规格）：滚动切态阈值 24dp（Dock 内边距见 LinkedBottomDock 的 Dock*Padding）
+private val linkedDockScrollThreshold = 24.dp
 @Composable
 fun AppNavHost(
     themeConfig: ThemeConfig = ThemeConfig(),
@@ -410,7 +413,9 @@ fun AppNavHost(
                     onNavigateToMsgFeed = { rootNavController.navigateToMsgFeed() },
                     onNavigateToImConversation = { item ->
                         rootNavController.navigateToImConversation(item)
-                    }
+                    },
+                    // 详情页存活 → 小横条只隐藏不卸载（保留无缝返回动画的锚点）
+                    detailAlive = playbackHostViewModel.videoDetailAlive
                 )
             }
 
@@ -579,35 +584,127 @@ private fun MainTabsScaffold(
     onNavigateToDynamicDetail: (String) -> Unit,
     onNavigateToListenDetail: (Long, Int, Long, String, String, String) -> Unit,
     onNavigateToMsgFeed: () -> Unit,
-    onNavigateToImConversation: (ImSessionItem) -> Unit
+    onNavigateToImConversation: (ImSessionItem) -> Unit,
+    detailAlive: Boolean = false
 ) {
     val saveableStateHolder = rememberSaveableStateHolder()
     val userViewModel: UserViewModel = hiltViewModel()
     val userState by userViewModel.uiState.collectAsStateWithLifecycle()
-    val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
+    val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val useStartAlignedBottomToolbar = windowSizeClass.isWidthAtLeastBreakpoint(600)
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val fixBottomBar by settingsViewModel.fixBottomBar.collectAsStateWithLifecycle()
-    val navVisibilityController = rememberTopLevelNavVisibilityController(fixBottomBar)
+    val topProgressiveFade by settingsViewModel.topProgressiveFade.collectAsStateWithLifecycle()
+    // 播放会话激活期间固定 Dock：下滑只驱动胶囊融合，不再与 Dock 自动隐藏抢戏
+    val navVisibilityController = rememberTopLevelNavVisibilityController(fixBottomBar || capsuleState.active)
+    // 详情页存活期间，小横条只**隐藏**、不卸载：它是无缝返回动画的锚点宿主。
+    // 卸载会让锚点 View detach，系统返回时取不到锚点 → 退回 alpha 交叉淡出
+    // （实测日志 `anchor released (wasAttached=false)` + `do alpha anim`）。
+    // 值由 AppNavHost 的 composable 作用域传入（见 MainTabsScaffold 的 detailAlive 参数）。
     val anim = LocalAnimations.current
 
-    // 玻璃背景源：页面内容（含各 Tab 页）作为 hazeSource，Dock / 胶囊在其上采样
+    // 玻璃背景源：页面内容（含各 Tab 页）作为 hazeSource，Dock / 胶囊在其上采样。
     val glassState = remember { HazeState() }
     val glassOn = isGlassActive(glassState)
-    // 底栏几何快照：供胶囊融合动画计算落点（终版方案 4.3）
-    var dockGeometry by remember { mutableStateOf<DockGeometry?>(null) }
+    // 官方液态玻璃（BiliPai 同款）：miuix ChromeBackdropSource 录制主 Tab 内容，
+    // Dock / 胶囊 drawBackdrop 采样（blur + 边缘折射 + vibrancy + 高光）。
+    val backdropSource = rememberChromeBackdropSource()
+    val liquidGlassOn = LocalGlassConfig.current.material == GlassMaterial.LIQUID && glassOn
+    // 玻璃源重录触发器：录制节点只在自身重绘时重录，而信息流列表滚动不令其重绘，
+    // 滚动衔接处玻璃会采样到上一帧（骨架屏/新卡片更替最明显；FM/直播页内容平稳
+    // 故不可见）。对拖拽+惯性逐帧计 tick：Crossfade 的 drawWithContent 读它强制
+    // 源重录；Dock/胶囊消费端经 LocalGlassRefresher 读同一 tick 强制重采样。
+    val glassRefresher = remember { GlassSourceRefresher() }
+    // 联动底栏（任务 1）：滚动只负责**判定态**，不逐帧驱动进度。官方策略是
+    // 24dp 累积阈值 + 方向反转清零 + 仅首页生效，切态后由 updateTransition 一次
+    // 成型（280ms morph tween）——逐帧 snapTo 的旧耦合方案正是"跟手但生硬"的原因。
+    val dockThresholdPx = with(LocalDensity.current) { linkedDockScrollThreshold.toPx() }
+    val dockState = remember(dockThresholdPx) { LinkedDockState(dockThresholdPx) }
+    // nestedScroll 的 connection 是 remember{} 出来的普通对象，直接闭包读组合期变量
+    // 会永远拿到首帧值，故这三个输入走 rememberUpdatedState。
+    val isHomeTabState = rememberUpdatedState(currentTab == TopLevelRoute.HOME)
+    val hasAudioState = rememberUpdatedState(capsuleState.active)
+    val chromeScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput) dockState.onScrollStarted()
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (consumed.y == 0f && available.y == 0f) return Offset.Zero
+                glassRefresher.tick()
+                if (!isHomeTabState.value) {
+                    dockState.clearAccumulation()
+                    return Offset.Zero
+                }
+                dockState.onScrollDelta(
+                    // 符号约定：官方喂给 accumulator 的是 `LocalHomeScrollOffset` 的**偏移增量**
+                    // （`currentOffset - scrollDeltaY`），BiliPai 的全局偏移与 BBSpace 相反——
+                    // 下滑偏移增大为正。nestedScroll 给的 `consumed/available` 是**滚轮增量**：
+                    // 手指上滑（内容向下翻、导航收起）为负。直接喂进去会整体反向
+                    // （上滑反而展开、下滑反而合并），故取负对齐官方「上滑收起 / 下滑展开」。
+                    delta = -(if (consumed.y != 0f) consumed.y else available.y),
+                    hasAudio = hasAudioState.value,
+                    // 到顶仍继续下拉 = 列表吃不下这段负增量（官方 `offset <= 0 && delta < 0`）
+                    atTopPullDown = source == NestedScrollSource.UserInput &&
+                        consumed.y == 0f &&
+                        available.y < 0f
+                )
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                dockState.onScrollStopped()
+                return Velocity.Zero
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .nestedScroll(navVisibilityController.connection)
+            .nestedScroll(glassRefresher.nestedScrollConnection)
+            .nestedScroll(chromeScrollConnection)
     ) {
         // A1：主 Tab 内容切换 Crossfade（200ms Standard）。各 Tab 状态仍由
         // rememberSaveableStateHolder 保留，过渡期间新旧页面短暂并存。
         Crossfade(
             targetState = currentTab,
-            modifier = if (glassOn) Modifier.hazeSource(glassState) else Modifier,
+            modifier = Modifier
+                .drawWithContent {
+                    // 读滚动 tick：绘制期读状态，滚动帧触发本节点重绘（重录玻璃源）
+                    glassRefresher.frame
+                    drawContent()
+                }
+                .then(if (liquidGlassOn) backdropSource.modifier else Modifier)
+                .then(if (glassOn) Modifier.hazeSource(glassState) else Modifier)
+                // 页面底色必须在录制链**内**：双列卡片文字区无底色（透明），底色若画在
+                // 外层 Box，背板里文字区就是空像素，玻璃采样后渲染成黑色（封面不透明
+                // 所以正常——这正是"图片正常、简介发黑"的根因）。
+                .background(MaterialTheme.colorScheme.background)
+                // 顶部渐进消隐（同步 BiliPai 上游 2d987c4）：内容滚入顶栏时按 Telegram
+                // 5 阶非线性 alpha 阶梯融进底色，消除线性渐变的马赫带切面感。
+                //
+                // **玻璃顶栏生效时不再叠这一层**：顶栏玻璃自身就提供"内容在它下方消隐"
+                // 的观感，再压一层不透明纯色，等于在内容上方放一块 132dp 高的白板
+                // （浅色主题底色近白，实测白带下沿到 y=462px，比顶栏本体还高）——
+                // 用户反馈的"白色遮罩好丑"就是它。玻璃链路里这一层还会被录进背板，
+                // 让顶栏采样到一片纯色而不是真实内容。
+                .topSolidProgressiveFade(
+                    surfaceColor = MaterialTheme.colorScheme.background,
+                    fadeHeight = 96.dp,
+                    enabled = topProgressiveFade && !glassOn,
+                    // 非玻璃档也留一点透气：顶栏自身底色已提供不透明区，
+                    // 遮罩只需要负责"接缝处的过渡"，不需要自己变成一块实心色板。
+                    peakAlpha = 0.85f
+                ),
             animationSpec = tween(durationMillis = anim.medium, easing = anim.standard),
             label = "mainTabCrossfade"
         ) { tab ->
@@ -646,40 +743,44 @@ private fun MainTabsScaffold(
             }
         }
 
-        // 悬浮播放胶囊：内容层之后、底栏之前（z 序低于底栏，方案 2.8）
+        // 悬浮播放胶囊 + 悬浮底栏：内容层之后（z 序：胶囊 0.5 < 底栏 1）。
+        //
+        // 修复：LocalGlassHazeState 必须同时覆盖底栏。此前 Provider 只包住胶囊，
+        // 而 TopLevelFloatingNavigation 在其作用域之外 —— 底栏内
+        // `LocalGlassHazeState.current` 读到 null，导致 isGlassActive(null)=false、
+        // dockColor 走不透明分支、glassEffect(state=null) 首行即 return。
+        // 结果：底栏玻璃完全不生效（本轮"没效果"的直接原因）。
         CompositionLocalProvider(
             LocalGlassHazeState provides glassState,
-            LocalDockGeometry provides dockGeometry
+            LocalLiquidBackdrop provides backdropSource.backdrop,
+            LocalGlassRefresher provides glassRefresher
         ) {
-            CapsuleIndicator(
-                capsuleState = capsuleState,
-                onOpen = onCapsuleOpen,
-                onTogglePlay = onCapsuleTogglePlay,
+            TopLevelFloatingNavigation(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 92.dp)
-                    .zIndex(0.5f)
+                    .align(
+                        if (useStartAlignedBottomToolbar) Alignment.BottomStart else Alignment.BottomCenter
+                    )
+                    // Dock 自带官方 12/8dp 内边距，这里只在平板左对齐工具栏时留启动侧边距
+                    .then(
+                        if (useStartAlignedBottomToolbar) {
+                            Modifier.padding(start = topLevelNavEdgePadding)
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .zIndex(1f),
+                currentTab = currentTab,
+                dockState = dockState,
+                visibilityController = navVisibilityController,
+                capsuleState = capsuleState,
+                onTabChange = onTabChange,
+                onCapsuleOpen = onCapsuleOpen,
+                onCapsuleTogglePlay = onCapsuleTogglePlay,
+                onNavigateToSearch = onNavigateToSearch,
+                onOcclusionChanged = onBottomNavOcclusionChanged,
+                detailAlive = detailAlive
             )
         }
-
-        TopLevelFloatingNavigation(
-            modifier = Modifier
-                .align(
-                    if (useStartAlignedBottomToolbar) Alignment.BottomStart else Alignment.BottomCenter
-                )
-                .padding(
-                    start = if (useStartAlignedBottomToolbar) topLevelNavEdgePadding else 0.dp,
-                    bottom = topLevelNavEdgePadding
-                )
-                .zIndex(1f),
-            currentTab = currentTab,
-            visibilityController = navVisibilityController,
-            capsuleState = capsuleState,
-            onGeometryChanged = { dockGeometry = it },
-            onTabChange = onTabChange,
-            onNavigateToSearch = onNavigateToSearch,
-            onOcclusionChanged = onBottomNavOcclusionChanged
-        )
     }
 }
 
@@ -687,108 +788,84 @@ private fun MainTabsScaffold(
 private fun TopLevelFloatingNavigation(
     modifier: Modifier = Modifier,
     currentTab: TopLevelRoute,
+    dockState: LinkedDockState,
     visibilityController: TopLevelNavVisibilityController,
     capsuleState: CapsuleIndicatorState,
-    onGeometryChanged: (DockGeometry?) -> Unit,
     onTabChange: (TopLevelRoute) -> Unit,
+    onCapsuleOpen: () -> Unit,
+    onCapsuleTogglePlay: () -> Unit,
     onNavigateToSearch: () -> Unit,
-    onOcclusionChanged: (Float) -> Unit = {}
+    onOcclusionChanged: (Float) -> Unit = {},
+    detailAlive: Boolean = false
 ) {
     val isIOS = LocalUiStyle.current == UiStyle.IOS
-    val glassState = LocalGlassHazeState.current
-    val glassOn = isGlassActive(glassState)
-    // 底栏容器色与圆角提前计算：onGloballyPositioned 回调（非组合上下文）只读捕获值
-    val dockCornerRadiusPx = with(LocalDensity.current) { BiliRadius.dock.toPx() }
-    val dockColor = when {
-        // 玻璃生效：Haze 染色接管，容器底透明
-        glassOn -> Color.Transparent
-        isIOS -> {
-            val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-            if (dark) {
-                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.90f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.92f)
-            }
-        }
-        else -> MaterialTheme.colorScheme.surfaceContainer
-    }
-    val toolbarShape = if (isIOS) {
-        // iOS：Dock 圆角刻意由 32dp（extraLarge@ROUNDED）收紧至 28dp（方案 2.5）
-        RoundedCornerShape(BiliRadius.dock)
-    } else {
-        MaterialTheme.shapes.extraLarge
-    }
     val anim = LocalAnimations.current
-    val dockDeformPx = with(LocalDensity.current) { 2.dp.toPx() }
-    val edgePaddingPx = with(LocalDensity.current) { topLevelNavEdgePadding.toPx() }
+    val dockVerticalPaddingPx = with(LocalDensity.current) { DockVerticalPadding.toPx() }
     var hiddenDistancePx by remember { mutableFloatStateOf(0f) }
     val animatedOffsetPx by animateFloatAsState(
-        targetValue = if (visibilityController.hidden) hiddenDistancePx + edgePaddingPx else 0f,
+        targetValue = if (visibilityController.hidden) hiddenDistancePx else 0f,
         animationSpec = tween(durationMillis = anim.medium, easing = anim.standard),
         label = "top level nav offset"
     )
-    val animatedModifier = modifier
-        .onSizeChanged { size ->
-            hiddenDistancePx = size.height.toFloat()
-        }
-        // 实测悬浮导航栏遮挡屏幕的比例，供无缝动画 BUNDLE_LIST_COVER 使用。
-        // 遮挡高度就是该悬浮栏自身高度（隐藏动画只是 graphicsLayer 平移，布局位置不变），
-        // 因此这里读到的是常驻遮挡区，正合返回动画末端做渐隐所需。
-        .onGloballyPositioned { coords ->
-            val windowHeight = coords.parentLayoutCoordinates
-                ?.size?.height ?: return@onGloballyPositioned
-            if (windowHeight <= 0) return@onGloballyPositioned
-            onOcclusionChanged(
-                (coords.size.height.toFloat() / windowHeight).coerceIn(0f, 1f)
-            )
-            // 终版方案 4.3：追加底栏几何采集（不动 onOcclusionChanged 逻辑）
-            val pos = coords.positionInParent()
-            onGeometryChanged(
-                DockGeometry(
-                    leftPx = pos.x,
-                    topPx = pos.y,
-                    widthPx = coords.size.width.toFloat(),
-                    heightPx = coords.size.height.toFloat(),
-                    cornerRadiusPx = dockCornerRadiusPx,
-                    containerColor = dockColor,
-                    visible = !visibilityController.hidden
-                )
+    // 内容槽位：官方以 `nowPlayingContent != null` 作为 hasAudio，无会话时整个
+    // 横条子节点不参与组合（也就不会有零宽 Surface 采样）。
+    val nowPlayingContent: (@Composable (Modifier, Float, Boolean) -> Unit)? = if (capsuleState.active) {
+        { contentModifier, merge, layoutStable ->
+            LinkedNowPlayingRow(
+                capsuleState = capsuleState,
+                merge = merge,
+                layoutStable = layoutStable,
+                onOpen = onCapsuleOpen,
+                onTogglePlay = onCapsuleTogglePlay,
+                modifier = contentModifier
             )
         }
-        .graphicsLayer {
-            // 动画值在图层块内延迟读取：隐藏/显示过渡每帧只更新图层属性，
-            // 不按帧重组调用方（此前组合期读值 → 每个滚动 tick 都重组一次）
-            // 底栏形变（终版方案 4.4）：胶囊融合接触瞬间 scaleY 微凸 + 上浮 2dp，
-            // 独立维度不干扰滚动隐藏的 translationY。
-            val p = capsuleState.sinkAnim.value
-            val deform = if (p < 0.6f) p / 0.6f else ((1f - p) / 0.4f).coerceAtLeast(0f)
-            translationY = animatedOffsetPx - dockDeformPx * deform
-            scaleY = 1f + deform * 0.02f
-        }
-    val tabs: @Composable () -> Unit = {
-        if (isIOS) {
-            // iOS：Segmented 胶囊滑块 + 阻尼回弹（方案 3.2 #1，对标 BiliPai BottomBar）
-            val entries = TopLevelRoute.entries
-            val selectedIndex = entries.indexOf(currentTab).coerceAtLeast(0)
-            val itemSize = 48.dp
-            Box {
-                val pillX by animateDpAsState(
-                    targetValue = itemSize * selectedIndex,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    ),
-                    label = "dockPillX"
+    } else {
+        null
+    }
+    val firstTab = TopLevelRoute.entries.first()
+
+    LinkedBottomDock(
+        dockState = dockState,
+        isHomeTab = currentTab == TopLevelRoute.HOME,
+        searchEnabled = true,
+        firstItemIcon = firstTab.icon,
+        firstItemLabel = firstTab.label,
+        navigationItemCount = TopLevelRoute.entries.size,
+        onSearchClick = onNavigateToSearch,
+        isScrolling = visibilityController.hidden,
+        modifier = modifier
+            .onSizeChanged { hiddenDistancePx = it.height.toFloat() }
+            // 实测悬浮导航栏遮挡屏幕的比例，供无缝动画 BUNDLE_LIST_COVER 使用。
+            // 遮挡高度就是 chrome 自身那一段（外层尺寸另含 Dock 的上下内边距）；
+            // 隐藏动画只是 graphicsLayer 平移，布局位置不变，因此常驻遮挡区恒定。
+            .onGloballyPositioned { coords ->
+                val windowHeight = coords.parentLayoutCoordinates
+                    ?.size?.height ?: return@onGloballyPositioned
+                if (windowHeight <= 0) return@onGloballyPositioned
+                val chromeHeightPx = (coords.size.height - dockVerticalPaddingPx * 2f).coerceAtLeast(0f)
+                onOcclusionChanged(
+                    (chromeHeightPx / windowHeight).coerceIn(0f, 1f)
                 )
-                Box(
-                    modifier = Modifier
-                        .offset(x = pillX + 4.dp)
-                        .padding(4.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                )
-                Row(modifier = Modifier.padding(4.dp)) {
+            }
+            .graphicsLayer {
+                // 动画值在图层块内延迟读取：隐藏/显示过渡每帧只更新图层属性，
+                // 不按帧重组调用方（组合期读值 → 每个滚动 tick 都重组一次）
+                translationY = animatedOffsetPx
+            },
+        navigationContent = {
+            if (isIOS) {
+                // iOS 分段导航：**静态选中胶囊**，不再用滑动的"圈圈"指示器。
+                //
+                // 为什么去掉滑动指示器：它需要"指示器几何"与"图标几何"两套坐标严丝合缝，
+                // 稍有偏差就不同心（此前 offset 与 padding 叠加导致每格错位 4dp），
+                // 且切换时的位移/回弹在底栏这个尺度上读作"抖一下"。它带来的信息量
+                // （当前在哪个 Tab）完全可以由**选中项自身的底色 + 更重的字重**表达，
+                // 不需要一个独立移动的图层。去掉后：零错位可能、零跳动、层级反而更清楚。
+                val entries = TopLevelRoute.entries
+                val itemSize = DockNavItemWidth
+                val innerPad = DockNavInnerPadding
+                Row(modifier = Modifier.padding(innerPad)) {
                     entries.forEach { tab ->
                         val selected = tab == currentTab
                         Box(
@@ -800,92 +877,56 @@ private fun TopLevelFloatingNavigation(
                                 ) { onTabChange(tab) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = tab.label,
-                                tint = if (selected) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
+                            // 选中底色：与 Dock 同语汇的大圆角胶囊，只覆盖图标本体
+                            // （inset 4dp），不占满整格，视觉上更轻。
+                            Box(
+                                modifier = Modifier
+                                    .size(itemSize - innerPad * 2)
+                                    .clip(RoundedCornerShape(BiliRadius.dockChip))
+                                    .background(
+                                        if (selected) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = tab.label,
+                                    tint = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
                         }
                     }
                 }
-            }
-        } else {
-            TopLevelRoute.entries.forEach { tab ->
-                TopLevelFloatingNavigationItem(
-                    tab = tab,
-                    selected = currentTab == tab,
-                    onClick = { onTabChange(tab) }
-                )
-            }
-        }
-    }
-    val searchFab: @Composable () -> Unit = {
-        FloatingActionButton(
-            onClick = onNavigateToSearch,
-            containerColor = if (isIOS) {
-                MaterialTheme.colorScheme.primary
             } else {
-                MaterialTheme.colorScheme.tertiaryContainer
-            },
-            contentColor = if (isIOS) {
-                MaterialTheme.colorScheme.onPrimary
-            } else {
-                MaterialTheme.colorScheme.onTertiaryContainer
-            },
-            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "搜索"
-            )
-        }
-    }
-
-    Row(
-        modifier = animatedModifier,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        val dockModifier = when {
-            isIOS && glassOn -> Modifier.glassEffect(
-                state = glassState,
-                surfaceType = GlassSurfaceType.BOTTOM_BAR,
-                shape = toolbarShape,
-                isScrolling = visibilityController.hidden
-            )
-            isIOS -> {
-                val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                val borderColor = if (dark) {
-                    Color.White.copy(alpha = 0.10f)
-                } else {
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TopLevelRoute.entries.forEach { tab ->
+                        TopLevelFloatingNavigationItem(
+                            tab = tab,
+                            selected = currentTab == tab,
+                            onClick = { onTabChange(tab) }
+                        )
+                    }
                 }
-                Modifier
-                    .shadow(
-                        elevation = 3.dp,
-                        shape = toolbarShape,
-                        clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.08f),
-                        spotColor = Color.Black.copy(alpha = 0.30f)
-                    )
-                    .border(1.dp, borderColor, toolbarShape)
             }
-            else -> Modifier
-        }
-        Surface(
-            modifier = dockModifier,
-            shape = toolbarShape,
-            color = dockColor,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), content = { tabs() })
-        }
-        Spacer(modifier = Modifier.width(topLevelNavGap))
-        searchFab()
-    }
+        },
+        nowPlayingContent = nowPlayingContent,
+        // 小横条**全程保持渲染**（详情页打开期间也不隐藏）。
+        //
+        // 为什么不能隐藏：系统 morph 的是锚点这块 View 的**实时像素**。锚点是小横条
+        // 内一个零绘制透明 View，一旦小横条内容被 alpha 隐藏，系统在返回动画里就取到
+        // 一块空 View——表现为"缩回途中是黑的，然后内容闪一下、跳一下"。
+        // 打开方向没这个问题，因为那时锚点被 SeamlessCardOpener 用封面位图装饰过。
+        // 详情页是全屏不透明 Activity，小横条在其背后本来看不见，保持渲染零副作用。
+        nowPlayingVisible = true
+    )
 }
 
 @Composable

@@ -1,6 +1,5 @@
 package com.naaammme.bbspace.playback.capsule
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.mutableStateOf
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
@@ -9,14 +8,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 悬浮播放胶囊的进程级状态机（方案 2.3）。两态：Hidden / Active。
+ * 播放会话（联动底栏小横条内容源）的进程级状态机。两态：Hidden / Active。
  *
- * 胶囊是"回程入口 + 位置指示"，**不持有 player、不创建 PlayerView、不触发网络**
- * ——只读会话与引擎的 StateFlow（0.8 节），因此不存在旧小窗的 PlayerView 抢绑
- * 竞态，详情页收起动画期间可立即出现。
+ * 只读会话与引擎的 StateFlow，**不持有 player、不创建 PlayerView、不触发网络**，
+ * 因此不存在旧小窗的 PlayerView 抢绑竞态，详情页收起动画期间可立即出现。
+ *
+ * 合并进度不在这里——那属于视图层：由 `LinkedDockPhase` 经 `updateTransition`
+ * 驱动（见 [LinkedBottomDock]），本类型只提供 `active`（= 官方 `hasAudio`）与内容快照。
  *
  * 与被删除的 `minimize()` 分支语义等价（方案 0.7 推论）：小窗启用时播放本来就
- * 不停，激活胶囊后播放同样继续；直播退出不进胶囊（走原有 close 路径）。
+ * 不停，激活横条后播放同样继续；直播退出不进横条（走原有 close 路径）。
  */
 @Singleton
 class CapsuleIndicatorState @Inject constructor(
@@ -29,21 +30,15 @@ class CapsuleIndicatorState @Inject constructor(
     /** 播放进度（positionMs / durationMs），引擎 StateFlow 直供，零轮询。 */
     val progress = playerEngine.playbackProgress
 
-    /**
-     * 融合动画进度（1=完全沉入底栏，0=常态悬浮）。Animatable 提升到进程级状态：
-     * 胶囊 UI 驱动它，底栏在 graphicsLayer 内读值做形变（层属性，零重组）。
-     */
-    val sinkAnim = Animatable(1f)
-
     private val _active = mutableStateOf(false)
 
-    /** 胶囊是否激活（Hidden=false）。 */
+    /** 横条是否激活（Hidden=false）；等价于官方 Dock 的 `hasAudio`。 */
     val active: Boolean
         get() = _active.value
 
     /**
      * 详情页收起路径的等价替换：`currentTarget is Video ? activate() : 原关停分支`。
-     * 仅视频目标激活胶囊；直播 / 空目标返回 false，由调用方走原有关停。
+     * 仅视频目标激活横条；直播 / 空目标返回 false，由调用方走原有关停。
      */
     fun activateForVideoTarget(): Boolean {
         if (playbackSession.currentTarget.value !is StreamPlaybackTarget.Video) return false

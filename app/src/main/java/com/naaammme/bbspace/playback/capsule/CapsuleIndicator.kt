@@ -1,23 +1,13 @@
 package com.naaammme.bbspace.playback.capsule
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,261 +16,228 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
-import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
-import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
-import com.naaammme.bbspace.core.designsystem.glass.glassEffect
-import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
-import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
-import androidx.compose.ui.layout.onSizeChanged
-import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
-import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.icon.AppIcons
+import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
+import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
+import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.StreamPlaybackSessionState
-import com.naaammme.bbspace.core.model.PlaybackProgress
-import com.naaammme.bbspace.core.designsystem.icon.AppIcons
+import com.naaammme.bbspace.core.model.StreamPlaybackTarget
+import android.view.View
 
-private val CapsuleHeight = 56.dp
-private val CapsuleRadius = CapsuleHeight / 2
+private val NowPlayingRadius = 28.dp
 
 /**
- * 悬浮播放胶囊指示器（方案 2.1 / 2.6）：不显示视频画面，仅标题 / UP 名 /
- * 播放态 / 进度。挂在主 Tab 内容层之后、底栏之前（z 序低于底栏），隐藏动画 =
- * 下沉融入底栏：单个 [Animatable] 驱动 progress，插值全部在 graphicsLayer 块内
- * 读取，动画期间调用方零重组。
+ * 小横条无缝动画的 `BUNDLE_LIST_COVER` 比例对。
  *
- * 交互：单击回详情；水平滑动超阈值 dismiss（停播）；播放/暂停按钮只切播放态；
- * 播放自然结束（PlaybackState.Ended）自动停播收起。
+ * 官方语义（接入指引 13772）：传入后，返回动画末端会对**被遮挡区域**做 alpha 渐隐，
+ * 避免"缩回时被底栏/顶栏硬切一刀"。
+ *
+ * 小横条贴着屏幕底部：它**上方**直到屏幕顶都还在屏内（不算遮挡），真正被遮挡的是
+ * 小横条**下方**那一条（底栏自身 + 系统导航区），比例由 App 层实测后经
+ * [LocalBottomNavOcclusionRatio] 下发；顶部比例固定 0（小横条之上没有 chrome 遮挡）。
+ *
+ * 锚点尺寸为 0（尚未布局）或比例全为 0 时返回 null —— 不传该字段，系统退回默认行为。
+ */
+private fun listCoverFor(anchor: View, bottomOcclusionRatio: Float): Pair<Float, Float>? {
+    if (anchor.width <= 0 || anchor.height <= 0) return null
+    val bottom = bottomOcclusionRatio.coerceIn(0f, 1f)
+    if (bottom <= 0f) return null
+    return 0f to bottom
+}
+
+/**
+ * 联动底栏的小横条内容（任务 1 规格）：**同一个节点**由 [LinkedBottomDock] 在行间
+ * 移动——`merge=0` 满宽独占导航上方一行，`merge=1` 收窄到「首页图标之后」与导航同行，
+ * 全程保持组合（外壳由 Dock 统一绘制，四个表面材质一致）。
+ *
+ * [merge] 同时驱动次级元素（UP 名 / 关闭钮）的消隐：收窄后放不下，淡出并在
+ * `merge > 0.5` 起禁止点击，避免留下不可见的命中区。
+ *
+ * 交互：单击回详情；播放/暂停只切播放态；× 才真正停播并解除入坞；
+ * 播放自然结束（[PlaybackState.Ended]）自动停播收起。
+ *
+ * 单击走 ColorOS「View 无缝动画」：横条内挂一个零绘制透明 View 锚点，点击瞬间把
+ * 锚点交给共享的 [com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener]，
+ * 由系统在窗口层做「横条 → 全屏详情」的过渡（与首页卡片同一套执行器）。
+ * 设备不支持 / 注册失败 / 开关关闭时，`tryOpen` 返回 false，原样回落 [onOpen]。
  */
 @Composable
-fun CapsuleIndicator(
+internal fun LinkedNowPlayingRow(
     capsuleState: CapsuleIndicatorState,
+    merge: Float,
+    /**
+     * 小横条内容布局是否已稳定（合并动画结束且 IME 落定）。
+     *
+     * 上游配套参数：合并动画期间行高/位置每帧都在变，内容此时若再做自己的布局决策
+     * （跑马灯重测、次级元素消隐）会与几何插值打架，表现为落位前"顿一下"。
+     * false 时应跳过昂贵的自测量。
+     */
+    layoutStable: Boolean = true,
     onOpen: () -> Unit,
     onTogglePlay: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val sessionState by capsuleState.sessionState.collectAsStateWithLifecycle()
     val progress by capsuleState.progress.collectAsStateWithLifecycle()
-    val active = capsuleState.active
-    val anim = LocalAnimations.current
+    val seamlessOpener = LocalSeamlessCardOpener.current
+    val anchorState = rememberSeamlessAnchorState()
+    val density = LocalDensity.current
+    val bottomNavRatio = LocalBottomNavOcclusionRatio.current
+    // 锚点圆角必须与横条真实圆角一致（官方：有圆角的 view 必传 BUNDLE_RADIUS）。
+    // 横条自身圆角是 NowPlayingRadius，而不是卡片 token —— 用错会在 morph 中途跳一下。
+    val anchorRadiusPx = with(density) { NowPlayingRadius.toPx() }
+    // 过渡填充色兜底：小横条又宽又扁（1188×168px），而详情页是整屏竖屏比例，
+    // 两者宽高比差异极大。系统把锚点放大到全屏比例时，view 之外的区域若取不到色
+    // 就会填黑——实测表现为"退回途中拖出一道黑轨迹"。这里显式给页面底色。
+    val seamlessFallbackColor = MaterialTheme.colorScheme.background.toArgb()
+    // 版本门禁前置到组合期：不支持无缝的设备不额外实例化锚点 View
+    val canSeamless = seamlessOpener != null && OplusViewSeamlessCompat.isVersionSupported()
 
-    // 1 = 完全沉入底栏，0 = 常态。Animatable 提升至 State（底栏形变共用读取）。
-    // 出现（激活）：1→0 带 spring 回弹；隐藏（dismiss/结束）：0→1
-    // 前 60% 实体下沉融合，后 40% 淡出（终版方案 4.4）。
-    val sinkProgress = capsuleState.sinkAnim
-    var mounted by remember { mutableStateOf(false) }
-
-    LaunchedEffect(active) {
-        if (active) {
-            mounted = true
-            sinkProgress.animateTo(
-                0f,
-                spring(dampingRatio = 0.9f, stiffness = 380f)
-            )
-        } else {
-            if (sinkProgress.value < 1f) {
-                sinkProgress.animateTo(
-                    1f,
-                    tween(durationMillis = anim.long, easing = anim.emphasized)
-                )
-            }
-            mounted = false
-        }
-    }
-
-    // 自然结束 = 同 × 关闭（方案 2.3 状态机）
     LaunchedEffect(sessionState.playbackState) {
-        if (active && sessionState.playbackState == PlaybackState.Ended) {
+        if (sessionState.playbackState == PlaybackState.Ended) {
             capsuleState.dismissAndStop()
         }
     }
 
-    if (!mounted) return
-
-    val isIOS = LocalUiStyle.current == UiStyle.IOS
-    val capsuleGlassState = LocalGlassHazeState.current
-    val capsuleGlassOn = isGlassActive(capsuleGlassState)
-    val capsuleShape = RoundedCornerShape(CapsuleRadius)
-    // 融合落点：底栏几何（终版方案 4.3）。缺失时退回固定距离平移淡出。
-    val dockGeometry = LocalDockGeometry.current
-    var capsuleWidthPx by remember { mutableFloatStateOf(0f) }
-    val density = LocalDensity.current
-    val containerColor = when {
-        // 玻璃生效：Haze 染色接管，容器底透明
-        capsuleGlassOn -> Color.Transparent
-        isIOS -> MaterialTheme.colorScheme.surfaceContainerLow
-        else -> MaterialTheme.colorScheme.surfaceContainer
+    val progressColor = MaterialTheme.colorScheme.primary
+    val progressFraction = if (progress.durationMs > 0) {
+        (progress.positionMs.toFloat() / progress.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
     }
-    // 底栏隐藏与否不影响胶囊位置：固定悬浮于主 Tab 底部（Dock 常驻位上方）
-    val sinkDistancePx = with(LocalDensity.current) { 88.dp.toPx() }
-    var dragX by remember { mutableFloatStateOf(0f) }
-    val dragDismissThresholdPx = with(LocalDensity.current) { 140.dp.toPx() }
+    val secondaryAlpha = (1f - merge).coerceIn(0f, 1f)
+    val compact = merge > 0.5f
 
+    // 单击入口：优先无缝，失败回落普通跳转。
+    val openClick: () -> Unit = {
+        val videoTarget = (sessionState.target as? StreamPlaybackTarget.Video)?.target
+        val seamless = videoTarget != null && canSeamless && seamlessOpener.tryOpen(
+            anchor = anchorState.anchor,
+            target = videoTarget,
+            coverUrl = sessionState.cover,
+            // 横条封面是 43 比例的小图（CapsuleCover 的 40dp），取 Small43 档
+            coverLarge = false,
+            anchorRadiusPx = anchorRadiusPx,
+            listCover = anchorState.anchor?.let { listCoverFor(it, bottomNavRatio) },
+            fallbackColor = seamlessFallbackColor,
+            // 小横条**锚点自身就有实时内容**（封面 + 标题 + 按钮 + 玻璃壳），
+            // 不需要框架的兜底位图；而兜底位图是一张 16:9 封面，被拉伸到
+            // 1188×168 的横条矩形里就会在打开/返回动画中留下"预览图痕迹"。
+            // 置 true 让框架直接采真实 View（官方 BUNDLE_VIEW_VISIBLE）。
+            keepAnchorVisible = true,
+            // 关键：不要用封面位图装饰小横条锚点。
+            // 小横条是 1188×168（≈7:1），封面是 16:9；框架走兜底路径时会把封面
+            // 拉伸铺满整个横条 —— 用户反馈的"预览图填充在视频小横条中"就是它。
+            // 改为只用 BUNDLE_COLOR（横条底色）兜底，最差是一块纯色。
+            decorateAnchor = false
+        )
+        if (!seamless) onOpen()
+    }
+
+    // 外层 Box 只负责给锚点一个「与横条同边界」的宿主：`matchParentSize()` 是
+    // BoxScope 限定修饰符，直接放进 Row 会把锚点当成一个真实的布局子项（撑开宽度、
+    // 挤掉封面与标题）。锚点零绘制且不拦截事件，层级压在内容之下。
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 0.dp)
-            .onSizeChanged { capsuleWidthPx = it.width.toFloat() },
-        contentAlignment = Alignment.BottomCenter
+            .fillMaxSize()
+            .clip(RoundedCornerShape(NowPlayingRadius))
     ) {
-        Surface(
-            shape = capsuleShape,
-            color = containerColor,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            shadowElevation = if (capsuleGlassOn) 0.dp else if (isIOS) 4.dp else 2.dp,
+        if (canSeamless) {
+            SeamlessAnchor(anchorState, Modifier.matchParentSize())
+        }
+        Row(
             modifier = Modifier
-                .padding(horizontal = 12.dp)
-                .widthIn(max = 480.dp)
-                .fillMaxWidth()
-                .height(CapsuleHeight)
-                .then(
-                    if (capsuleGlassOn) {
-                        Modifier.glassEffect(
-                            state = capsuleGlassState,
-                            surfaceType = GlassSurfaceType.OVERLAY,
-                            shape = capsuleShape,
-                            isScrolling = dragX != 0f
+                .fillMaxSize()
+                .drawBehind {
+                    // BiliPai 式细进度线：画在横条底边 2dp、tint 色。draw 阶段读值，
+                    // 进度刷新只重绘不重组。
+                    if (progressFraction > 0f) {
+                        val lineH = 2.dp.toPx()
+                        drawRect(
+                            color = progressColor,
+                            topLeft = Offset(0f, size.height - lineH),
+                            size = Size(size.width * progressFraction, lineH)
                         )
-                    } else {
-                        Modifier
                     }
-                )
-                .graphicsLayer {
-                    // 七维融合插值（终版方案 4.4）：单 Animatable 驱动，全部在图层块内
-                    // 按帧读值，调用方零重组。前 60% 实体下沉+收窄，后 40% 淡出。
-                    val p = sinkProgress.value
-                    val settle = (p / 0.6f).coerceIn(0f, 1f)
-                    val hasGeometry = dockGeometry != null && capsuleWidthPx > 0f
-                    val sink = if (hasGeometry) {
-                        // 常态胶囊中心 → 底栏中心的垂直落差（胶囊锚定 BottomCenter、
-                        // padding 92dp；底栏 top = 父高 - 16dp - 高度）
-                        val capsuleCenterY = size.height / 2f + with(density) { 92.dp.toPx() }
-                        val dockCenterY = dockGeometry.topPx + dockGeometry.heightPx / 2f
-                        (dockCenterY - capsuleCenterY).coerceAtLeast(0f)
-                    } else {
-                        sinkDistancePx
-                    }
-                    val dockWidthRatio = if (hasGeometry) {
-                        (dockGeometry.widthPx / capsuleWidthPx).coerceIn(0.2f, 1f)
-                    } else {
-                        0.2f
-                    }
-                    translationY = sink * settle
-                    scaleX = 1f + (dockWidthRatio - 1f) * settle
-                    scaleY = 1f + (dockWidthRatio - 1f) * settle
-                    translationX = dragX
-                    alpha = (1f - ((p - 0.6f) / 0.4f).coerceIn(0f, 1f)) *
-                        (1f - (kotlin.math.abs(dragX) / (dragDismissThresholdPx * 1.6f)).coerceIn(0f, 0.7f))
                 }
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, amount ->
-                            change.consume()
-                            dragX += amount
-                        },
-                        onDragEnd = {
-                            if (kotlin.math.abs(dragX) > dragDismissThresholdPx) {
-                                capsuleState.dismissAndStop()
-                                dragX = 0f
-                            } else {
-                                dragX = 0f
-                            }
-                        },
-                        onDragCancel = { dragX = 0f }
-                    )
-                }
-                .clickable(onClick = onOpen)
+                .clickable(onClick = openClick)
+                .padding(start = 8.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            val progressColor = MaterialTheme.colorScheme.primary
-            val progressFraction = if (progress.durationMs > 0) {
-                (progress.positionMs.toFloat() / progress.durationMs).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-            Row(
+            CapsuleCover(
+                sessionState = sessionState,
+                modifier = Modifier.padding(end = 8.dp)
+            )
+            Column(
                 modifier = Modifier
-                    .padding(start = 8.dp, end = 4.dp)
-                    .drawBehind {
-                        // BiliPai 式细进度线：画在胶囊底边，2dp、tint 色。
-                        // draw 阶段读 State，进度刷新只重绘不重组。
-                        if (progressFraction > 0f) {
-                            val lineH = 2.dp.toPx()
-                            drawRect(
-                                color = progressColor,
-                                topLeft = Offset(0f, size.height - lineH),
-                                size = androidx.compose.ui.geometry.Size(size.width * progressFraction, lineH)
-                            )
-                        }
-                    },
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .padding(end = 4.dp)
             ) {
-                CapsuleCover(sessionState, modifier = Modifier.padding(8.dp))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                ) {
+                Text(
+                    text = sessionState.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!sessionState.subtitle.isNullOrBlank()) {
                     Text(
-                        text = sessionState.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        text = sessionState.subtitle.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (!sessionState.subtitle.isNullOrBlank()) {
-                        Text(
-                            text = sessionState.subtitle.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                IconButton(onClick = onTogglePlay) {
-                    Icon(
-                        imageVector = if (sessionState.isPlaying) AppIcons.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (sessionState.isPlaying) "暂停" else "播放",
-                        tint = MaterialTheme.colorScheme.primary
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.graphicsLayer { alpha = secondaryAlpha }
                     )
                 }
-                IconButton(onClick = { capsuleState.dismissAndStop() }) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "关闭",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            }
+            IconButton(onClick = onTogglePlay, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = if (sessionState.isPlaying) AppIcons.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (sessionState.isPlaying) "暂停" else "播放",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            IconButton(
+                onClick = { capsuleState.dismissAndStop() },
+                enabled = !compact,
+                modifier = Modifier
+                    .size(32.dp)
+                    .graphicsLayer { alpha = secondaryAlpha }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "关闭",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CapsuleCover(
+internal fun CapsuleCover(
     sessionState: StreamPlaybackSessionState,
     modifier: Modifier = Modifier
 ) {
