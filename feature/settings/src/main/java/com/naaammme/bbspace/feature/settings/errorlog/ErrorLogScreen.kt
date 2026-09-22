@@ -64,13 +64,13 @@ fun ErrorLogScreen(
                 title = { Text("错误日志 (${logs.size})") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
                     if (logs.isNotEmpty()) {
                         IconButton(onClick = { viewModel.clear() }) {
-                            Icon(Icons.Default.Delete, contentDescription = null)
+                            Icon(Icons.Default.Delete, contentDescription = "清空错误日志")
                         }
                     }
                 },

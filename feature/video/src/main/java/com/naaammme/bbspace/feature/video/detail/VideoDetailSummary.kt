@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -514,6 +515,12 @@ internal fun RowScope.ActionChip(
     Column(
         modifier = Modifier
             .weight(1f)
+            // 触控目标下限**显式声明**。按内容算这一列本来就有约 56dp
+            // （图标 22 + 间隙 2 + labelMedium 行高约 16，再加上下各 8 的内边距），
+            // 所以这条在现状下不改变任何像素 —— 它把"碰巧够高"变成"保证够高"：
+            // 日后有人去掉文字行、或把图标改小，56dp 会不知不觉掉到 48 以下，
+            // 而 Material 规范要求的 48dp 触控目标没有任何编译期检查会拦住它。
+            .defaultMinSize(minHeight = 48.dp)
             .clip(MaterialTheme.shapes.large)
             .then(clickableModifier)
             .padding(vertical = BiliSpacing.sm),

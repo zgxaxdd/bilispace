@@ -73,7 +73,7 @@ fun AboutScreen(
                 title = { Text("关于") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 scrollBehavior = scrollBehavior

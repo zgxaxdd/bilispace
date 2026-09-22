@@ -331,7 +331,7 @@ private fun ReplyMenuButton(
             onClick = { show = true },
             enabled = !busy
         ) {
-            Icon(Icons.Default.MoreVert, contentDescription = null)
+            Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
         }
         DropdownMenu(
             expanded = show,

@@ -173,7 +173,13 @@ class DesignTokenLintTest {
     fun dpLiteralsOutsideTheme_isFrozen() {
         assertRatchet(
             actual = sumOf("""\b\d+(\.\d+)?\.dp\b"""),
-            limit = 961,
+            // 上限 961 → 962 的变更记录（2026-09-22，T6）：
+            // 新增的是 VideoDetailSummary 操作栏的 `defaultMinSize(minHeight = 48.dp)`。
+            // 48dp 是 Material 触控目标**规范常量**而不是设计标度里的一个档位
+            // （BiliSpacing 没有 48，也不该有：把它做成"间距 token"会在哪天调间距时
+            // 顺手改掉无障碍下限），所以刻意保留字面量、把上限 +1。
+            // 该改动本身不改变任何像素（那列原本按内容就有约 56dp）。
+            limit = 962,
             what = "theme 包外的 `N.dp` 字面量",
             why = "同一语义的尺寸散在各处就没有单一改动点。要降它就把语义明确的" +
                 "重复值收敛进 BiliRadius/BiliSpacing；一次性尺寸（图标、分隔线粗细、" +
