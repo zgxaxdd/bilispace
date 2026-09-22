@@ -102,6 +102,8 @@ internal fun LinkedNowPlayingRow(
     val seamlessOpener = LocalSeamlessCardOpener.current
     val anchorState = rememberSeamlessAnchorState()
     val density = LocalDensity.current
+    // 下发的是 provider（见 ListCoverRatio.kt）：这里只在 openClick 里读，
+    // 组合期不读值，避免 Dock 合并动画按帧重组胶囊。
     val bottomNavRatio = LocalBottomNavOcclusionRatio.current
     // 锚点圆角必须与横条真实圆角一致（官方：有圆角的 view 必传 BUNDLE_RADIUS）。
     // 横条自身圆角是 NowPlayingRadius，而不是卡片 token —— 用错会在 morph 中途跳一下。
@@ -138,7 +140,7 @@ internal fun LinkedNowPlayingRow(
             // 横条封面是 43 比例的小图（CapsuleCover 的 40dp），取 Small43 档
             coverLarge = false,
             anchorRadiusPx = anchorRadiusPx,
-            listCover = anchorState.anchor?.let { listCoverFor(it, bottomNavRatio) },
+            listCover = anchorState.anchor?.let { listCoverFor(it, bottomNavRatio()) },
             fallbackColor = seamlessFallbackColor,
             // 小横条**锚点自身就有实时内容**（封面 + 标题 + 按钮 + 玻璃壳），
             // 不需要框架的兜底位图；而兜底位图是一张 16:9 封面，被拉伸到

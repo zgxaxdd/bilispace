@@ -74,11 +74,14 @@ fun RankScreen(
     val density = LocalDensity.current
     val screenHpx = LocalWindowInfo.current.containerSize.height
     val bottomNavRatio = LocalBottomNavOcclusionRatio.current
-    val listCover = remember(topContentPadding, screenHpx, density, bottomNavRatio) {
+    // 与推荐页同口径：遮挡比延迟到点击时才算，理由见 HomeVideoPage 的同名注释
+    // （组合期读会在 Dock 合并动画期间按帧重组；且遮挡比是异步实测的，remember 住
+    //   会把首帧的 0f 缓存成永久值）。
+    val listCover: () -> Pair<Float, Float>? = {
         listCoverRatio(
             topOcclusionPx = with(density) { topContentPadding.roundToPx() },
             screenHeightPx = screenHpx,
-            bottomOcclusionRatio = bottomNavRatio
+            bottomOcclusionRatio = bottomNavRatio()
         )?.let { it.top to it.bottom }
     }
 
@@ -255,7 +258,7 @@ private fun RankSelectors(
 @Composable
 private fun RankVideoCard(
     item: RankVideoItem,
-    listCover: Pair<Float, Float>? = null,
+    listCover: () -> Pair<Float, Float>? = { null },
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit
 ) {
@@ -290,7 +293,7 @@ private fun RankVideoCard(
                     coverUrl = item.cover,
                     coverLarge = false,
                     anchorRadiusPx = seamlessSpec.radiusPx,
-                    listCover = listCover
+                    listCover = listCover()
                 )
             ) {
                 return@BiliCardSurface

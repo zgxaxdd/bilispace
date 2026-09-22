@@ -11,9 +11,19 @@ import androidx.compose.runtime.compositionLocalOf
  * 悬浮 Tab 栏 + 搜索 FAB —— 只由 App 层测得，因此经这个 CompositionLocal 下发，
  * 页面读取后连同自己的顶部比例一起传给 `SeamlessCardOpener.tryOpen(listCover = ...)`。
  *
- * 默认 0f：未接线（或测不到高度）时不传底部比例，行为与从前一致。
+ * 默认返回 0f：未接线（或测不到高度）时不传底部比例，行为与从前一致。
+ *
+ * ## 为什么下发的是 `() -> Float` 而不是 `Float`
+ *
+ * 下发 `Float` 时，**提供端**必须在组合期读那个 mutableState 才能 `provides` 它，
+ * 而提供端是 AppNavHost 自己的 scope —— 底部遮挡比一旦被写一次，整棵主框架树
+ * （四个 Tab 的内容 + Dock + 胶囊）就跟着重组一遍。实测这个写入发生在
+ * Dock 与播放胶囊的合并动画期间，于是 280ms 里每帧重组一次整树。
+ *
+ * 改成 provider 后，提供端只造一个 lambda、**不读值**，组合期不登记观察；
+ * 读取推迟到消费者真正需要它的那一刻（点击卡片发起无缝动画时）。
  */
-val LocalBottomNavOcclusionRatio = compositionLocalOf { 0f }
+val LocalBottomNavOcclusionRatio = compositionLocalOf<() -> Float> { { 0f } }
 
 /**
  * 卡片所在网格的上下遮挡比例（供 `BUNDLE_LIST_COVER` 使用）：

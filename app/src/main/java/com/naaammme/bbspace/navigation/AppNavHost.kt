@@ -367,7 +367,7 @@ fun AppNavHost(
 
     CompositionLocalProvider(
         LocalSeamlessCardOpener provides seamlessCardOpener,
-        LocalBottomNavOcclusionRatio provides bottomNavOcclusionRatio
+        LocalBottomNavOcclusionRatio provides { bottomNavOcclusionRatio }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
@@ -814,6 +814,12 @@ private fun TopLevelFloatingNavigation(
     val anim = LocalAnimations.current
     val dockVerticalPaddingPx = with(LocalDensity.current) { DockVerticalPadding.toPx() }
     var hiddenDistancePx by remember { mutableFloatStateOf(0f) }
+    // Dock 的**展开态**几何缓存：[0]=展开态整体高度、[1]=展开态 chrome 高度、
+    // [2]=上次实测时的窗口高度。
+    //
+    // 用普通 FloatArray 而不是 mutableStateOf —— 这两个值只在布局回调里读写，
+    // 一旦被组合观察反而就退化成我们要修的"每帧写 → 每帧重组"。
+    val expandedDockGeometryPx = remember { floatArrayOf(0f, 0f, 0f) }
     val animatedOffsetPx by animateFloatAsState(
         targetValue = if (visibilityController.hidden) hiddenDistancePx else 0f,
         animationSpec = tween(durationMillis = anim.medium, easing = anim.standard),
@@ -847,18 +853,44 @@ private fun TopLevelFloatingNavigation(
         onSearchClick = onNavigateToSearch,
         isScrolling = visibilityController.hidden,
         modifier = modifier
-            .onSizeChanged { hiddenDistancePx = it.height.toFloat() }
+            .onSizeChanged { size ->
+                // 收起位移取**展开态**高度，不是当前高度。
+                //
+                // Dock 与播放胶囊合并时布局高度每帧都在变
+                // （LinkedDockPolicy：height = top + barHeight，
+                //   top = (barHeight + verticalGap) * (1 - merge)），
+                // 于是原来的"每帧直接赋值"= 每帧写一次 mutableFloatStateOf →
+                // 每帧重算下面 animateFloatAsState 的 targetValue → 280ms 里
+                // 每帧重组一次本 composable 的宿主 scope。
+                // 取历史最大值既是展开态高度（merge 只会让它变小），又让写入收敛到
+                // 稳态零写入。位移偏大是安全的：多平移一段只会更彻底地离开屏幕。
+                val height = size.height.toFloat()
+                if (height > expandedDockGeometryPx[0]) {
+                    expandedDockGeometryPx[0] = height
+                    hiddenDistancePx = height
+                }
+            }
             // 实测悬浮导航栏遮挡屏幕的比例，供无缝动画 BUNDLE_LIST_COVER 使用。
-            // 遮挡高度就是 chrome 自身那一段（外层尺寸另含 Dock 的上下内边距）；
-            // 隐藏动画只是 graphicsLayer 平移，布局位置不变，因此常驻遮挡区恒定。
+            // 遮挡高度就是 chrome 自身那一段（外层尺寸另含 Dock 的上下内边距）。
+            //
+            // **只在"读到更大的 chrome 高度"或"窗口高度变了"时下发**：
+            // 合并动画期间 `coords.size.height` 每帧都在变小，按当前值写就变成
+            // 每帧一次 onOcclusionChanged → 每帧一次组合状态写入。历史最大值
+            // 就是展开态遮挡高度（merge 只会缩小它），所以取最大值既正确又让写入收敛。
+            // 原注释说的"常驻遮挡区恒定"只对**隐藏**动画成立（那是 graphicsLayer
+            // 平移、布局不变），对合并动画不成立 —— 布局高度确实在变。
             .onGloballyPositioned { coords ->
                 val windowHeight = coords.parentLayoutCoordinates
                     ?.size?.height ?: return@onGloballyPositioned
                 if (windowHeight <= 0) return@onGloballyPositioned
                 val chromeHeightPx = (coords.size.height - dockVerticalPaddingPx * 2f).coerceAtLeast(0f)
-                onOcclusionChanged(
-                    (chromeHeightPx / windowHeight).coerceIn(0f, 1f)
-                )
+                val windowChanged = windowHeight.toFloat() != expandedDockGeometryPx[2]
+                if (!windowChanged && chromeHeightPx <= expandedDockGeometryPx[1]) {
+                    return@onGloballyPositioned
+                }
+                expandedDockGeometryPx[2] = windowHeight.toFloat()
+                expandedDockGeometryPx[1] = chromeHeightPx
+                onOcclusionChanged((chromeHeightPx / windowHeight).coerceIn(0f, 1f))
             }
             .graphicsLayer {
                 // 动画值在图层块内延迟读取：隐藏/显示过渡每帧只更新图层属性，

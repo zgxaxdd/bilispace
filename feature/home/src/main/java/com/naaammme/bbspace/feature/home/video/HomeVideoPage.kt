@@ -226,11 +226,18 @@ fun HomeVideoPage(
     val density = LocalDensity.current
     val screenHpx = LocalWindowInfo.current.containerSize.height
     val bottomNavRatio = LocalBottomNavOcclusionRatio.current
-    val listCover = remember(topContentPadding, screenHpx, density, bottomNavRatio) {
+    // 遮挡比延迟到**点击那一刻**才算，不在组合期算好 remember 住：
+    // 1) 组合期读 `bottomNavRatio` 会让本页在 Dock 合并动画期间跟着按帧重组，
+    //    而 listCover 只在 `tryOpen` 那一瞬间用得到 —— 提前算纯属浪费；
+    // 2) 时序上也只有点击算才对：底部遮挡比是 Dock 的布局回调**异步实测**的，
+    //    常常晚于本页首次组合。原实现靠 remember 的 key 变化来跟进，一旦哪天
+    //    key 漏了一个来源，就会把"还没测到"的 0f 永久缓存，表现为返回动画末端
+    //    卡片被 Dock 生生切一刀（遮挡渐隐失效）。点击时读则永远拿当下最新值。
+    val listCover: () -> Pair<Float, Float>? = {
         listCoverRatio(
             topOcclusionPx = with(density) { topContentPadding.roundToPx() },
             screenHeightPx = screenHpx,
-            bottomOcclusionRatio = bottomNavRatio
+            bottomOcclusionRatio = bottomNavRatio()
         )?.let { it.top to it.bottom }
     }
 
@@ -286,7 +293,7 @@ fun HomeVideoPage(
 private fun FeedCard(
     item: FeedItem,
     singleColumn: Boolean = false,
-    listCover: Pair<Float, Float>? = null,
+    listCover: () -> Pair<Float, Float>? = { null },
     onOpenSpace: (SpaceRoute) -> Unit,
     dislikedReason: String?,
     onDislike: (FeedItem, ThreePointReason) -> Unit,
@@ -489,7 +496,7 @@ private fun FeedCard(
                         coverUrl = item.cover,
                         coverLarge = singleColumn,
                         anchorRadiusPx = seamlessSpec.radiusPx,
-                        listCover = listCover,
+                        listCover = listCover(),
                         sourceCardKey = seamlessSourceKey,
                         coverHeightPx = coverHeightPx,
                         cardBitmap = captured,
