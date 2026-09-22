@@ -83,10 +83,6 @@ class HomeViewModel @Inject constructor(
     val canAutoFillMore: Boolean
         get() = autoFillCount < AUTO_FILL_MAX && stagnantLoads < MAX_STAGNANT_LOADS
 
-    private fun FeedItem.actionKey(): String {
-        return "$goto|$param|$idx"
-    }
-
     fun refreshPageAction() {
         pageActionTracker.refresh()
     }
@@ -202,7 +198,7 @@ class HomeViewModel @Inject constructor(
                     val merged = withContext(Dispatchers.Default) {
                         // 按 (goto|param|idx) 去重：服务端偶发重复下发卡片，
                         // 重复 key 会让 LazyStaggeredGrid 直接抛异常崩溃
-                        (feed.items + _uiState.value.items).distinctBy { it.actionKey() }
+                        (feed.items + _uiState.value.items).distinctBy { it.actionKey }
                     }
                     _uiState.update { it.copy(items = merged) }
                     flush++
@@ -231,7 +227,7 @@ class HomeViewModel @Inject constructor(
                     val before = _uiState.value.items
                     val merged = withContext(Dispatchers.Default) {
                         // 追加时同样去重，保留已有条目在前
-                        (before + feed.items).distinctBy { it.actionKey() }
+                        (before + feed.items).distinctBy { it.actionKey }
                     }
                     _uiState.update { it.copy(items = merged) }
                     flush++
@@ -260,7 +256,7 @@ class HomeViewModel @Inject constructor(
             _uiState.update { it.copy(toastMessage = "当前卡片暂不支持此操作") }
             return
         }
-        val itemKey = item.actionKey()
+        val itemKey = item.actionKey
         viewModelScope.launch {
             runCatching { feedDislikeRepo.dislike(context, reason) }
                 .onSuccess { result ->
@@ -287,7 +283,7 @@ class HomeViewModel @Inject constructor(
             _uiState.update { it.copy(toastMessage = "当前卡片暂不支持此操作") }
             return
         }
-        val itemKey = item.actionKey()
+        val itemKey = item.actionKey
         viewModelScope.launch {
             runCatching { feedDislikeRepo.cancelDislike(context) }
                 .onSuccess { result ->

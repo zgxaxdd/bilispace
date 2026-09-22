@@ -43,9 +43,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -255,7 +256,7 @@ fun HomeVideoPage(
         ),
         errorMessage = errorMessage,
         onRetry = onRetry,
-        key = { _, item -> item.actionKey() },
+        key = { _, item -> item.actionKey },
         contentType = { _, item -> item.cardType },
         loadingContent = {
             FeedCardSkeleton(singleColumn = singleColumn)
@@ -266,7 +267,7 @@ fun HomeVideoPage(
             singleColumn = singleColumn,
             listCover = listCover,
             onOpenSpace = onOpenSpace,
-            dislikedReason = dislikedReasons[item.actionKey()],
+            dislikedReason = dislikedReasons[item.actionKey],
             onDislike = onDislike,
             onCancelDislike = onCancelDislike,
             onClick = {
@@ -344,16 +345,19 @@ private fun FeedCard(
     // 避免出现"容器 24dp / 封面 12dp / 单列封面直角"这种卡片自身就不一致的观感。
     // 单列本可用更大的圆角，但普通 HomeVideoPage 只有双列；排行榜/搜索等页在单列下
     // 也用卡片圆角，保持全局一致。
-    val cardShape = RoundedCornerShape(BiliRadius.card)
+    //
+    // 三个形状都是**文件级常量**（见文件末尾）：它们只由 BiliRadius.card 决定，
+    // 原先写成局部 `val` / `remember` 时，每张卡片每次重组都要新建 RoundedCornerShape
+    // （`CornerBasedShape` 持有 4 个 Dp），或至少占一个 remember 槽位并做一次
+    // 键比较——而形状值在全进程内从不改变。
+    //
     // 卡片是「封面 + 信息区」两块拼成的。两块**分别**只圆上/下两角，
     // 接缝处都保持直角 → 拼合无缝，读作一张卡片；若两块都用全圆角，
     // 接缝会各圆各的、中间露出一道背景，看起来像"图 + 贴在下面的小面板"。
-    // 整卡最终由 BiliCardSurface 的 cardShape 收圆。
-    val coverShape = remember(cardShape) { BiliRadius.topRounded(BiliRadius.card) }
-    val infoShape = remember(cardShape) { BiliRadius.bottomRounded(BiliRadius.card) }
+    // 整卡最终由 BiliCardSurface 的 FeedCardShape 收圆。
     // 无缝动画参数：圆角取卡片自身 shape；兜底色即卡片所在区域的底色
     val seamlessSpec = rememberSeamlessCardSpec(
-        shape = cardShape,
+        shape = FeedCardShape,
         containerColor = if (singleColumn) {
             MaterialTheme.colorScheme.surfaceContainerLow
         } else {
@@ -395,21 +399,39 @@ private fun FeedCard(
         tintSource != null
     // 信息区自身**不再铺底色**（底色已由整卡容器承担），只叠渐变与描边：
     // 再铺一层会让接缝处出现"双层色"的色阶断层。
+    //
+    // 标题样式：`TextStyle` 是重对象（约 20 个字段，含 fontSize/lineHeight/fontFamily/
+    // 各种 SpanStyle 等）。原先直接写在 Text 的 `style =` 上是 `typography.bodyLarge.copy(...)`，
+    // 于是**每张卡片每次重组**都要新建一份 TextStyle —— 而 copy 的结果只由主题排版决定，
+    // 全站只有一份。以 `bodyLarge` 为 key remember：主题不变时零分配，换主题时正确重建。
+    val baseTitleStyle = MaterialTheme.typography.bodyLarge
+    val titleStyle = remember(baseTitleStyle) {
+        baseTitleStyle.copy(
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+    // `drawWithCache` 而不是 `drawBehind`：brush 的 3 个 Color、stops 数组与 Brush 对象
+    // 本身都要在缓存块外重建的话，等于**每次重绘**分配一份。滚动列表里重绘频率远高于
+    // 取色变化频率，所以把 brush 挪进 cache 块。在缓存块内读取状态是 Compose 认可的
+    // 用法（值变化会让缓存块重跑），`size.height` 也在块内读，因此 endY 仍跟随实际高度。
+    val glowSpec = if (showCoverGlow) infoDrawSpec else null
+    val glowTint = if (showCoverGlow) tintSource else null
     val infoModifier = Modifier
         .then(
-            if (showCoverGlow && tintSource != null) {
-                Modifier.drawBehind {
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                tintSource.copy(alpha = infoDrawSpec!!.coverGlowAlpha),
-                                tintSource.copy(alpha = infoDrawSpec.coverGlowAlpha * 0.35f),
-                                Color.Transparent
-                            ),
-                            startY = 0f,
-                            endY = size.height * 0.85f
-                        )
+            if (glowSpec != null && glowTint != null) {
+                Modifier.drawWithCache {
+                    val brush = Brush.verticalGradient(
+                        colors = listOf(
+                            glowTint.copy(alpha = glowSpec.coverGlowAlpha),
+                            glowTint.copy(alpha = glowSpec.coverGlowAlpha * 0.35f),
+                            Color.Transparent
+                        ),
+                        startY = 0f,
+                        endY = size.height * 0.85f
                     )
+                    onDrawBehind { drawRect(brush) }
                 }
             } else {
                 Modifier
@@ -417,7 +439,7 @@ private fun FeedCard(
         )
         .then(
             if (infoDrawSpec != null) {
-                Modifier.border(width = 0.5.dp, color = infoDrawSpec.borderColor, shape = infoShape)
+                Modifier.border(width = 0.5.dp, color = infoDrawSpec.borderColor, shape = FeedCardInfoShape)
             } else {
                 Modifier
             }
@@ -507,7 +529,7 @@ private fun FeedCard(
             }
         },
         enabled = canOpen,
-        shape = cardShape,
+        shape = FeedCardShape,
         // 整卡染色底：有封面色时是与封面同调的半透明色，无封面色时原样返回
         // containerColor（双列即 Transparent），行为不变。
         // 铺在**整卡**上而不是信息区，是"卡片与简介成为一个整体"的关键。
@@ -563,8 +585,8 @@ private fun FeedCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                // 封面只圆上两角，下沿直角与信息区无缝拼接（详见 coverShape 注释）
-                shape = coverShape,
+                // 封面只圆上两角，下沿直角与信息区无缝拼接（详见 FeedCardCoverShape 注释）
+                shape = FeedCardCoverShape,
                 coverLarge = singleColumn,
                 coverFourThree = !singleColumn,
                 // 取色挂在 Coil 解码成功回调上：**复用已解码位图**，不额外发请求、
@@ -652,11 +674,7 @@ private fun FeedCard(
                 // 浅色主题 + 深色封面时翻白（resolveVideoCardAdaptiveContentColors），
                 // 否则被染深的卡片上深色标题会糊成一片
                 color = adaptiveContentColors.titleColor,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                style = titleStyle
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -716,7 +734,7 @@ private fun CoverBadge(
     backdrop: LayerBackdrop? = null,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(8.dp)
+    val shape = CoverBadgeShape
     val glass = backdrop != null
     Surface(
         modifier = modifier.then(
@@ -766,7 +784,7 @@ private fun FeedCardSkeleton(singleColumn: Boolean = false) {
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (singleColumn) 16f / 9f else 4f / 3f),
-            shape = RoundedCornerShape(BiliRadius.card)
+            shape = FeedCardShape
         )
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             SkeletonBlock(
@@ -872,9 +890,24 @@ private fun DislikedOverlay(
     }
 }
 
-private fun FeedItem.actionKey(): String {
-    return "$goto|$param|$idx"
-}
+// ── 卡片形状常量（原为每张卡片每次重组新建的局部值）────────────────────────────
+// 为什么放文件级：`RoundedCornerShape(Dp)` 返回 `CornerBasedShape`，它持有 4 个 Dp
+// （topStart/topEnd/bottomEnd/bottomStart）。写在 composable 里就是"每张可见卡片、
+// 每次重组"各分配一份，而这些值在整个进程生命周期内从不改变。
+// 用文件级 val 还顺带消掉了原先 `remember(cardShape) { BiliRadius.topRounded(...) }`
+// 的两处 remember 槽位与键比较。
+
+/** 整卡形状（容器 + 无缝动画锚点共用，两端同值才不跳）。 */
+private val FeedCardShape: RoundedCornerShape = RoundedCornerShape(BiliRadius.card)
+
+/** 封面块：只圆上两角，下沿直角，与信息区无缝拼接。 */
+private val FeedCardCoverShape: Shape = BiliRadius.topRounded(BiliRadius.card)
+
+/** 信息区块：只圆下两角，上沿直角。与 [FeedCardCoverShape] 配对。 */
+private val FeedCardInfoShape: Shape = BiliRadius.bottomRounded(BiliRadius.card)
+
+/** 封面角标（时长 / 播放量）形状。 */
+private val CoverBadgeShape = RoundedCornerShape(8.dp)
 
 // ── 封面预加载参数（见 HomeVideoPage 内 preload effect 的注释）────────────────
 /** 合并惯性滑动期间爆发的布局更新；约等于"手指停下/惯性将尽"的窗口。 */

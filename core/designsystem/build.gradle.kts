@@ -63,3 +63,24 @@ composeCompiler {
     metricsDestination.set(layout.buildDirectory.dir("compose-metrics"))
     reportsDestination.set(layout.buildDirectory.dir("compose-reports"))
 }
+
+// ── 结构断言 / 棘轮的输入声明 ────────────────────────────────────────────────
+//
+// `FrameBudgetLintTest` 与 `ListAllocationStructureTest` 读的是**仓库里的 .kt 文本**
+// （反模式计数、"某文件内不许出现某种写法"），这些文本不是本模块的 classpath 依赖，
+// 所以 Gradle 完全不知道它们是测试输入。
+//
+// 后果实测过：改坏 `HomeVideoPage.kt` 之后跑 `:core:designsystem:testDebugUnitTest`，
+// 4 秒 BUILD SUCCESSFUL —— 任务被判 UP-TO-DATE 直接跳过；加上 `--rerun-tasks` 才
+// 真正跑出 3 个 FAILED。在 CI 上等价于"第一次跑过之后永远绿"，
+// 属于任务书 §8 点名的最危险假绿形态。
+//
+// 这里把全仓 main 源码显式登记为测试输入：任一处 .kt 变化都会让本模块测试重跑。
+tasks.withType<Test>().configureEach {
+    inputs.files(
+        fileTree(rootDir) {
+            include("**/src/main/**/*.kt")
+            exclude("**/build/**")
+        }
+    ).withPropertyName("repoMainKotlinSources")
+}

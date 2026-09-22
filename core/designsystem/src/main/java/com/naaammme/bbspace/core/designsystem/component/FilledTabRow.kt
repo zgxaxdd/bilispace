@@ -35,8 +35,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
@@ -147,6 +149,7 @@ private fun IOSSegmented(
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow
     }
+    val density = LocalDensity.current
     BoxWithConstraints(
         modifier = modifier
             .height(32.dp)
@@ -154,7 +157,11 @@ private fun IOSSegmented(
             .background(container)
     ) {
         val segmentWidth = maxWidth / tabs.size
-        val thumbX by animateDpAsState(
+        // **不要 `by` 解包**：`animate*AsState` 的值一旦在组合期被读，动画的每一帧都会
+        // 重组宿主 composable。本滑块位于顶栏内，切 Tab 的 300ms 里每帧重组整条顶栏。
+        // 保留 State 引用，把读取推迟到 `offset { }` 的布局期 lambda —— 每帧只改偏移，
+        // 不重组。这是 Compose 官方对"动画位移"的标准写法。
+        val thumbX = animateDpAsState(
             targetValue = segmentWidth * selectedIndex,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -164,7 +171,7 @@ private fun IOSSegmented(
         )
         Box(
             modifier = Modifier
-                .offset(x = thumbX)
+                .offset { IntOffset(with(density) { thumbX.value.roundToPx() }, 0) }
                 .width(segmentWidth)
                 .fillMaxHeight()
                 .padding(1.dp)

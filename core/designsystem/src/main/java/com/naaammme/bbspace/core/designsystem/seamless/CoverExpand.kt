@@ -80,16 +80,33 @@ private object CoverExpandBoundsStore {
             size > MAX_ENTRIES
     }
 
+    /**
+     * 滚动期间**每张卡片每帧**都会被调用，所以这里的原则是"没跨粒度的帧一个对象都不分配"。
+     *
+     * 之前的写法是先 `Rect(...)` 再和 map 里的比 —— 于是"分配 4 个 float + 一次构造 +
+     * 一次 equals"全部发生在去重**之前**，去重只省了一次 map 写入，白分配。
+     * 现在先把 4 个分量各自量化成 Float，与已存值逐个比，只有真的变了才构造 Rect。
+     *
+     * 调用方 `boundsInWindow()` 仍会分配一个临时 Rect：LayoutCoordinates 的公开 API
+     * 没有"写入调用方 Rect"的重载，这一份无法省。净效果是稳态下每卡每帧 2 → 1 次分配。
+     */
     fun put(key: String, bounds: Rect) {
-        val quantized = Rect(
-            (bounds.left / QUANTUM_PX).toInt() * QUANTUM_PX,
-            (bounds.top / QUANTUM_PX).toInt() * QUANTUM_PX,
-            (bounds.right / QUANTUM_PX).toInt() * QUANTUM_PX,
-            (bounds.bottom / QUANTUM_PX).toInt() * QUANTUM_PX
-        )
-        if (map[key] == quantized) return
-        map[key] = quantized
+        val left = snap(bounds.left)
+        val top = snap(bounds.top)
+        val right = snap(bounds.right)
+        val bottom = snap(bounds.bottom)
+        val prev = map[key]
+        if (prev != null &&
+            prev.left == left && prev.top == top &&
+            prev.right == right && prev.bottom == bottom
+        ) {
+            return
+        }
+        map[key] = Rect(left, top, right, bottom)
     }
+
+    /** 按 [QUANTUM_PX] 向下取整到网格。单独成函数是为了让"先比标量、后构造 Rect"可读。 */
+    private fun snap(value: Float): Float = (value / QUANTUM_PX).toInt() * QUANTUM_PX
 
     fun get(key: String): Rect? = map[key]
 }
