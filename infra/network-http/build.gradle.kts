@@ -16,8 +16,9 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 
-    api(libs.retrofit)
-    api(libs.retrofit.kotlin.serialization)
+    // Retrofit 已移除：全仓 0 处使用（无 Retrofit.Builder / 无 @GET/@POST），
+    // 实际网络层是手写 OkHttp + protobuf/gRPC。它此前以 `api` 声明，
+    // 等于把一条完全用不到的依赖**传递给所有下游模块**。
     api(libs.okhttp)
     api(libs.okhttp.brotli)
     api(libs.okhttp.logging)

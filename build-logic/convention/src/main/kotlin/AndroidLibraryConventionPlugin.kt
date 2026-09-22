@@ -26,7 +26,16 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
             extensions.configure<LibraryExtension> {
                 namespace = derivedNamespace()
-                compileSdk = 37
+                // compileSdk 37 + minor 2：AGP 9 的 `compileSdk { }` 块支持 minor 版本。
+                // haze 2.0.0-beta03 的 AAR 元数据声明 `minCompileSdk=37, minCompileMinorSdk=2`，
+                // 只写 `compileSdk = 37` 会被 AAR 元数据检查判为不满足。
+                // **必须与 ApplicationConventionPlugin 同步**：库模块也要编译到 37.2，
+                // 否则 `:feature:*` 的 checkReleaseAarMetadata 会失败。
+                compileSdk {
+                    version = release(37) {
+                        minorApiLevel = 2
+                    }
+                }
 
                 defaultConfig {
                     // minSdk 33：Liquid Glass 全量生效的下限（AGSL = API 33），

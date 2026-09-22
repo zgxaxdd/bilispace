@@ -25,10 +25,16 @@ dependencies {
     api(libs.haze)
     implementation(libs.haze.blur)
     implementation(libs.haze.blur.materials)
+    // 液态玻璃（LIQUID 档）：miuix-blur 背板系统（layerBackdrop 录制 + drawBackdrop 采样），
+    // api 因 GlassEffect/LiquidBackdrop 签名暴露 LayerBackdrop。BiliPai 同款实现。
+    api(libs.miuix.blur)
     // 帧率守卫（GlassGuard）
     implementation(libs.androidx.metrics.performance)
 
     implementation(libs.coil.compose)
+    // 封面代表色提取（VideoCardCoverColorStore）：androidx.palette 聚类取面积最大色。
+    // api 因 VideoCardCoverColorStore 的 public 签名暴露 Palette.Swatch（可单测的纯策略）。
+    api(libs.androidx.palette)
     implementation(libs.google.material)
     // ForegroundEnterBox 的回前台判据依赖进程级生命周期
     implementation(libs.androidx.lifecycle.process)
