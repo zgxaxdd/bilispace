@@ -610,6 +610,18 @@ private fun MainTabsScaffold(
     // Dock / 胶囊 drawBackdrop 采样（blur + 边缘折射 + vibrancy + 高光）。
     val backdropSource = rememberChromeBackdropSource()
     val liquidGlassOn = LocalGlassConfig.current.material == GlassMaterial.LIQUID && glassOn
+    // 两条玻璃链路**互斥地**录屏，不要同时挂上（T1：拆逐帧全屏重录链的一半）。
+    //
+    // `glassEffect` 在 LIQUID 且有背板时走 `liquidGlassSurface(backdrop)` 后**直接
+    // return**，根本不碰 haze（见 GlassEffect.kt 的 LIQUID 分支）。也就是说默认
+    // LIQUID 档下这里的 `hazeSource` 每天都在白录一整屏 1272×2800 —— 而且 Crossfade
+    // 是全 App 的根，这一份比首页顶栏自己那份影响面更大（四个 Tab 都吃）。
+    //
+    // 为什么还留着 HazeState 而不是整个删掉：
+    // - FROSTED 档必须有人录 haze 源，这是它唯一的采样路径；
+    // - `isGlassActive(state)` 要求 state != null 才承认玻璃生效，所以对象本身
+    //   要照常 create + provide，只是**不再往它上面挂录制器**。
+    val hazeGlassOn = glassOn && !liquidGlassOn
     // 玻璃源重录触发器：录制节点只在自身重绘时重录，而信息流列表滚动不令其重绘，
     // 滚动衔接处玻璃会采样到上一帧（骨架屏/新卡片更替最明显；FM/直播页内容平稳
     // 故不可见）。对拖拽+惯性逐帧计 tick：Crossfade 的 drawWithContent 读它强制
@@ -684,7 +696,7 @@ private fun MainTabsScaffold(
                     drawContent()
                 }
                 .then(if (liquidGlassOn) backdropSource.modifier else Modifier)
-                .then(if (glassOn) Modifier.hazeSource(glassState) else Modifier)
+                .then(if (hazeGlassOn) Modifier.hazeSource(glassState) else Modifier)
                 // 页面底色必须在录制链**内**：双列卡片文字区无底色（透明），底色若画在
                 // 外层 Box，背板里文字区就是空像素，玻璃采样后渲染成黑色（封面不透明
                 // 所以正常——这正是"图片正常、简介发黑"的根因）。

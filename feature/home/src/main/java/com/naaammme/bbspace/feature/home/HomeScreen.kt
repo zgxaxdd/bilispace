@@ -179,11 +179,33 @@ fun HomeScreen(
     // GlassSourceRefresher 逐帧 tick（滚动衔接处残影修复，见 GlassRefresher.kt）。
     val homeGlassState = remember { HazeState() }
     val homeGlassOn = isGlassActive(homeGlassState)
-    val homeGlassRefresher = remember { GlassSourceRefresher() }
     // 顶栏官方液态：Pager 内容录进 miuix 背板（顶栏是悬浮兄弟节点，无自采样），
     // 由 LocalLiquidBackdrop 下发给顶栏的 glassEffect（LIQUID 档走 drawBackdrop）
     val homeLiquidBackdrop = rememberLayerBackdrop()
     val homeLiquidOn = LocalGlassConfig.current.material == GlassMaterial.LIQUID && homeGlassOn
+    // ── 拆掉"同一帧两遍全屏离屏录制"（任务书 T1）────────────────────────────
+    // 本页在 AppNavHost 的 Crossfade **里面**，而那个 Crossfade 已经把同一块屏幕
+    // 录进了主框架的 haze 源与 miuix 背板（供 Dock / 胶囊采样）。首页再为了自己的
+    // 顶栏录一份，等于同一片像素每帧录两遍。
+    //
+    // 不能直接复用主框架那份：主框架的源把**首页顶栏也包进去了**，顶栏采样含自身的
+    // 背板会自采样鬼影（这正是当初建私有源的理由）。所以这里改为**只录消费端真正
+    // 会用到的那一种**：
+    //   LIQUID 档 → glassEffect 走 `liquidGlassSurface(backdrop)` 后**直接 return**，
+    //              根本不碰 haze（见 GlassEffect.kt 的 LIQUID 分支）；
+    //   FROSTED 档 → 没有背板路径，才需要 hazeSource。
+    // 于是默认 LIQUID 档下，hazeSource 这一路是纯粹的白录 —— 关掉后每滚动帧少一次
+    // 1272×2800 的全屏离屏录制。保留 homeGlassState 本身仍然要 provide 给顶栏：
+    // `isGlassActive(state)` 要求 state != null 才承认玻璃生效。
+    val homeHazeOn = homeGlassOn && !homeLiquidOn
+    // tick 门控：顶栏**完全滚出屏幕**后，首页这套私有玻璃源就没有任何可见消费者了
+    // （顶栏是唯一消费者），继续逐帧 tick 只是让全屏重录白跑。滚动中顶栏正是隐藏的
+    // 常态，所以这一刀砍掉的是滚动路径上大部分的第二份录制。
+    // 读的是 snapshot state 而非组合期值：nestedScroll 回调里读不会触发重组，
+    // 顶栏滑回来的那一帧门控自动打开、立即恢复重录（最多落后一次分发，肉眼不可见）。
+    val homeGlassRefresher = remember {
+        GlassSourceRefresher { topBarOffsetPx < topBarHeightState.value }
+    }
 
     Box(
         modifier = Modifier
@@ -202,7 +224,7 @@ fun HomeScreen(
                     homeGlassRefresher.frame
                     drawContent()
                 }
-                .then(if (homeGlassOn) Modifier.hazeSource(homeGlassState) else Modifier)
+                .then(if (homeHazeOn) Modifier.hazeSource(homeGlassState) else Modifier)
                 .then(if (homeLiquidOn) Modifier.layerBackdrop(homeLiquidBackdrop) else Modifier)
                 // 底色画进录制链内（理由同 AppNavHost Crossfade：文字区透明不能进背板）
                 .background(MaterialTheme.colorScheme.background)
