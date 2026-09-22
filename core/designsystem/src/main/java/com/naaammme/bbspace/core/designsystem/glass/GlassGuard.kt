@@ -45,16 +45,15 @@ class GlassGuardTracker internal constructor() {
         if (isJank) jankCounts[idx]++
     }
 
-    /** 每 [WINDOW_MS] 调一次：按最近 N 个窗口计算 jank 占比并施加滞后。 */
+    /** 每 [WINDOW_MS] 调一次：结算当前窗口的 jank 占比并施加滞后。 */
     fun tick(nowMs: Long) {
         slot++
-        val activeSlot = slot.coerceAtMost(WINDOW_SLOTS)
-        var frames = 0
-        var janks = 0
-        for (i in 0 until activeSlot) {
-            frames += frameCounts[i]
-            janks += jankCounts[i]
-        }
+        // 结算即清空：形成真正的滑动窗口。此前计数无限累积，jank 百分比被
+        // 历史稀释，守卫永不触发（AI 复核发现，属实）。
+        val frames = frameCounts[0]
+        val janks = jankCounts[0]
+        frameCounts[0] = 0
+        jankCounts[0] = 0
         if (frames < MIN_FRAMES_PER_WINDOW) return
         val percent = janks * 100f / frames
 

@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.theme.AnimationSpeed
 import com.naaammme.bbspace.core.designsystem.theme.CornerStyle
 import com.naaammme.bbspace.core.designsystem.theme.DEFAULT_PULL_REFRESH_DISTANCE_DP
@@ -53,11 +54,14 @@ class AppSettings @Inject constructor(
     private val pullRefreshDistanceKey = floatPreferencesKey("pull_refresh_distance")
     private val animationSpeedKey = stringPreferencesKey("animation_speed")
     private val transitionStyleKey = stringPreferencesKey("transition_style")
+    /** 一次性迁移门闩：默认转场从缩放改为左右滑动后，只改写一次已落盘的旧默认值。 */
+    private val transitionDefaultMigratedKey = booleanPreferencesKey("transition_default_migrated_v1")
     private val isPureBlackKey = booleanPreferencesKey("is_pure_black")
     private val frameRateModeKey = stringPreferencesKey("frame_rate_mode")
     private val cornerStyleKey = stringPreferencesKey("corner_style")
     private val uiStyleKey = stringPreferencesKey("ui_style")
     private val glassMaterialKey = stringPreferencesKey("glass_material")
+    private val glassStrengthKey = floatPreferencesKey("glass_strength")
     // 旧版两键保留读取用于迁移，不再写入
     private val glassEnabledLegacyKey = booleanPreferencesKey("glass_enabled")
     private val glassStyleLegacyKey = stringPreferencesKey("glass_style")
@@ -69,6 +73,9 @@ class AppSettings @Inject constructor(
     private val autoCheckUpdateKey = booleanPreferencesKey("auto_check_update")
     private val useSystemDnsKey = booleanPreferencesKey("use_system_dns")
     private val fixBottomBarKey = booleanPreferencesKey("fix_bottom_bar")
+    private val topProgressiveFadeKey = booleanPreferencesKey("top_progressive_fade")
+    private val playerControlsBlurKey = booleanPreferencesKey("player_controls_blur")
+    private val playerControlsMaterialKey = stringPreferencesKey("player_controls_material")
 
     val themeConfig: Flow<ThemeConfig> = context.appSettingsDataStore.data.map { prefs ->
         ThemeConfig(
@@ -88,8 +95,7 @@ class AppSettings @Inject constructor(
             animationSpeed = prefs[animationSpeedKey]?.let { AnimationSpeed.valueOf(it) }
                 ?: defaultThemeConfig.animationSpeed,
             transitionStyle = prefs[transitionStyleKey]?.let { TransitionStyle.valueOf(it) }
-                ?: defaultThemeConfig.transitionStyle,
-            isPureBlack = prefs[isPureBlackKey] ?: defaultThemeConfig.isPureBlack,
+                ?: defaultThemeConfig.transitionStyle,            isPureBlack = prefs[isPureBlackKey] ?: defaultThemeConfig.isPureBlack,
             preferredFrameRate = prefs[frameRateModeKey]?.let { FrameRateMode.valueOf(it) }
                 ?: defaultThemeConfig.preferredFrameRate,
             cornerStyle = prefs[cornerStyleKey]?.let { CornerStyle.valueOf(it) }
@@ -98,9 +104,36 @@ class AppSettings @Inject constructor(
             // 将来翻转默认风格（MATERIAL → IOS）时本文件零改动。
             uiStyle = prefs[uiStyleKey]?.let { UiStyle.valueOf(it) }
                 ?: defaultThemeConfig.uiStyle,
-            glassMaterial = resolveGlassMaterial(prefs)
+            glassMaterial = resolveGlassMaterial(prefs),
+            glassStrength = prefs[glassStrengthKey] ?: defaultThemeConfig.glassStrength
         )
     }.distinctUntilChanged()
+
+    /**
+     * 一次性迁移：把**旧默认值** `SHARED_AXIS_Z`（缩放）改写为新默认 `SHARED_AXIS_X`（左右滑动）。
+     *
+     * 为什么需要迁移而不是只改 `ThemeConfig` 默认值：`themeConfig` 的读法是
+     * "prefs 里有值就用 prefs，没有才用默认"。老用户（以及任何在本改动之前
+     * 跑过一次的设置）DataStore 里**已经落盘了 `SHARED_AXIS_Z`**，只改默认值
+     * 对他们完全无效——开箱仍是整页缩放。
+     *
+     * 边界（重要）：
+     * - 只迁移"恰好等于旧默认值"的记录。用户**主动选过**缩放时值也是
+     *   `SHARED_AXIS_Z`，无法与"从未改过"区分，因此会被一并迁移。
+     *   这是刻意的取舍：缩放是本次要淘汰的默认观感，而设置项本身仍在，
+     *   用户想用缩放随时可以重新选回来。
+     * - 用 [transitionDefaultMigratedKey] 做一次性门闩，迁移后不再触碰该键，
+     *   用户在迁移之后手动改回 `SHARED_AXIS_Z` 不会被再次改写。
+     */
+    suspend fun migrateTransitionStyleDefaultIfNeeded() {
+        context.appSettingsDataStore.edit { prefs ->
+            if (prefs[transitionDefaultMigratedKey] == true) return@edit
+            if (prefs[transitionStyleKey] == TransitionStyle.SHARED_AXIS_Z.name) {
+                prefs[transitionStyleKey] = TransitionStyle.SHARED_AXIS_X.name
+            }
+            prefs[transitionDefaultMigratedKey] = true
+        }
+    }
 
     suspend fun updateThemeMode(mode: ThemeMode) {
         context.appSettingsDataStore.edit { it[themeModeKey] = mode.name }
@@ -166,6 +199,10 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.edit { it[glassMaterialKey] = material.name }
     }
 
+    suspend fun updateGlassStrength(strength: Float) {
+        context.appSettingsDataStore.edit { it[glassStrengthKey] = strength.coerceIn(0.5f, 2f) }
+    }
+
     /**
      * 三档材质读取与旧值迁移（终版方案 3.1）：新 key 缺失时由旧两键推导——
      * 开+STABLE→FROSTED、开+RICH→LIQUID、关→OFF；全新安装默认 FROSTED。
@@ -178,7 +215,10 @@ class AppSettings @Inject constructor(
                 .firstOrNull { it.name == raw }
                 ?: defaultThemeConfig.glassMaterial
         }
-        val legacyEnabled = prefs[glassEnabledLegacyKey] ?: false
+        // 旧 key 缺失 = 从未设置过（新装 / 未开过玻璃）→ 采用新默认 FROSTED，
+        // 不能把"从未设置"当"用户主动关闭"（AI 复核发现，属实）
+        val legacyEnabled = prefs[glassEnabledLegacyKey]
+            ?: return defaultThemeConfig.glassMaterial
         val legacyStyle = prefs[glassStyleLegacyKey]
         return when {
             !legacyEnabled ->
@@ -205,6 +245,32 @@ class AppSettings @Inject constructor(
     val autoCheckUpdate: Flow<Boolean> = context.appSettingsDataStore.data.map { it[autoCheckUpdateKey] ?: true }
     val useSystemDns: Flow<Boolean> = context.appSettingsDataStore.data.map { it[useSystemDnsKey] ?: false }
     val fixBottomBar: Flow<Boolean> = context.appSettingsDataStore.data.map { it[fixBottomBarKey] ?: true }
+
+    /** 顶部渐进消隐（同步 BiliPai 上游）：内容滚入顶栏时按 Telegram 5 阶非线性融进底色。 */
+    val topProgressiveFade: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[topProgressiveFadeKey] ?: true }
+
+    /**
+     * 播放页控件模糊：进度条 / 中央播放钮 / 控制条 / 顶栏浮层是否采样实时视频画面做
+     * 磨砂玻璃。关闭或背板不可用时回落「黑遮罩 + 白前景」纯色（可读性优先）。
+     */
+    val playerControlsBlur: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[playerControlsBlurKey] ?: true }
+
+    /**
+     * 播放页控件用哪种玻璃材质（磨砂 / 液态），与全局 [ThemeConfig.glassMaterial] **独立**。
+     *
+     * 为什么单独给播放页一个开关：全局材质是给 chrome（Dock / 顶栏 / 胶囊）定的，
+     * 而播放控件叠在**实时视频画面**上——液态的强折射在大面积动态画面上容易糊，
+     * 磨砂更稳；反过来喜欢液态质感的人又希望播放控件也跟上。两者诉求冲突，
+     * 所以拆成独立设置。默认磨砂（画面可读性优先）。
+     */
+    val playerControlsMaterial: Flow<GlassMaterial> =
+        context.appSettingsDataStore.data.map { prefs ->
+            prefs[playerControlsMaterialKey]?.let { raw ->
+                runCatching { GlassMaterial.valueOf(raw) }.getOrNull()
+            } ?: GlassMaterial.FROSTED
+        }
 
     private val interestDoneKey = booleanPreferencesKey("interest_done")
     val interestDone: Flow<Boolean> = context.appSettingsDataStore.data.map { it[interestDoneKey] ?: false }
@@ -239,6 +305,18 @@ class AppSettings @Inject constructor(
 
     suspend fun updateFixBottomBar(enabled: Boolean) {
         context.appSettingsDataStore.edit { it[fixBottomBarKey] = enabled }
+    }
+
+    suspend fun updateTopProgressiveFade(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[topProgressiveFadeKey] = enabled }
+    }
+
+    suspend fun updatePlayerControlsBlur(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[playerControlsBlurKey] = enabled }
+    }
+
+    suspend fun updatePlayerControlsMaterial(material: GlassMaterial) {
+        context.appSettingsDataStore.edit { it[playerControlsMaterialKey] = material.name }
     }
 
     suspend fun markInterestDone() {

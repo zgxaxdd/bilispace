@@ -82,6 +82,12 @@ class AppInitializer @Inject constructor(
         reportPlayerBinderRetention()
 
         initScope.launch {
+            // 一次性设置迁移：默认转场 缩放(SHARED_AXIS_Z) → 左右滑动(SHARED_AXIS_X)。
+            // 幂等的一次写；失败不挡启动，只留痕。
+            launch {
+                runCatching { appSettings.migrateTransitionStyleDefaultIfNeeded() }
+                    .onFailure { Logger.w(TAG) { "转场默认值迁移失败：${it.message}" } }
+            }
             val useSystemDns = appSettings.useSystemDns.first()
             biliDns.start(useSystemDns) {
                 if (!initialized) return@start

@@ -7,20 +7,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeInputScale
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.HazeColorEffect
-import dev.chrisbanes.haze.blur.blurEffect
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.blur.hazeBlur
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
@@ -35,6 +38,9 @@ private fun isDarkTheme(): Boolean =
  * 手动构造 HazeBlurStyle（替代 HazeMaterials 预设）：让 [GlassBudget.backgroundAlphaMultiplier]
  * 真正消费——染色 alpha = 材质基础 alpha × 预算乘数（终版方案 3.2 修复 #2）。
  * 基础 alpha 取自 HazeMaterials 同名材质的实测常量（ultraThin .35/.55、thin .60/.65）。
+ *
+ * haze 2.0 起 `HazeBlurStyle` 由**不可变配置 + lambda 构造**（旧的可变属性构造器已移除），
+ * 所以这里用 `HazeBlurStyle { ... }` 写法；Style 本身不可变、可跨 modifier 复用。
  */
 private fun styleFor(
     config: GlassConfig,
@@ -44,20 +50,22 @@ private fun styleFor(
     budget: GlassBudget
 ): HazeBlurStyle {
     val isHeader = surfaceType == GlassSurfaceType.HEADER
+    val isLiquid = config.material == GlassMaterial.LIQUID
     val (lightAlpha, darkAlpha, blurRadius) = when {
-        config.material == GlassMaterial.LIQUID -> Triple(0.60f, 0.65f, 24.dp)
         isHeader -> Triple(0.60f, 0.65f, 24.dp)
+        // LIQUID 清玻璃：低模糊 + 低染色，内容从玻璃后流过（BiliPai BALANCED 观感）
+        isLiquid -> Triple(0.38f, 0.30f, 6.dp)
         else -> Triple(0.35f, 0.55f, 20.dp)
     }
     val base = if (dark) darkAlpha else lightAlpha
     val tintAlpha = (base * budget.backgroundAlphaMultiplier).coerceIn(0f, 1f)
-    return HazeBlurStyle(
-        backgroundColor = container,
-        colorEffects = listOf(
-            HazeColorEffect.tint(container.copy(alpha = tintAlpha))
-        ),
-        blurRadius = blurRadius
-    )
+    return HazeBlurStyle {
+        backgroundColor(container)
+        colorEffects(
+            listOf(HazeColorEffect.tint(container.copy(alpha = tintAlpha)))
+        )
+        blurRadius(blurRadius)
+    }
 }
 
 /**
@@ -67,9 +75,13 @@ private fun styleFor(
  * 关门顺序：用户 OFF 档 / 非 iOS 风格 / state 为空 → 原样返回（调用方半透明底
  * 即关闭态）；预算 maxBlurLevel==0（帧守卫降级 / Reduced 档）→ 原样返回。
  *
- * LIQUID 档在 hazeEffect **之外**叠加 [liquidGlassSurfaceV2]——graphicsLayer 的
- * RenderEffect 采样的是"模糊背景 + 染色 + 内容"的合成层，折射/高光作用于完整
- * 玻璃观感（终版方案 3.2 修复 #1：liquidGlassEdge 零调用问题）。
+ * LIQUID 档主路线（BiliPai v0.2.3-beta.40 官方观感）：悬浮玻璃采样 miuix 的
+ * [LocalLiquidBackdrop] 背板（宿主 ChromeBackdropSource 录制 + 滚动逐帧 tick 重录，
+ * 见 AppNavHost glassFrameTick），经 [liquidGlassSurface] 做 blur + SDF 边缘折射 +
+ * vibrancy + 高光。宿主未录制背板或无形状（如 HEADER）时回退 Haze 路径。
+ *
+ * 历史教训（勿重蹈）：在 hazeEffect 外再包 RuntimeShader graphicsLayer 会把整个
+ * 表面渲染成空；miuix 背板若不配滚动逐帧重录，衔接处会采样到上一帧内容。
  *
  * [isScrolling] / [isTransitionRunning] 由调用方传入（修复 #3）：预算只停实时
  * 重录、不降等级（Pulsing / Popping 教训）。
@@ -108,36 +120,79 @@ fun Modifier.glassEffect(
     if (budget.maxBlurLevel <= 0) return this
 
     val container = MaterialTheme.colorScheme.surface
+
+    // LIQUID 档主路线：miuix 背板（Dock / 胶囊悬浮层由宿主录制背板）
+    if (config.material == GlassMaterial.LIQUID) {
+        val liquidBackdrop = LocalLiquidBackdrop.current
+        if (liquidBackdrop != null && shape != null) {
+            return this.liquidGlassSurface(
+                backdrop = liquidBackdrop,
+                surfaceType = surfaceType,
+                shape = shape,
+                containerColor = container,
+                isDarkTheme = dark,
+                strength = config.strength
+            )
+        }
+    }
+
+    // FROSTED 档 & LIQUID 回退（HEADER / 无背板宿主）：Haze 路径
     val style = remember(config, surfaceType, dark, container, budget) {
         styleFor(config, surfaceType, dark, container, budget)
-    }
-    val edgeTreatment = remember(shape) {
-        if (shape != null) BlurredEdgeTreatment(shape) else BlurredEdgeTreatment.Rectangle
     }
     val inputScaleFactor = remember(budget, surfaceType) {
         resolveGlassInputScale(budget, surfaceType)
     }
+    // haze 2.0：采样策略由 HazePerformanceMode 表达（旧的 HazeInputScale 已移除）。
+    // 滚动/转场期间降档以省算力；静止时用 Balanced（等价于原先的按比例降采样）。
+    val performanceMode = remember(budget) {
+        if (budget.allowRealtime) HazePerformanceMode.Balanced else HazePerformanceMode.Performance
+    }
 
-    var modifier = if (shape != null) this.clip(shape) else this
-    if (config.material == GlassMaterial.LIQUID) {
-        modifier = modifier.liquidGlassSurfaceV2()
-    }
-    return modifier.hazeEffect(state = state) {
-        blurEffect {
-            this.style = style
-            this.blurEnabled = true
-            this.blurredEdgeTreatment = edgeTreatment
-        }
-        @OptIn(ExperimentalHazeApi::class)
-        run {
-            inputScale = if (inputScaleFactor >= 1f) {
-                HazeInputScale.None
-            } else {
-                HazeInputScale.Fixed(inputScaleFactor)
-            }
-        }
-    }
+    val modifier = if (shape != null) this.clip(shape) else this
+    val liquid = config.material == GlassMaterial.LIQUID
+    // haze 2.0：`hazeEffect { blurEffect { ... } }` 的可变 DSL 已废弃，改为
+    // 「输入 + 不可变 Style + 性能模式」三件套的 hazeBlur。
+    // HazeInput.Sources(state) = 采样 hazeSource 捕获的内容（原 hazeEffect(state) 语义）。
+    // 圆角由上面 clip(shape) 负责，不再需要 BlurredEdgeTreatment。
+    val base = modifier.hazeBlur(
+        input = HazeInput.Sources(state),
+        style = style,
+        performanceMode = performanceMode
+    )
+    // 液态档圆角壳追加 Fresnel 高光边（方向光近似：左上亮、右下淡）
+    return if (liquid && shape != null) base.liquidRimStroke(shape, dark) else base
 }
+
+/**
+ * 液态玻璃高光边：沿形状轮廓描一道左上→右下衰减的细边，模拟光线掠射的
+ * Fresnel 高光。纯绘制（不采样背景），滚动/静止都无采样正确性问题。
+ */
+private fun Modifier.liquidRimStroke(shape: Shape, isDarkTheme: Boolean): Modifier =
+    drawWithContent {
+        drawContent()
+        val stroke = 1.5.dp.toPx()
+        val highlightAlpha = if (isDarkTheme) 0.35f else 0.55f
+        val brush = Brush.linearGradient(
+            colors = listOf(
+                Color.White.copy(alpha = highlightAlpha),
+                Color.White.copy(alpha = highlightAlpha * 0.35f),
+                Color.White.copy(alpha = highlightAlpha * 0.12f)
+            ),
+            start = Offset.Zero,
+            end = Offset(size.width, size.height)
+        )
+        val outline = shape.createOutline(size, layoutDirection, this)
+        when (outline) {
+            is Outline.Rounded -> drawRoundRect(
+                brush = brush,
+                cornerRadius = outline.roundRect.topLeftCornerRadius,
+                style = Stroke(width = stroke)
+            )
+            is Outline.Rectangle -> drawRect(brush = brush, style = Stroke(width = stroke))
+            is Outline.Generic -> drawPath(outline.path, brush, style = Stroke(width = stroke))
+        }
+    }
 
 /** 玻璃是否实际生效：决定调用方容器底色是否切为透明（Haze 染色接管）。 */
 @Composable

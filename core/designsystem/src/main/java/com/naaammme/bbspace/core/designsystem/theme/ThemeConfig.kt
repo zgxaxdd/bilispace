@@ -15,7 +15,10 @@ data class ThemeConfig(
     val roundScreenSafePaddingScale: Float = DEFAULT_ROUND_SCREEN_SAFE_PADDING_SCALE,
     val pullRefreshDistanceDp: Float = DEFAULT_PULL_REFRESH_DISTANCE_DP,
     val animationSpeed: AnimationSpeed = AnimationSpeed.NORMAL,
-    val transitionStyle: TransitionStyle = TransitionStyle.SHARED_AXIS_Z,
+    // 默认左右滑动（SHARED_AXIS_X）：新装/清数据后的开箱转场。
+    // 此前默认 SHARED_AXIS_Z（缩放），开箱第一眼就是"整页缩放"，观感突兀且与
+    // iOS 大圆角语言不搭；左右滑动与系统返回手势方向一致，是更安全的默认。
+    val transitionStyle: TransitionStyle = TransitionStyle.SHARED_AXIS_X,
     val isPureBlack: Boolean = false,
     val preferredFrameRate: FrameRateMode = FrameRateMode.AUTO,
     // 默认圆角由 STANDARD 提到 ROUNDED：STANDARD 下卡片圆角仅 12dp（medium），
@@ -32,7 +35,9 @@ data class ThemeConfig(
     // 液态玻璃材质包（挂在 iOS 风格上，非新风格维度）：三档 OFF/FROSTED/LIQUID，
     // 默认 FROSTED（磨砂）。MATERIAL 下不生效且置灰。
     val glassMaterial: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial =
-        com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.FROSTED
+        com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.FROSTED,
+    // 液态玻璃统一强度倍率（0.5–2.0）：缩放全部玻璃表面的模糊与折射
+    val glassStrength: Float = 1f
 )
 
 const val DEFAULT_PULL_REFRESH_DISTANCE_DP = 80f

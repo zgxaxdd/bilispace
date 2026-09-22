@@ -122,7 +122,9 @@ fun AppearanceSettingsScreen(
                 GlassSection(
                     isIOS = isIOS,
                     material = config.glassMaterial,
-                    onMaterialChange = viewModel::updateGlassMaterial
+                    strength = config.glassStrength,
+                    onMaterialChange = viewModel::updateGlassMaterial,
+                    onStrengthChange = viewModel::updateGlassStrength
                 )
             }
 
@@ -160,6 +162,37 @@ fun AppearanceSettingsScreen(
                     subtitle = "主页底栏不再随滚动自动收起",
                     checked = fixBottomBar,
                     onCheckedChange = viewModel::updateFixBottomBar
+                )
+            }
+
+            item {
+                val topFade by viewModel.topProgressiveFade.collectAsStateWithLifecycle()
+                SettingSwitch(
+                    title = "顶部渐进消隐",
+                    subtitle = "内容滚入顶栏时非线性融进底色（Telegram 5 阶算法，防马赫带）",
+                    checked = topFade,
+                    onCheckedChange = viewModel::updateTopProgressiveFade
+                )
+            }
+
+            item {
+                val playerBlur by viewModel.playerControlsBlur.collectAsStateWithLifecycle()
+                SettingSwitch(
+                    title = "播放页控件模糊",
+                    subtitle = "进度条 / 播放按钮 / 控制条采样实时画面做玻璃；关闭则回落纯色遮罩",
+                    checked = playerBlur,
+                    onCheckedChange = viewModel::updatePlayerControlsBlur
+                )
+            }
+
+            item {
+                val playerBlur by viewModel.playerControlsBlur.collectAsStateWithLifecycle()
+                val playerMaterial by viewModel.playerControlsMaterial.collectAsStateWithLifecycle()
+                PlayerControlsMaterialSelector(
+                    selected = playerMaterial,
+                    onSelect = viewModel::updatePlayerControlsMaterial,
+                    // 模糊关掉时材质无从谈起，置灰避免"选了没反应"
+                    enabled = playerBlur
                 )
             }
 
@@ -726,10 +759,60 @@ private fun CornerStyleSelector(
 }
 
 @Composable
+private fun PlayerControlsMaterialSelector(
+    selected: GlassMaterial,
+    onSelect: (GlassMaterial) -> Unit,
+    enabled: Boolean = true
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "播放页控件质感",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "磨砂 = 均匀雾面，画面上最稳；液态 = 强折射 + 高光边，质感更重",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 只给这两档：OFF 由上面的「播放页控件模糊」开关表达，避免两处开关语义重叠
+                listOf(GlassMaterial.FROSTED, GlassMaterial.LIQUID).forEach { m ->
+                    FilterChip(
+                        modifier = Modifier.weight(1f),
+                        selected = selected == m,
+                        onClick = { onSelect(m) },
+                        enabled = enabled,
+                        label = {
+                            Text(
+                                if (m == GlassMaterial.FROSTED) "磨砂" else "液态",
+                                maxLines = 1
+                            )
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun GlassSection(
     isIOS: Boolean,
     material: GlassMaterial,
-    onMaterialChange: (GlassMaterial) -> Unit
+    strength: Float,
+    onMaterialChange: (GlassMaterial) -> Unit,
+    onStrengthChange: (Float) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -771,6 +854,25 @@ private fun GlassSection(
                         }
                     )
                 }
+            }
+            if (material == GlassMaterial.LIQUID) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "统一强度（Dock / 顶栏 / 胶囊 / 角标 / 播放控件）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = strength,
+                    onValueChange = onStrengthChange,
+                    valueRange = 0.5f..2f,
+                    steps = 5
+                )
+                Text(
+                    String.format(java.util.Locale.ROOT, "%.1f×", strength),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
