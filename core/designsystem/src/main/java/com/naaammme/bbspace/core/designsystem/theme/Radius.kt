@@ -133,6 +133,13 @@ object BiliRadius {
      * 「图 + 贴在下面的小面板」而不是一张卡片（BiliPai 上游同款结构：
      * `coverShape = topRounded` + `infoSurfaceShape = bottomRounded`）。
      * 拆开之后上下两块在接缝处都是直角，拼合无缝，整卡仍由外层全圆角收圆。
+     *
+     * **不要用 `RoundedCornerShape(topStart = r, topEnd = r)` 手写替代本函数**：
+     * 那样写形状上确实等价（已用 javap 反查 androidx.compose.foundation 1.12.0 的
+     * `RoundedCornerShape$default(FFFF…)` 确认：四个角各自默认 `fconst_0` 即 0dp，
+     * **不会**从顶角继承），但它读起来像"只圆顶角"却是靠默认值碰巧成立，
+     * 而且会把半径字面量散落到调用点。本仓库曾因此有 7 处
+     * `RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)` 各写各的 28dp。
      */
     fun topRounded(radius: Dp): Shape = RoundedCornerShape(
         topStart = radius,

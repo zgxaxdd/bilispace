@@ -153,12 +153,10 @@ private fun capsuleGroupShape(index: Int, count: Int, shapes: Shapes, isIOS: Boo
         val r = BiliRadius.groupedList
         return when {
             count <= 1 -> RoundedCornerShape(r)
-            index == 0 -> RoundedCornerShape(
-                topStart = r, topEnd = r, bottomStart = 0.dp, bottomEnd = 0.dp
-            )
-            index == count - 1 -> RoundedCornerShape(
-                topStart = 0.dp, topEnd = 0.dp, bottomStart = r, bottomEnd = r
-            )
+            // 分组列表的"上下两半分角"统一走 BiliRadius 的配对助手，与首页卡片
+            // （HomeVideoPage 的封面/信息区）同一套写法，见 topRounded 的注释。
+            index == 0 -> BiliRadius.topRounded(r)
+            index == count - 1 -> BiliRadius.bottomRounded(r)
             else -> RectangleShape
         }
     }

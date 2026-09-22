@@ -55,7 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import androidx.compose.material3.BottomSheetDefaults
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
@@ -249,9 +249,9 @@ private fun DynamicPublishSheet(
     }
 
     ModalBottomSheet(
-        // iOS：弹层顶部圆角 20dp（方案 2.3 / BiliRadius.sheetTop 语义）
+        // iOS：弹层顶部圆角 28dp，只圆上两角（见 BiliRadius.sheetTop）
         shape = if (LocalUiStyle.current == UiStyle.IOS) {
-            RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+            BiliRadius.topRounded(BiliRadius.sheetTop)
         } else {
             BottomSheetDefaults.ExpandedShape
         },
