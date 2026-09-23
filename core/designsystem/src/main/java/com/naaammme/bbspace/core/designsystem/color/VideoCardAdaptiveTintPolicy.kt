@@ -78,23 +78,32 @@ fun resolveVideoCardAmbientDrawSpec(
         coverTint = coverTint,
     )
 
-    // ── 染色强度：整屏观感的调节旋钮（2026-09-22 真机截图对比后下调）──────────
-    // 原值（浅色 0.34 透明 / 0.75 混色 / 0.38 光晕）在双列信息流上会让**每张卡的
-    // 信息区呈现一块高饱和色带**：米、蓝、绿、黄相邻排布，整屏读作"拼色块"，
-    // 是当前界面最显旧的一处。取色这个功能本身要留（它让卡片与封面同源），
-    // 但应当是一层**淡染**而不是一块色板。
-    // 下调后信息区仍带封面色相，但不再与邻卡争夺注意力；因为底色更浅，
-    // 正文与次要文字的对比度也随之上抬（对 T4.2 的次要文字偏弱是正向的）。
-    // 单测钉的是关系（半透明、光晕>0、深色更强、data saver 更不透明），不钉数值，
-    // 所以这次调参不会让测试假绿。
+    // ── 染色强度：整屏观感的调节旋钮 ────────────────────────────────────────
+    //
+    // 这个值被改过两轮，两次的理由都成立，但方向相反 —— 记在这里免得再被无声改动：
+    //
+    // 轮 1（上游原值）：浅色 0.34 透明 / 0.75 混色 / 0.38 光晕。
+    // 轮 2（`d70fcce0`，对着真机截图改的）：下调到 0.20 / 0.58 / 0.22，
+    //   理由原文「原值在双列信息流上会让每张卡的信息区呈现一块高饱和色带……
+    //   整屏读作拼色块，是当前界面最显旧的一处」。方向：**整屏统一优先**。
+    // 轮 3（本次）：上调到 0.28 / 0.68 / 0.30。
+    //   理由：轮 2 压过头了 —— `blend × alpha` 从上游的 0.255 掉到 0.116，
+    //   **染色可见度只剩上游的 45%**，用户直接反馈"颜色提取有问题/没有提取色"。
+    //   本次取上游与轮 2 的中间偏上：既看得出卡片与封面同源，又不回到"拼色块"。
+    //
+    // **判据不是"哪个值好看"**（那要有设备才能判），而是：
+    // 1. `blend × alpha` 必须落在一个下限之上（见 `tintVisibility_isNotTooFaint`），
+    //    否则用户会把"太淡"读成"功能坏了"——这正是本次的起因；
+    // 2. 关系不变：半透明、深色更强、data saver 更不透明（现有 15 条单测钉的就是这些）。
+    // 3. 真机观感仍需复核：见 docs/2026-09-22-卡片动态取色-任务书.md §五。
     val glassTransparency = if (isDarkTheme) {
-        if (isDataSaverActive) 0.65f else 0.28f
+        if (isDataSaverActive) 0.65f else 0.34f
     } else {
-        if (isDataSaverActive) 0.70f else 0.20f
+        if (isDataSaverActive) 0.70f else 0.28f
     }
 
     val baseColor = if (hasValidCoverTint) {
-        val blendFraction = if (isDarkTheme) 0.72f else 0.58f
+        val blendFraction = if (isDarkTheme) 0.80f else 0.68f
         lerp(defaultContainerColor, coverTint!!, blendFraction).copy(alpha = glassTransparency)
     } else {
         // 无壁纸且无封面：保持中性玻璃表面，不要沿用上一张封面的颜色
@@ -102,14 +111,14 @@ fun resolveVideoCardAmbientDrawSpec(
     }
 
     val glowAlpha = if (hasValidCoverTint) {
-        if (isDarkTheme) 0.34f else 0.22f
+        if (isDarkTheme) 0.42f else 0.30f
     } else {
         0f
     }
 
     val finalBorderColor = if (hasValidCoverTint) {
         val borderBlendFraction = if (isDarkTheme) 0.50f else 0.40f
-        val borderAlpha = if (isDarkTheme) 0.24f else 0.32f
+        val borderAlpha = if (isDarkTheme) 0.28f else 0.40f
         val baseBorder = Color.White.copy(alpha = borderAlpha)
         lerp(baseBorder, coverTint!!, borderBlendFraction).copy(alpha = borderAlpha)
     } else {

@@ -133,6 +133,103 @@ class VideoCardAdaptiveTintPolicyTest {
         assertTrue(spec.borderColor.alpha > 0f)
     }
 
+    // ── 染色强度的数值守卫 ────────────────────────────────────────────────
+    //
+    // 背景：这组参数被改过两轮，方向相反，而现有 15 条单测**只钉关系不钉数值** ——
+    // 所以两轮改动都没让测试报警，问题只能等用户肉眼发现。下面的断言就是补这个缺口。
+    //
+    // 判据选「色偏 × alpha」而不是直接钉 0.68 / 0.28 这些字面量，有两个原因：
+    // 1. 它测的是**用户实际看到的东西**（颜色偏离背景多少、又有多不透明）；
+    // 2. 它对"换个封面色"不敏感，因此不会把染色强度与色彩细节耦合在一起 ——
+    //    后者才是脆弱的钉法（改个测试用色就要改期望值）。
+    //
+    // 阈值来历（用本文件的 coverBlue = 0xFF1E5AA8 实测）：
+    // - 上游原值（浅 0.75×0.34）→ 0.224；深（0.85×0.38）→ 0.284
+    // - `d70fcce0` 下调后（浅 0.58×0.20）→ 0.102；深（0.72×0.28）→ 0.171
+    // - 本次折中（浅 0.68×0.28）→ 0.168；深（0.80×0.34）→ 0.239
+    // 取 0.15 为下限：**能挡住下调到 0.102 的那次**，又给折中值留出余量。
+    // 换言之，若有人再把强度压到"用户读作没上色"，这条会红。
+
+    /** 容器色相对默认底色的最大通道偏移（0..1）。lerp 是逐通道线性，故它正比于混色比例。 */
+    private fun channelDelta(a: Color, b: Color): Float = maxOf(
+        kotlin.math.abs(a.red - b.red),
+        kotlin.math.abs(a.green - b.green),
+        kotlin.math.abs(a.blue - b.blue)
+    )
+
+    /**
+     * 染色可见度 = 色偏 × alpha。等价于 `混色比例 × 通道差 × 透明度`，
+     * 即"这层颜色落在背景上，最终让背景偏离了多少"。
+     */
+    private fun tintVisibility(container: Color, defaultContainer: Color): Float =
+        channelDelta(container, defaultContainer) * container.alpha
+
+    @Test
+    fun tintVisibility_isNotTooFaint_inLightTheme() {
+        val spec = resolveVideoCardAmbientDrawSpec(
+            coverTint = coverBlue, isDarkTheme = false,
+            defaultContainerColor = light, defaultBorderColor = neutralBorder
+        )
+        val visibility = tintVisibility(spec.containerColor, light)
+        assertTrue(
+            "浅色主题染色可见度只有 $visibility，低于下限 0.15 —— " +
+                "用户会把「太淡」读成「没取到色」。历史上 0.58×0.20 那版就是 0.102，" +
+                "正是这个问题的起因。",
+            visibility >= 0.15f
+        )
+    }
+
+    @Test
+    fun tintVisibility_isNotTooFaint_inDarkTheme() {
+        val spec = resolveVideoCardAmbientDrawSpec(
+            coverTint = coverBlue, isDarkTheme = true,
+            defaultContainerColor = dark, defaultBorderColor = neutralBorder
+        )
+        val visibility = tintVisibility(spec.containerColor, dark)
+        assertTrue(
+            "深色主题染色可见度只有 $visibility，低于下限 0.15",
+            visibility >= 0.15f
+        )
+    }
+
+    @Test
+    fun tintVisibility_isNotOverpowering() {
+        // 反向守卫：也不能压成"纯色板"。上限取 0.45 —— 上游最激进的档位是 0.284，
+        // 留足余量，只用来挡住"把 blend 拉到 1.0 且 alpha 拉到 0.6"这类极端改动。
+        val lightSpec = resolveVideoCardAmbientDrawSpec(
+            coverTint = coverBlue, isDarkTheme = false,
+            defaultContainerColor = light, defaultBorderColor = neutralBorder
+        )
+        val darkSpec = resolveVideoCardAmbientDrawSpec(
+            coverTint = coverBlue, isDarkTheme = true,
+            defaultContainerColor = dark, defaultBorderColor = neutralBorder
+        )
+        assertTrue(
+            "浅色染色过强（${tintVisibility(lightSpec.containerColor, light)}），会退化成纯色板",
+            tintVisibility(lightSpec.containerColor, light) <= 0.45f
+        )
+        assertTrue(
+            "深色染色过强（${tintVisibility(darkSpec.containerColor, dark)}），会退化成纯色板",
+            tintVisibility(darkSpec.containerColor, dark) <= 0.45f
+        )
+    }
+
+    @Test
+    fun glowAlpha_matchesContainerTintOrder() {
+        // 微光与底色是同一套强度语言：底色染得越重，边缘光也该越强。
+        // 这条防止"只调了底色忘了光晕"的半吊子改动。
+        val lightSpec = resolveVideoCardAmbientDrawSpec(
+            coverTint = coverBlue, isDarkTheme = false,
+            defaultContainerColor = light, defaultBorderColor = neutralBorder
+        )
+        val darkSpec = resolveVideoCardAmbientDrawSpec(
+            coverTint = coverBlue, isDarkTheme = true,
+            defaultContainerColor = dark, defaultBorderColor = neutralBorder
+        )
+        assertTrue("浅色光晕偏低：${lightSpec.coverGlowAlpha}", lightSpec.coverGlowAlpha >= 0.25f)
+        assertTrue("深色光晕偏低：${darkSpec.coverGlowAlpha}", darkSpec.coverGlowAlpha >= 0.35f)
+    }
+
     // ── resolveVideoCardAdaptiveContentColors ─────────────────────────────
 
     private val onSurface = Color(0xFF1A1A1A)
