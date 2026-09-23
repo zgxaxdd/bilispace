@@ -20,6 +20,19 @@ data class ThemeConfig(
     // iOS 大圆角语言不搭；左右滑动与系统返回手势方向一致，是更安全的默认。
     val transitionStyle: TransitionStyle = TransitionStyle.SHARED_AXIS_X,
     val isPureBlack: Boolean = false,
+    /**
+     * 推荐页卡片是否跟随**系统壁纸主色**染色（而非只用封面代表色）。
+     *
+     * **默认 true** —— 这是与 BiliPai 上游对齐的默认观感：上游在开了壁纸背景时
+     * 壁纸是唯一取色来源，封面色只作回退。BBSpace 没有自定义壁纸背景功能，
+     * 所以这里直接取**系统壁纸**的主色（`WallpaperManager.getWallpaperColors`）。
+     *
+     * 注意与 [useDynamicColor] 的区别：那个是 Android 12 的 **Monet**（影响整套
+     * 主题色板），这个是**卡片信息区的染色来源**，两者独立。
+     *
+     * 关掉后卡片退回"只用封面代表色"的路径（即接入壁纸前的行为）。
+     */
+    val wallpaperCardTint: Boolean = true,
     val preferredFrameRate: FrameRateMode = FrameRateMode.AUTO,
     // 默认圆角由 STANDARD 提到 ROUNDED：STANDARD 下卡片圆角仅 12dp（medium），
     // 观感偏方、显得陈旧；ROUNDED 给到 16dp / 大容器 24dp，与当下主流客户端

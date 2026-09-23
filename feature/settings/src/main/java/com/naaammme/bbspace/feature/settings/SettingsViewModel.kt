@@ -340,6 +340,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun updateWallpaperCardTint(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updateWallpaperCardTint(enabled)
+        }
+    }
+
     fun updateFrameRateMode(mode: FrameRateMode) {
         viewModelScope.launch {
             appSettings.updateFrameRateMode(mode)

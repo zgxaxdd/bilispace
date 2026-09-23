@@ -119,6 +119,15 @@ fun AppearanceSettingsScreen(
             }
 
             item {
+                SettingSwitch(
+                    title = "卡片跟随壁纸取色",
+                    subtitle = "推荐页卡片信息区按系统壁纸主色染色；关掉则只用封面代表色",
+                    checked = config.wallpaperCardTint,
+                    onCheckedChange = viewModel::updateWallpaperCardTint
+                )
+            }
+
+            item {
                 GlassSection(
                     isIOS = isIOS,
                     material = config.glassMaterial,

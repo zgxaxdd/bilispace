@@ -12,13 +12,12 @@ import androidx.compose.ui.graphics.luminance
  * 全部是**纯函数**：输入颜色与开关，输出颜色与透明度。不依赖 Compose 运行时、
  * 不读 CompositionLocal，因此可以在 JVM 单测里逐个断言（上游同样配了 352 行测试）。
  *
- * 上游有两路取色来源：
- * - **壁纸调色板**（跟随系统壁纸，按滚动 Y 轴插值）；
+ * 两路取色来源：
+ * - **壁纸调色板**（[WallpaperPaletteStore] 取系统壁纸主色，按滚动 Y 轴插值）；
  * - **封面代表色**（[VideoCardCoverColorStore] 提取）。
  *
- * BBSpace 目前只移植**封面代表色**这一路（壁纸那路依赖 WallpaperManager 全链路，
- * 单独一期做）。因此策略函数保留了 `wallpaperTintEnabled` 形参但调用方传 false，
- * 这样将来接壁纸时不需要改签名与测试。
+ * 优先级照搬上游：**壁纸开着时壁纸是唯一来源，封面色只作为无壁纸时的回退**
+ * （见 [shouldUseCoverTintForCard]）。
  */
 
 /**
@@ -34,6 +33,52 @@ data class VideoCardAmbientDrawSpec(
     val coverGlowAlpha: Float,
     val borderColor: Color
 )
+
+/**
+ * 壁纸调色板：从系统壁纸取出的主/次/三级色。
+ *
+ * [stops] 是**按屏幕 Y 轴从上到下**排列的色段，供 [interpolateWallpaperColor] 插值。
+ * 上游自定义壁纸按高度切 5 片聚类；BBSpace 只有系统给的 3 个色，所以是 3 段。
+ * 段数不同不影响插值 —— 见该函数的实现。
+ */
+@Immutable
+data class WallpaperPalette(
+    val topColor: Color,
+    val bottomColor: Color,
+    val dominantColor: Color = topColor,
+    val stops: List<Color> = listOf(topColor, bottomColor)
+)
+
+/**
+ * 当前壁纸调色板（由宿主 provide；未提供时为 null）。
+ *
+ * 用 `staticCompositionLocalOf` 而非 `compositionLocalOf`：调色板**极少变**
+ * （换壁纸才变），不需要细粒度失效；static 版本读取开销更低，而卡片在滚动帧里会读它。
+ */
+val LocalWallpaperPalette = staticCompositionLocalOf<WallpaperPalette?> { null }
+
+/**
+ * 按屏幕 Y 轴位置在调色板色段之间线性插值。
+ *
+ * [yFraction] 是卡片在屏幕上的纵向位置（0 = 顶部，1 = 底部）；本函数内部再钳一次，
+ * 越界不抛。
+ *
+ * 为什么按位置插值而不是全屏一个色：滚动时卡片自上而下移动，若所有卡片同色，
+ * 就失去了"色彩随位置流动"的观感；按位置取色让顶部卡片偏 [WallpaperPalette.topColor]、
+ * 底部偏 [WallpaperPalette.bottomColor]，滚动时颜色随之过渡。这是上游强调 120fps
+ * 轻量的原因 —— 本函数是纯浮点运算，**无堆分配**（`lerp` 返回 inline value class）。
+ */
+fun interpolateWallpaperColor(palette: WallpaperPalette, yFraction: Float): Color {
+    val clamped = yFraction.coerceIn(0f, 1f)
+    val stops = palette.stops
+    if (stops.isEmpty()) return palette.topColor
+    if (stops.size == 1) return stops[0]
+    val scaled = clamped * (stops.size - 1)
+    // coerceIn 防浮点误差：clamped==1f 时 scaled 可能算出 size-1，导致 index+1 越界
+    val index = scaled.toInt().coerceIn(0, stops.size - 2)
+    val fraction = scaled - index
+    return lerp(stops[index], stops[index + 1], fraction)
+}
 
 /**
  * 是否该用封面取色。
@@ -63,9 +108,21 @@ fun resolveVideoCardAmbientDrawSpec(
     defaultBorderColor: Color,
     wallpaperTintEnabled: Boolean = false,
     isDataSaverActive: Boolean = false,
-    frostedGlassEnabled: Boolean = true
+    frostedGlassEnabled: Boolean = true,
+    /**
+     * 壁纸调色板。仅当 [wallpaperTintEnabled] 为 true 时参与决策。
+     *
+     * 放在形参末尾并给默认值：这样所有既有调用点与测试**无需改动**即可编译，
+     * 且不传时行为与接入壁纸前完全一致（回归安全）。
+     */
+    wallpaperPalette: WallpaperPalette? = null,
+    /** 卡片在屏幕上的纵向位置（0 顶部 / 1 底部），用于在 [wallpaperPalette] 的色段间插值。 */
+    yFraction: Float = 0.5f
 ): VideoCardAmbientDrawSpec {
-    if (!frostedGlassEnabled || (!wallpaperTintEnabled && coverTint == null)) {
+    // 上游语义：壁纸开启时，**壁纸就是唯一来源**，即使调色板还没加载好也不能退回封面色
+    // （否则会先闪一下封面色再变壁纸色）。所以这里的判据是"壁纸开着或有封面色"。
+    val wallpaperActive = wallpaperTintEnabled
+    if (!frostedGlassEnabled || (!wallpaperActive && coverTint == null)) {
         return VideoCardAmbientDrawSpec(
             containerColor = defaultContainerColor,
             coverGlowAlpha = 0f,
@@ -102,14 +159,28 @@ fun resolveVideoCardAmbientDrawSpec(
         if (isDataSaverActive) 0.70f else 0.28f
     }
 
-    val baseColor = if (hasValidCoverTint) {
-        val blendFraction = if (isDarkTheme) 0.80f else 0.68f
-        lerp(defaultContainerColor, coverTint!!, blendFraction).copy(alpha = glassTransparency)
-    } else {
-        // 无壁纸且无封面：保持中性玻璃表面，不要沿用上一张封面的颜色
-        defaultContainerColor.copy(alpha = glassTransparency)
+    val baseColor = when {
+        // ① 壁纸路：直接用插值后的**真实壁纸色**，不与容器底色混合稀释。
+        //    上游注释原文：「直接采用壁纸取色插值后的真实色彩，杜绝与白色容器底色混合稀释」。
+        //    混合会把壁纸色冲淡成灰白，失去"跟随壁纸"的意义。
+        wallpaperActive && wallpaperPalette != null -> {
+            interpolateWallpaperColor(wallpaperPalette, yFraction)
+                .copy(alpha = glassTransparency)
+        }
+        // ② 壁纸开着但调色板还没加载好：保持中性玻璃表面，**不要**退回封面色。
+        //    否则会先闪一下上一张卡/封面颜色，等壁纸色到位再跳变。
+        wallpaperActive -> defaultContainerColor.copy(alpha = glassTransparency)
+        // ③ 封面路：与容器底色按比例混合（不直接铺满，否则卡片变成一块纯色板、失去玻璃感）
+        hasValidCoverTint -> {
+            val blendFraction = if (isDarkTheme) 0.80f else 0.68f
+            lerp(defaultContainerColor, coverTint!!, blendFraction).copy(alpha = glassTransparency)
+        }
+        // ④ 都没有：中性玻璃表面
+        else -> defaultContainerColor.copy(alpha = glassTransparency)
     }
 
+    // 微光与描边只跟**封面色**走：壁纸路没有"封面边缘"这个概念，
+    // 给它加光晕等于凭空出现无来源的光（上游同样只在 hasValidCoverTint 时给强度）。
     val glowAlpha = if (hasValidCoverTint) {
         if (isDarkTheme) 0.42f else 0.30f
     } else {

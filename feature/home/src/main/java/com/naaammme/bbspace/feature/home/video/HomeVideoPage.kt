@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,7 +52,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -65,6 +68,7 @@ import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.designsystem.color.LocalHomeCardDynamicTintEnabled
+import com.naaammme.bbspace.core.designsystem.color.LocalWallpaperPalette
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAdaptiveContentColors
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawSpec
@@ -377,6 +381,15 @@ private fun FeedCard(
         useLargeCover = singleColumn
     )
     val dynamicTintEnabled = LocalHomeCardDynamicTintEnabled.current
+    // 壁纸调色板（宿主按开关 provide；关掉时为 null → 退回封面路）
+    val wallpaperPalette = LocalWallpaperPalette.current
+    val wallpaperTintEnabled = wallpaperPalette != null
+    // 卡片在屏幕上的纵向位置（0 顶部 / 1 底部），用于在壁纸色段之间插值。
+    //
+    // 用 **Float state + onGloballyPositioned 写** 而不是组合期读一个 Dp：
+    // 滚动时位置每帧都变，若它进组合就会让整张卡片每帧重组（本文件 :310 一带
+    // 已经在为顶栏避免同类问题）。这里只在绘制期读 floatValue，滚动帧只重绘不重组。
+    val cardYFraction = remember { mutableFloatStateOf(0.5f) }
     val tintScope = rememberCoroutineScope()
     var coverTint by remember(coverCacheKey) {
         mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverCacheKey))
@@ -460,7 +473,11 @@ private fun FeedCard(
             isDarkTheme = darkTheme,
             defaultContainerColor = containerColor,
             defaultBorderColor = if (darkTheme) Color.White.copy(alpha = 0.25f)
-            else Color.White.copy(alpha = 0.40f)
+            else Color.White.copy(alpha = 0.40f),
+            wallpaperTintEnabled = wallpaperTintEnabled,
+            wallpaperPalette = wallpaperPalette,
+            // 绘制期读：滚动帧只重绘不重组（见 cardYFraction 的注释）
+            yFraction = cardYFraction.floatValue
         )
     } else {
         null
@@ -605,7 +622,22 @@ private fun FeedCard(
         // containerColor（双列即 Transparent），行为不变。
         // 铺在**整卡**上而不是信息区，是"卡片与简介成为一个整体"的关键。
         containerColor = infoDrawSpec?.containerColor ?: containerColor,
-        modifier = Modifier.fillMaxWidth(),
+        // 记录卡片在屏幕上的纵向位置，供壁纸色按位置插值。
+        //
+        // 写的是 Float state（不是普通变量）：绘制期读 floatValue 时不进组合，
+        // 所以滚动帧只重绘不重组。`windowSize` 用根窗口高度而非卡片自身高度 ——
+        // 要的是"卡片在屏幕上的相对位置"，分母必须是屏幕。
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                val screenH = coords.parentLayoutCoordinates
+                    ?.size?.height?.toFloat()
+                    ?: coords.size.height.toFloat()
+                if (screenH > 0f) {
+                    cardYFraction.floatValue =
+                        (coords.positionInParent().y / screenH).coerceIn(0f, 1f)
+                }
+            },
         // 无缝动画锚点铺满**整张卡片**（封面 + 简介区）。
         //
         // 依据：OPPO 无缝动画里**锚点矩形就是过渡的几何范围**。官方 B 站客户端

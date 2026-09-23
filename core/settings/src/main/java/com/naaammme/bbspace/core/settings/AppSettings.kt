@@ -57,6 +57,7 @@ class AppSettings @Inject constructor(
     /** 一次性迁移门闩：默认转场从缩放改为左右滑动后，只改写一次已落盘的旧默认值。 */
     private val transitionDefaultMigratedKey = booleanPreferencesKey("transition_default_migrated_v1")
     private val isPureBlackKey = booleanPreferencesKey("is_pure_black")
+    private val wallpaperCardTintKey = booleanPreferencesKey("wallpaper_card_tint")
     private val frameRateModeKey = stringPreferencesKey("frame_rate_mode")
     private val cornerStyleKey = stringPreferencesKey("corner_style")
     private val uiStyleKey = stringPreferencesKey("ui_style")
@@ -95,7 +96,9 @@ class AppSettings @Inject constructor(
             animationSpeed = prefs[animationSpeedKey]?.let { AnimationSpeed.valueOf(it) }
                 ?: defaultThemeConfig.animationSpeed,
             transitionStyle = prefs[transitionStyleKey]?.let { TransitionStyle.valueOf(it) }
-                ?: defaultThemeConfig.transitionStyle,            isPureBlack = prefs[isPureBlackKey] ?: defaultThemeConfig.isPureBlack,
+                ?: defaultThemeConfig.transitionStyle,
+            isPureBlack = prefs[isPureBlackKey] ?: defaultThemeConfig.isPureBlack,
+            wallpaperCardTint = prefs[wallpaperCardTintKey] ?: defaultThemeConfig.wallpaperCardTint,
             preferredFrameRate = prefs[frameRateModeKey]?.let { FrameRateMode.valueOf(it) }
                 ?: defaultThemeConfig.preferredFrameRate,
             cornerStyle = prefs[cornerStyleKey]?.let { CornerStyle.valueOf(it) }
@@ -181,6 +184,10 @@ class AppSettings @Inject constructor(
 
     suspend fun updateIsPureBlack(isPure: Boolean) {
         context.appSettingsDataStore.edit { it[isPureBlackKey] = isPure }
+    }
+
+    suspend fun updateWallpaperCardTint(enabled: Boolean) {
+        context.appSettingsDataStore.edit { it[wallpaperCardTintKey] = enabled }
     }
 
     suspend fun updateFrameRateMode(mode: FrameRateMode) {
