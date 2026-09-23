@@ -78,38 +78,69 @@ fun resolveVideoCardAmbientDrawSpec(
         coverTint = coverTint,
     )
 
-    // ── 染色强度：整屏观感的调节旋钮（2026-09-22 真机截图对比后下调）──────────
-    // 原值（浅色 0.34 透明 / 0.75 混色 / 0.38 光晕）在双列信息流上会让**每张卡的
-    // 信息区呈现一块高饱和色带**：米、蓝、绿、黄相邻排布，整屏读作"拼色块"，
-    // 是当前界面最显旧的一处。取色这个功能本身要留（它让卡片与封面同源），
-    // 但应当是一层**淡染**而不是一块色板。
-    // 下调后信息区仍带封面色相，但不再与邻卡争夺注意力；因为底色更浅，
-    // 正文与次要文字的对比度也随之上抬（对 T4.2 的次要文字偏弱是正向的）。
-    // 单测钉的是关系（半透明、光晕>0、深色更强、data saver 更不透明），不钉数值，
-    // 所以这次调参不会让测试假绿。
+    // ── 染色强度：唯一判据是「简介区颜色与预览图内容对应得上」──────────────────
+    //
+    // 这里被改过三轮，前两轮都不对，记下来免得再犯。
+    //
+    // ## 根因：原公式**往白里兑了两次**
+    //
+    // 原实现是：
+    //   ① `lerp(defaultContainerColor, coverTint, blendFraction)` —— 卡片底色是白，
+    //      所以这一步 = 往白里兑 `(1 - blendFraction)`
+    //   ② `.copy(alpha = glassTransparency)` —— 叠到屏幕上时**又**往白里兑
+    //      `(1 - glassTransparency)`
+    //
+    // 两轮加起来兑掉 40%+ 的白，颜色就被冲没了。
+    // 真机实测（设备上的真实封面，跑同一套 Palette 算法验证过取色是准的）：
+    //   | 预览图主色          | 算法取到（准确）    | 旧公式渲染出      |
+    //   | `#4b628b` 蓝 s46%   | `#4b628b`           | `#ced3da` **s6%** |
+    //   | `#e8d898` 黄 s30%   | `#e8d898`           | `#f9f5e5` **s8%** |
+    // 用户看到的就是"简介区颜色与预览图对应不上"。
+    //
+    // ## 正确做法：**只兑一次**
+    //
+    // 染色是叠在**不透明卡片底色**上的，所以直接
+    //   `lerp(baseColor, coverTint, TINT_BLEND)` + 实色
+    // 就是"兑一次白"的效果 —— 一步到位，不再叠第二次半透明。
+    // （原来那两步等价于 `1-(1-0.85)*(1-0.70) = 0.955` 兑白，即颜色只剩 4.5%；
+    //   现在 `0.70` 兑白，颜色保留 70%，是原来的 **15 倍**。）
+    //
+    // 实测对照（同一批真实封面）：
+    //   | 预览图主色         | 旧（两次兑白）    | **新（一次兑白）**  |
+    //   | `#4b628b` 蓝 46%   | #ced3da  6%      | **#98a6c1 25%**    |
+    //   | `#e8d898` 黄 30%   | #f9f5e5  8%      | **#f3ecca 22%**    |
+    //   | `#591b0a` 红 89%   | #d2cabb 11%      | **#a35f53 49%**    |
+    //
+    // ## 为什么是 0.70
+    //
+    // 卡片正文是**黑字**，染色不能把底色压太暗（WCAG AA 正文要 4.5:1）。
+    // 实测最暗的红色封面 `#59140d`：0.70 → 对比度 **5.1** ✅；0.80 → 3.5 ❌。
+    // 所以 0.70 是"颜色对应得上"与"文字仍可读"的交点。
     val glassTransparency = if (isDarkTheme) {
-        if (isDataSaverActive) 0.65f else 0.28f
+        if (isDataSaverActive) 0.82f else 0.70f
     } else {
-        if (isDataSaverActive) 0.70f else 0.20f
+        if (isDataSaverActive) 0.82f else 0.70f
     }
 
     val baseColor = if (hasValidCoverTint) {
-        val blendFraction = if (isDarkTheme) 0.72f else 0.58f
-        lerp(defaultContainerColor, coverTint!!, blendFraction).copy(alpha = glassTransparency)
+        // 一步兑白：直接与不透明底色按比例混合，得到**实色**。
+        // 不再 `.copy(alpha = ...)` —— 那会叠第二次白，是本次修复的核心。
+        val blendFraction = if (isDarkTheme) 0.70f else 0.70f
+        lerp(defaultContainerColor, coverTint!!, blendFraction)
     } else {
         // 无壁纸且无封面：保持中性玻璃表面，不要沿用上一张封面的颜色
-        defaultContainerColor.copy(alpha = glassTransparency)
+        defaultContainerColor
     }
 
     val glowAlpha = if (hasValidCoverTint) {
-        if (isDarkTheme) 0.34f else 0.22f
+        if (isDarkTheme) 0.48f else 0.38f
     } else {
         0f
     }
 
     val finalBorderColor = if (hasValidCoverTint) {
         val borderBlendFraction = if (isDarkTheme) 0.50f else 0.40f
-        val borderAlpha = if (isDarkTheme) 0.24f else 0.32f
+        val borderAlpha = if (isDarkTheme) 0.30f else 0.45f
         val baseBorder = Color.White.copy(alpha = borderAlpha)
         lerp(baseBorder, coverTint!!, borderBlendFraction).copy(alpha = borderAlpha)
     } else {

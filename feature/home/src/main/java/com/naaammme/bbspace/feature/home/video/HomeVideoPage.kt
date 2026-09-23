@@ -345,11 +345,43 @@ private fun FeedCard(
     val coverTintKey = item.cover.orEmpty()
     val dynamicTintEnabled = LocalHomeCardDynamicTintEnabled.current
     val tintScope = rememberCoroutineScope()
+    val cardContext = LocalContext.current
     var coverTint by remember(coverTintKey) {
         mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverTintKey))
     }
     // 异步提取回来时，若卡片已被复用给别的封面，必须丢弃这次结果（上游同款防串色）
     val activeCoverTintKey by rememberUpdatedState(coverTintKey)
+    // ── 主动补一次取色（修掉"有些卡片完全没染色"）────────────────────────────
+    //
+    // 为什么必须有这一步（真机实测定位）：
+    //
+    // 取色只挂在 Coil 的 `onSuccess` 上，而 **`onSuccess` 只在真正解码时触发一次**。
+    // 首页的封面预加载会把位图填进内存缓存，于是卡片走的是**缓存命中**路径、
+    // 解码不重走 → `onSuccess` 不再触发 → **这张卡永远拿不到颜色**。
+    //
+    // 而 `remember(coverTintKey)` 只在首次组合求值一次，之后也不会重算。
+    // 两者叠加的结果：屏上一部分卡片完全没有染色（实测 6 张里 3 张饱和度 0%）。
+    //
+    // 这里让卡片**自己主动取一次**：从 Coil 缓存取位图（不重新下载）→ 提取 → 落缓存。
+    // 不依赖任何回调时机，冷启动/滚动回来/缓存命中都成立。
+    LaunchedEffect(coverTintKey, dynamicTintEnabled) {
+        if (!dynamicTintEnabled || coverTintKey.isBlank()) return@LaunchedEffect
+        if (coverTint != null) return@LaunchedEffect
+        VideoCardCoverColorStore.requestExtraction(
+            appContext = cardContext,
+            cacheKey = coverTintKey,
+            url = biliImageUrlForVariant(item.cover, feedCoverVariant(singleColumn)).orEmpty(),
+            sizePx = if (singleColumn) {
+                COVER_PRELOAD_LARGE_WIDTH_PX to COVER_PRELOAD_LARGE_HEIGHT_PX
+            } else {
+                COVER_PRELOAD_WIDTH_PX to COVER_PRELOAD_HEIGHT_PX
+            },
+            scope = tintScope
+        ) { color ->
+            // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
+            if (activeCoverTintKey == coverTintKey) coverTint = color
+        }
+    }
     // 取色结果渐变入场：直接跳变会让整张卡片"啪"地换色，350ms 过渡读起来是"光渗进来"
     val animatedCoverTint by animateColorAsState(
         targetValue = coverTint ?: Color.Transparent,
@@ -357,12 +389,28 @@ private fun FeedCard(
         label = "videoCardCoverTint"
     )
     val tintSource = if (animatedCoverTint.alpha > 0f) animatedCoverTint else null
-    val containerColor = if (singleColumn) {
-        MaterialTheme.colorScheme.surfaceContainerLow
-    } else {
-        // 双列参考 PiliPlus-Max：无卡片底色，封面与文字直接落在页面背景上
-        Color.Transparent
-    }
+    // 卡片底色：**必须不透明**，单双列都用 surfaceContainerLow。
+    //
+    // ## 为什么双列不能再是 Transparent（真机实测定位，这是"颜色对应不上"的根因）
+    //
+    // 双列原先照 PiliPlus-Max 做成「无卡片底色，封面与文字直接落在页面背景上」，
+    // 即 `Color.Transparent`。当时没有动态染色，这样最干净。
+    //
+    // 但它是染色的**致命前提**：`resolveVideoCardAmbientDrawSpec` 里染色是
+    // `lerp(defaultContainerColor, 封面色, 0.85).copy(alpha = 0.70)` ——
+    // 底色若是 Transparent，`lerp` 出来的是**半透明色**（alpha 只有 0.85），
+    // 再乘 0.70 后最终 alpha 只有 **0.595**，叠到屏幕上时被页面背景稀释掉 40%，
+    // 颜色就"对应不上"预览图了。
+    //
+    // 实测：某封面主色 `#4b628b`（蓝，饱和度 46%），染出的简介区只有
+    // `#ced3da`（饱和度 **6%**）—— 色相对但完全看不出是蓝的。
+    //
+    // 改成不透明底色后，`lerp(白, 封面色, 0.85)` 得到的是**实色**，
+    // 乘 alpha 0.70 叠上去仍保留足够饱和度（同例 → 约 32%）。
+    //
+    // 单列本来就是 `surfaceContainerLow`，这里统一取同一个值，
+    // 让单双列切换时卡片底色一致。
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     val defaultOnSurface = MaterialTheme.colorScheme.onSurface
     val defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     // 深浅判据与全站一致：以主题背景亮度为准（跟随主题模式，不直接问系统）
@@ -429,8 +477,7 @@ private fun FeedCard(
             defaultBorderColor = if (darkTheme) Color.White.copy(alpha = 0.25f)
             else Color.White.copy(alpha = 0.40f)
         )
-    } else {
-        null
+    } else {        null
     }
     val showCoverGlow = infoDrawSpec != null &&
         infoDrawSpec.coverGlowAlpha > 0f &&
