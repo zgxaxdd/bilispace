@@ -44,14 +44,31 @@ object VideoCardCoverColorStore {
      * 异步提取封面代表色并写入缓存，随后在主线程回调 [onColorExtracted]。
      *
      * 命中缓存时**同步**回调，避免已经算过的封面还要多等一帧才上色。
+     *
+     * @param onColorExtracted 提取成功（或命中缓存）时回调，主线程。
+     * @param onExtractionFailed 提取失败时回调，主线程；**可选，仅用于诊断**。
+     *
+     * ## 为什么需要 [onExtractionFailed]
+     *
+     * 原实现失败时**静默 return**：调用方只看到"回调没来"，分不清是
+     * ①图片没加载完 ②位图不可用（HARDWARE/recycled）③Palette 聚类没出结果。
+     * 用户报「很多卡片没有取色」时，这三种原因的修法完全不同，而现场**没有任何痕迹**。
+     * 加上这个回调后，debug 构建下能直接看出是哪一类。
+     *
+     * 注意：`cacheKey` 为空是**调用方约定**上的"不该发生"（见 [getCachedColor]），
+     * 也走失败回调 —— 否则键算错会表现成"静默不上色"，与本次修的两个 bug 同类。
      */
     fun extractColorAsync(
         cacheKey: String,
         bitmap: Bitmap,
         scope: CoroutineScope,
-        onColorExtracted: (Color) -> Unit
+        onColorExtracted: (Color) -> Unit,
+        onExtractionFailed: ((reason: String) -> Unit)? = null
     ) {
-        if (cacheKey.isBlank()) return
+        if (cacheKey.isBlank()) {
+            onExtractionFailed?.invoke("blank cache key")
+            return
+        }
 
         getCachedColor(cacheKey)?.let {
             onColorExtracted(it)
@@ -59,7 +76,20 @@ object VideoCardCoverColorStore {
         }
 
         scope.launch(Dispatchers.Default) {
-            val color = extractRepresentativeColor(bitmap) ?: return@launch
+            if (bitmap.isRecycled) {
+                withContext(Dispatchers.Main) { onExtractionFailed?.invoke("bitmap recycled") }
+                return@launch
+            }
+            val color = extractRepresentativeColor(bitmap)
+            if (color == null) {
+                withContext(Dispatchers.Main) {
+                    onExtractionFailed?.invoke(
+                        "palette returned no swatch (config=${bitmap.config} " +
+                            "${bitmap.width}x${bitmap.height})"
+                    )
+                }
+                return@launch
+            }
             synchronized(colorCache) {
                 colorCache.put(cacheKey, color)
             }

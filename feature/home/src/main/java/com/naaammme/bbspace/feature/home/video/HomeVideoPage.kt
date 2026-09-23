@@ -701,23 +701,36 @@ private fun FeedCard(
                         VideoCardCoverColorStore.extractColorAsync(
                             cacheKey = coverCacheKey,
                             bitmap = bitmap,
-                            scope = tintScope
-                        ) { extracted ->
-                            // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
-                            if (activeCoverTintKey == coverCacheKey) {
-                                coverTint = extracted
-                                // 诊断：仅 debug 构建输出。取色是"看不见的"功能，
-                                // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
-                                // 本模块未开启 buildConfig 生成，故用 Logger.isDebug 门控。
+                            scope = tintScope,
+                            onColorExtracted = { extracted ->
+                                // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
+                                if (activeCoverTintKey == coverCacheKey) {
+                                    coverTint = extracted
+                                    // 诊断：仅 debug 构建输出。取色是"看不见的"功能，
+                                    // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
+                                    // 本模块未开启 buildConfig 生成，故用 Logger.isDebug 门控。
+                                    if (Logger.isDebug) {
+                                        android.util.Log.i(
+                                            "BbDynamicTint",
+                                            "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
+                                                "key=$coverCacheKey dark=$darkTheme " +
+                                                "wallpaper=${wallpaperTintEnabled}"
+                                        )
+                                    }
+                                }
+                            },
+                            // 失败分支：**必须有**。原实现静默 return，导致用户报
+                            // 「很多卡片没有取色」时现场没有任何痕迹，分不清是
+                            // 位图不可用、Palette 没出结果、还是键算错。
+                            onExtractionFailed = { reason ->
                                 if (Logger.isDebug) {
-                                    android.util.Log.i(
+                                    android.util.Log.w(
                                         "BbDynamicTint",
-                                        "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
-                                            "key=$coverCacheKey dark=$darkTheme"
+                                        "extraction FAILED reason=$reason key=$coverCacheKey"
                                     )
                                 }
                             }
-                        }
+                        )
                     }
                 } else {
                     null
