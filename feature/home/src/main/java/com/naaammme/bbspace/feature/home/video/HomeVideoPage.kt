@@ -73,6 +73,7 @@ import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.biliImageUrlForVariant
 import com.naaammme.bbspace.core.designsystem.component.feedCoverVariant
+import com.naaammme.bbspace.core.designsystem.component.resolveCoverCacheKey
 import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonShimmer
 import com.naaammme.bbspace.core.designsystem.component.SkeletonBlock
 import com.naaammme.bbspace.core.designsystem.component.rememberAdaptiveGridColumnCount
@@ -141,16 +142,17 @@ fun HomeVideoPage(
 ) {
     val context = LocalContext.current
     val gridState = rememberLazyStaggeredGridState()
-    // 预加载封面 URL 列表。**必须与卡片请求的是同一个 URL**：Coil 的 memory / disk
-    // cache key 都由 ImageRequest.data（这里即解析后的 URL 字符串）派生，
-    // 差一个 `@640w_480h_1e_1c_85q.webp` 后缀就是另一个键。
+    // 预加载封面列表：**URL 与缓存键都要与卡片一致**，缺一个预加载就白做。
     //
-    // 上一轮这里传的是**未解析的 `item.cover`（原图地址）**，于是：
-    // - 预加载解出来的位图，卡片永远取不到 → 预加载 100% 白做；
-    // - 而且它下载的是原图，比不预加载更贵（多一份带宽 + 多一份内存缓存）。
+    // URL 这一半的教训（上一轮修的）：原先传的是**未解析的 `item.cover`（原图地址）**，
+    // 于是预加载解出来的位图卡片永远取不到 —— 而且它下载的是原图，比不预加载更贵。
     // 现在与卡片共用 biliImageUrlForVariant / feedCoverVariant，结构上不可能再分叉。
     //
-    // 单独派生而不是直接用 items：预加载只需要 URL，而 items 里任何字段变化
+    // 缓存键这一半（本次）：卡片现在**显式**指定 `memoryCacheKey`（见 coverCacheKey 的
+    // 注释），Coil 就不再按 URL 派生键了。若预加载仍按 URL 派生，两者又是两个键 ——
+    // 等于把上一轮修好的事换个地方再犯一次。所以预加载也必须带同一个键。
+    //
+    // 单独派生而不是直接用 items：预加载只需要 URL + 键，而 items 里任何字段变化
     // （播放量、点赞数刷新）都不该重启预加载 effect。key 用 List 的 equals，
     // 只有真正换了内容才会变。
     val preloadVariant = feedCoverVariant(singleColumn)
@@ -164,8 +166,16 @@ fun HomeVideoPage(
     } else {
         COVER_PRELOAD_WIDTH_PX to COVER_PRELOAD_HEIGHT_PX
     }
-    val preloadCoverUrls = remember(items, preloadVariant) {
-        items.map { biliImageUrlForVariant(it.cover, preloadVariant) }
+    val preloadCovers = remember(items, preloadVariant, singleColumn) {
+        items.map { item ->
+            CoverPreloadEntry(
+                url = biliImageUrlForVariant(item.cover, preloadVariant),
+                cacheKey = resolveCoverCacheKey(
+                    identity = item.actionKey,
+                    useLargeCover = singleColumn
+                )
+            )
+        }
     }
     val homeFling = rememberHomeFlingBehavior()
     var wasRefreshing by remember { mutableStateOf(false) }
@@ -211,8 +221,8 @@ fun HomeVideoPage(
     //    静止时仍用 180ms 合并抖动。
     // 3. 相应地取消"滚动中直接 return"的门控 —— 它和第 2 点合起来让预加载只在
     //    列表完全静止时才有用。解码始终在 IO 线程，不占主线程。
-    LaunchedEffect(gridState, preloadCoverUrls, preloadSizePx) {
-        if (preloadCoverUrls.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(gridState, preloadCovers, preloadSizePx) {
+        if (preloadCovers.isEmpty()) return@LaunchedEffect
         snapshotFlow {
             val info = gridState.layoutInfo
             val lastVisible = info.visibleItemsInfo.maxOfOrNull { it.index } ?: -1
@@ -226,20 +236,30 @@ fun HomeVideoPage(
             .collect { (lastVisible, _) ->
                 if (lastVisible < 0) return@collect
                 val from = lastVisible + 1
-                val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCoverUrls.lastIndex)
+                val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCovers.lastIndex)
                 if (from > to) return@collect
-                val urls = (from..to).mapNotNull { preloadCoverUrls.getOrNull(it) }
-                if (urls.isEmpty()) return@collect
+                val entries = (from..to).mapNotNull { preloadCovers.getOrNull(it) }
+                if (entries.isEmpty()) return@collect
                 // 解码/网络都在 Coil 自己的调度器上，主线程只负责入队
                 withContext(Dispatchers.IO) {
                     val loader = SingletonImageLoader.get(context)
-                    urls.forEach { url ->
+                    entries.forEach { entry ->
+                        val url = entry.url ?: return@forEach
                         loader.enqueue(
                             ImageRequest.Builder(context)
                                 .data(url)
                                 // 与卡片实际展示尺寸同档（见 preloadSizePx 的注释：
                                 // 预加载的位图比卡片需要的小，就会被判不可用而重新解码）
                                 .size(preloadSizePx.first, preloadSizePx.second)
+                                // **与卡片同一个键**（见 preloadCovers 的注释）：
+                                // 卡片显式指定了 memoryCacheKey，预加载不跟上的话
+                                // 两边就是两个键，预加载的位图卡片取不到。
+                                .apply {
+                                    if (entry.cacheKey.isNotEmpty()) {
+                                        memoryCacheKey(entry.cacheKey)
+                                        diskCacheKey(entry.cacheKey)
+                                    }
+                                }
                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                 .diskCachePolicy(CachePolicy.ENABLED)
                                 .build()
@@ -339,17 +359,30 @@ private fun FeedCard(
     val canOpen = !isDisliked && (item.target != null || item.liveRoute != null || isDynamic)
     var showMoreMenu by remember(item) { mutableStateOf(false) }
     // ── 封面动态取色（移植自 BiliPai 上游「卡片动态取色」）────────────────────────
-    // 缓存键用封面 URL 本身：同一张封面在任意卡片/任意次滚动里都命中同一份取色结果。
-    // 用 `remember(coverKey)` 而非 `remember(item)`：列表复用 slot 时 item 变而
-    // coverKey 不变的情况（同一视频换推荐位）不该重置颜色。
-    val coverTintKey = item.cover.orEmpty()
+    //
+    // 缓存键用**列表稳定键**派生，不用封面 URL —— 这是与上游对齐的关键一步。
+    //
+    // 为什么不能用封面 URL：URL 会变（同一视频在不同推荐位/不同清晰度档拿到不同 URL），
+    // 一变就查不到之前算好的颜色，表现成"滚动回来颜色没了/这张卡没上色"。
+    // 上游用 `cover_{bvid}_n` 这样的身份键，正是为了让它**跨 URL 变化保持稳定**。
+    //
+    // 为什么必须同时传给 Coil（`cacheKey` 参数）：取色挂在下游 `onSuccess` 上，
+    // 若取色键与 Coil 的图片键各算各的，就会出现"算过色的封面查不到、查得到的没算过"。
+    // 上游把同一个键同时用作 memory/disk cache key，两边同源。
+    //
+    // 键里带质量档（单列 `l` / 双列 `n`）：单双列请求的是不同尺寸位图，
+    // 共用键会让小图命中大图槽位、Coil 因尺寸不足重新解码（等于白算）。
+    val coverCacheKey = resolveCoverCacheKey(
+        identity = item.actionKey,
+        useLargeCover = singleColumn
+    )
     val dynamicTintEnabled = LocalHomeCardDynamicTintEnabled.current
     val tintScope = rememberCoroutineScope()
-    var coverTint by remember(coverTintKey) {
-        mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverTintKey))
+    var coverTint by remember(coverCacheKey) {
+        mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverCacheKey))
     }
     // 异步提取回来时，若卡片已被复用给别的封面，必须丢弃这次结果（上游同款防串色）
-    val activeCoverTintKey by rememberUpdatedState(coverTintKey)
+    val activeCoverTintKey by rememberUpdatedState(coverCacheKey)
     // 取色结果渐变入场：直接跳变会让整张卡片"啪"地换色，350ms 过渡读起来是"光渗进来"
     val animatedCoverTint by animateColorAsState(
         targetValue = coverTint ?: Color.Transparent,
@@ -627,17 +660,19 @@ private fun FeedCard(
                 shape = FeedCardCoverShape,
                 coverLarge = singleColumn,
                 coverFourThree = !singleColumn,
+                // 与取色共用同一个键：Coil 的位图缓存与取色结果缓存因此同源
+                cacheKey = coverCacheKey,
                 // 取色挂在 Coil 解码成功回调上：**复用已解码位图**，不额外发请求、
                 // 不额外解码。已有颜色时跳过（滚动回来命中缓存，无需重复提取）。
                 onImageLoaded = if (dynamicTintEnabled && coverTint == null) {
                     { bitmap ->
                         VideoCardCoverColorStore.extractColorAsync(
-                            cacheKey = coverTintKey,
+                            cacheKey = coverCacheKey,
                             bitmap = bitmap,
                             scope = tintScope
                         ) { extracted ->
                             // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
-                            if (activeCoverTintKey == coverTintKey) {
+                            if (activeCoverTintKey == coverCacheKey) {
                                 coverTint = extracted
                                 // 诊断：仅 debug 构建输出。取色是"看不见的"功能，
                                 // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
@@ -646,7 +681,7 @@ private fun FeedCard(
                                     android.util.Log.i(
                                         "BbDynamicTint",
                                         "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
-                                            "key=${coverTintKey.takeLast(28)} dark=$darkTheme"
+                                            "key=$coverCacheKey dark=$darkTheme"
                                     )
                                 }
                             }
@@ -946,6 +981,21 @@ private val FeedCardInfoShape: Shape = BiliRadius.bottomRounded(BiliRadius.card)
 
 /** 封面角标（时长 / 播放量）形状。 */
 private val CoverBadgeShape = RoundedCornerShape(8.dp)
+
+/**
+ * 预加载的一条封面：**URL 与缓存键成对**。
+ *
+ * 为什么必须是成对的、不能只存 URL：卡片现在**显式**给 Coil 指定 `memoryCacheKey`
+ * （见 `resolveCoverCacheKey` 的注释），Coil 不再按 URL 派生键。预加载若只带 URL，
+ * 它填的缓存与卡片读的缓存就是两个键 —— 预加载会静默白做，且没有任何报错。
+ *
+ * 这类"两边各算一个键"的问题在本项目已经犯过两次（预加载 URL 未解析、
+ * 取色键与 Coil 键不同源），所以这里用类型把两者绑在一起，而不是靠人记得同步。
+ */
+private data class CoverPreloadEntry(
+    val url: String?,
+    val cacheKey: String
+)
 
 // ── 封面预加载参数（见 HomeVideoPage 内 preload effect 的注释）────────────────
 /** 合并"手指停下/惯性将尽"后的抖动；滚动中不走这个值（见 preload effect 修正点 2）。 */
