@@ -6,6 +6,10 @@ import android.os.Build
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
 import androidx.palette.graphics.Palette
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,11 +36,122 @@ object VideoCardCoverColorStore {
 
     private val colorCache = LruCache<String, Color>(MAX_CACHE_SIZE)
 
+    /**
+     * 取色结果的**可观察**版本：每完成一次取色就发射一次 (key, color)。
+     *
+     * ## 为什么必须有它（第三个时序缺口，实测定位）
+     *
+     * 卡片里是 `var coverTint by remember(coverCacheKey) { mutableStateOf(getCachedColor(...)) }`。
+     * `remember` **只在首次组合求值一次**。而预加载侧取色是异步的（在 `Dispatchers.IO` 上
+     * 解码 + Palette 聚类），卡片往往**先**组合、取色**后**完成 —— 于是：
+     *
+     * 1. 卡片首次组合读到 null；
+     * 2. 取色完成、写进 cache；
+     * 3. 但 `remember` 不会重算，且卡片走的又是 Coil 缓存命中路径、
+     *    `onSuccess` 不再触发 → **这张卡的染色永远是 null**。
+     *
+     * 表现就是"大部分卡片没有取色"，而且取色日志明明有记录 —— 正是本功能最迷惑人的一处。
+     *
+     * 有了这个 Flow，卡片可以订阅、在取色落地时补上颜色，不再依赖"谁先谁后"。
+     */
+    private val _colorUpdates = MutableSharedFlow<Pair<String, Color>>(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val colorUpdates: SharedFlow<Pair<String, Color>> = _colorUpdates.asSharedFlow()
+
     /** 同步读取已缓存的封面代表色；未命中返回 null（调用方据此决定是否触发提取）。 */
     fun getCachedColor(cacheKey: String): Color? {
         if (cacheKey.isBlank()) return null
         return synchronized(colorCache) {
             colorCache.get(cacheKey)
+        }
+    }
+
+    /**
+     * 直接写入一份取色结果，并通知订阅者。
+     *
+     * 用途：**预加载侧取色**。预加载本来就持有解码好的位图，在那边算完直接落缓存，
+     * 卡片首次组合时 [getCachedColor] 就命中 —— 不依赖 Coil `onSuccess` 的触发时机。
+     *
+     * 为什么必须有这条路（实测定位）：`onSuccess` **只在真正解码时触发一次**。
+     * 而预加载的目的正是让卡片命中内存缓存，于是卡片走的是缓存命中路径、
+     * `onSuccess` 不再触发 → **取色永远不会发生**。日志实测：屏上 6~8 张卡，
+     * 只有 2 条取色记录。这是"很多卡片没有取色"的直接原因。
+     */
+    fun putCachedColor(cacheKey: String, color: Color) {
+        if (cacheKey.isBlank()) return
+        synchronized(colorCache) {
+            colorCache.put(cacheKey, color)
+        }
+        // 通知订阅者（卡片据此补色）。tryEmit 不阻塞：没有订阅者或缓冲满时静默丢弃，
+        // 卡片下次组合仍能从 cache 读到。
+        _colorUpdates.tryEmit(cacheKey to color)
+    }
+
+    /**
+     * **同步**从位图提取代表色并落缓存，返回取到的色（失败返回 null）。
+     *
+     * 给预加载侧用：那边已经在 `Dispatchers.IO` 上、且手上就有解码好的位图，
+     * 直接算完落缓存即可。调用方**不要在主线程序列里调**（Palette 聚类是 CPU 活）。
+     *
+     * 与 [extractColorAsync] 的分工：那个给"卡片拿到位图后异步补算"用（回主线程回调），
+     * 这个给"预加载侧一次算完"用（无回调）。两条路写的是同一个 [colorCache]，
+     * 键也相同，所以谁先到都算数、不会互相覆盖出问题。
+     */
+    fun extractAndCache(cacheKey: String, bitmap: Bitmap): Color? {
+        if (cacheKey.isBlank()) return null
+        getCachedColor(cacheKey)?.let { return it }
+        val color = extractRepresentativeColor(bitmap) ?: return null
+        putCachedColor(cacheKey, color)
+        return color
+    }
+
+    /**
+     * **主动**为某个键取一次色：从 Coil 缓存里把位图取出来（不重新下载）再提取。
+     *
+     * ## 为什么必须有"主动"这条路（第四个时序缺口，实测定位）
+     *
+     * 前面三条路都依赖某个**时机**，而它们都会漏掉同一批卡片 —— **当前可见的那些**：
+     *
+     * | 路径 | 触发条件 | 漏掉谁 |
+     * |---|---|---|
+     * | 卡片 `onSuccess` | Coil **真正解码**时触发一次 | 图片已在缓存里的卡（预加载刚填过） |
+     * | 预加载侧取色 | 只处理 `lastVisible+1 .. +AHEAD` | **当前可见的卡** |
+     *
+     * 两者合起来的空洞正好是"屏幕上的卡片"：预加载只填后面的、可见卡的 `onSuccess`
+     * 又因为缓存命中不触发。实测日志 `RENDER ... tint=null` 全是可见卡，
+     * 而同一时刻 `preload-extracted` 有 11 条 —— **取色在跑，但屏上没一张有颜色**。
+     *
+     * 这个方法由卡片在组合时主动调用：**不依赖任何回调时机**。图片没进缓存时
+     * Coil 会自己去取（走网络/磁盘），所以它对"直接打开首页"这种冷启动也成立。
+     *
+     * @param sizePx 期望的解码尺寸；与卡片实际展示同档，避免多解码一份
+     */
+    fun requestExtraction(
+        appContext: android.content.Context,
+        cacheKey: String,
+        url: String,
+        sizePx: Pair<Int, Int>,
+        scope: CoroutineScope
+    ) {
+        if (cacheKey.isBlank() || url.isBlank()) return
+        if (getCachedColor(cacheKey) != null) return
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val request = coil3.request.ImageRequest.Builder(appContext)
+                    .data(url)
+                    .size(sizePx.first, sizePx.second)
+                    .memoryCacheKey(cacheKey)
+                    .diskCacheKey(cacheKey)
+                    .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
+                    .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
+                    .build()
+                val result = coil3.SingletonImageLoader.get(appContext).execute(request)
+                val bitmap = (result.image as? coil3.BitmapImage)?.bitmap ?: return@runCatching
+                extractAndCache(cacheKey, bitmap)
+            }
         }
     }
 

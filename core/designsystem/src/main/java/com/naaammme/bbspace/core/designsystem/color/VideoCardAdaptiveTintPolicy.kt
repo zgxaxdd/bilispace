@@ -81,6 +81,42 @@ fun interpolateWallpaperColor(palette: WallpaperPalette, yFraction: Float): Colo
 }
 
 /**
+ * 把半透明的染色结果**合成到不透明底色上**，得到可直接铺满卡片的实色。
+ *
+ * ## 为什么需要这一步（实测定位）
+ *
+ * [resolveVideoCardAmbientDrawSpec] 返回的 `containerColor` 是**半透明**的
+ * （浅色 0.28 / 深色 0.34 / data saver 0.65+），设计意图是"透出背后的高斯模糊"。
+ * 但这个前提在本项目的双列卡片上**不成立**：卡片底色是 `surfaceContainerLow = White`
+ * （不透明），没有模糊层可透。
+ *
+ * 直接把半透明色交给 `Surface(color =)` 有两个问题：
+ * 1. 卡片实际呈现的是"半透明染色叠在**页面背景**上"而不是叠在卡片底色上 ——
+ *    颜色偏冷偏淡，与设计意图不符；
+ * 2. `Surface` 的 color 是**组合期参数**，首帧若取色还没到（null）就固定成底色，
+ *    之后再也不会更新（这是"卡片永远不上色"的直接原因之一）。
+ *
+ * 所以改为：`Surface` 用不透明底色，染色在**绘制期**用本函数合成后覆盖绘制。
+ * 合成后的颜色不透明，盖上去即可，不需要依赖背景。
+ *
+ * 合成用 sRGB 逐通道线性插值，与 Android 绘制半透明图层的实际行为一致。
+ */
+fun compositeTintOverBase(
+    tintedContainer: Color,
+    baseColor: Color
+): Color {
+    val a = tintedContainer.alpha
+    if (a >= 1f) return tintedContainer
+    if (a <= 0f) return baseColor
+    return Color(
+        red = tintedContainer.red * a + baseColor.red * (1f - a),
+        green = tintedContainer.green * a + baseColor.green * (1f - a),
+        blue = tintedContainer.blue * a + baseColor.blue * (1f - a),
+        alpha = 1f
+    )
+}
+
+/**
  * 是否该用封面取色。
  *
  * 壁纸取色开启时，壁纸是唯一来源，封面色只作为**无壁纸时的回退**
@@ -90,6 +126,141 @@ internal fun shouldUseCoverTintForCard(
     wallpaperTintEnabled: Boolean,
     coverTint: Color?,
 ): Boolean = !wallpaperTintEnabled && coverTint != null && coverTint.alpha > 0f
+
+/**
+ * 把封面代表色整理成**可用作卡片染色**的颜色。
+ *
+ * 两步，顺序不能反：
+ * 1. **明度归一化**：把过暗的颜色沿"黑→原色"推到 [TINT_TARGET_LUMINANCE]；
+ * 2. **饱和度下限**：HSV 饱和度不足 [TINT_MIN_SATURATION] 时补足。
+ *
+ * ## 为什么需要这一步（2026-09-22 真机实测，21 个真实封面色样本）
+ *
+ * | 指标 | 中位 | 分布 |
+ * |---|---|---|
+ * | HSV 饱和度 | 40% | <30% 占 47%，<15% 占 23% |
+ * | 相对亮度 | **0.051** | <0.10 占 **61%** |
+ *
+ * 提取出来的颜色**大多很暗**（视频封面夜景/黑底字幕很常见），直接与卡片底色混合
+ * 等于没混 —— 这才是"很多卡片没有取色"的真正原因，不是提取失败。
+ *
+ * ## 目标亮度为什么是 0.22 而不是"越亮越好"（实测纠正）
+ *
+ * 第一版把目标定在 0.42，结果**更难看**：提到 0.42 后颜色已经很浅，再以 0.68
+ * 混进**纯白**卡片底（`iOSColorScheme.surfaceContainerLow = White`）几乎等于白色。
+ * 实测算例 `#080820`（深蓝）：
+ *
+ * | 目标亮度 | 归一化后 | 混白 0.68 后 | 观感 |
+ * |---|---|---|---|
+ * | 0.42 | `#6585CC` | `#B9C9EE` | 很淡，几乎看不出 |
+ * | **0.22** | `#2A3D8A` | `#8794C6` | **明显蓝** |
+ *
+ * 正确方向是**保留颜色本身的深浅**、只把过暗的抬到"能参与混合"的下限。
+ *
+ * ## 为什么还要饱和度下限
+ *
+ * 亮度归一化是**逐通道等比缩放**，保不住饱和度：很暗的近灰色（如 `#202820`，
+ * 饱和度 20%）提亮后仍是低饱和灰绿，混上去读作"脏"而不是"有颜色"。
+ *
+ * ## 深色主题下不改动
+ *
+ * 深色主题卡片底色本来就暗（`#1C1C1E`），深色封面色混上去是**可见**的；
+ * 提亮反而让深色主题的卡片发灰。
+ *
+ * @param coverTint 提取到的封面代表色（应是不透明色）
+ * @param isDarkTheme 深色主题下原样返回
+ */
+internal fun normalizeTintColor(
+    coverTint: Color,
+    isDarkTheme: Boolean
+): Color {
+    if (isDarkTheme) return coverTint
+
+    val lum = coverTint.luminance()
+    val lifted = if (lum >= TINT_TARGET_LUMINANCE) {
+        coverTint
+    } else {
+        // 沿"黑→原色"推到目标亮度：RGB 各通道同比例放大（线性近似，够用且无分配）。
+        // 分母用 maxOf(r,g,b) 而非 luminance()：避免低亮度时除法放大噪声，
+        // 同时保证放大后最大通道正好是 1.0。
+        val maxChannel = maxOf(coverTint.red, coverTint.green, coverTint.blue)
+        if (maxChannel <= 0f) {
+            // 纯黑：没有任何色相信息可保留
+            return Color(TINT_TARGET_LUMINANCE, TINT_TARGET_LUMINANCE, TINT_TARGET_LUMINANCE)
+        }
+        val scale = TINT_TARGET_LUMINANCE / maxChannel
+        Color(
+            red = (coverTint.red * scale).coerceIn(0f, 1f),
+            green = (coverTint.green * scale).coerceIn(0f, 1f),
+            blue = (coverTint.blue * scale).coerceIn(0f, 1f),
+            alpha = coverTint.alpha
+        )
+    }
+    return boostSaturationIfNeeded(lifted)
+}
+
+/**
+ * HSV 饱和度不足 [TINT_MIN_SATURATION] 时补足，保持色相与明度。
+ *
+ * ## 做法
+ *
+ * 记 `max`/`min` 为最大/最小通道，HSV 饱和度 `s = (max-min)/max`，明度 `V = max`。
+ * 要在**不动 max**（保住明度）的前提下把 `s` 提到目标值 `S`：
+ * 令新差值 `d' = S * max`，再把**所有非最大通道**的差值按同一比例 `k = d'/d` 放大。
+ * 按比例放大（而不是给每个通道平摊一个常量）才能保住色相 —— 各通道到 max 的
+ * **相对**距离不变，改变的只是"离 max 多远"。
+ *
+ * ## 踩过的两个坑（都记下来，别再犯）
+ *
+ * 1. **第一版反解比例是错的**：写成 `k = (min - targetMin) / (min - max)`，
+ *    对 `#202820`（s=0.20）算出 **k = -0.5**，被 `coerceIn(0,1)` 钳成 0 ——
+ *    **等于完全没提升**。
+ * 2. **第二版平摊也是错的**：改成"把差值平均分给非最大通道"，
+ *    对同一颜色只提到 **0.25**（目标 0.30）—— 因为非最大通道只有 1 个时，
+ *    平摊的常量不足以把 min 推到目标位置。
+ *
+ * 两版都被单测 `boost_lowSaturation_isRaisedToFloor` 抓到。**按比例放大差值**才对。
+ *
+ * 纯灰（`max == min`）没有色相可保，**原样返回** —— 强行给灰色指定色相会得到
+ * "随机偏色"，比灰更糟。
+ */
+internal fun boostSaturationIfNeeded(color: Color): Color {
+    val maxC = maxOf(color.red, color.green, color.blue)
+    if (maxC <= 0f) return color
+    val minC = minOf(color.red, color.green, color.blue)
+    val range = maxC - minC
+    if (range <= 0f) return color // 纯灰：无色相可保
+    val sat = range / maxC
+    if (sat >= TINT_MIN_SATURATION) return color
+
+    // 差值放大比例：把 range 提到 S*max。max 不动，所以明度不变。
+    val scale = (TINT_MIN_SATURATION * maxC) / range
+    fun push(c: Float) = if (c < maxC) (maxC - (maxC - c) * scale).coerceIn(0f, maxC) else c
+    return Color(
+        red = push(color.red),
+        green = push(color.green),
+        blue = push(color.blue),
+        alpha = color.alpha
+    )
+}
+
+/**
+ * 染色目标亮度。
+ *
+ * 依据（21 个真实样本）：提取色相对亮度中位 **0.051**、61% 低于 0.10。
+ * 0.22 是"抬到能参与混合、又保留足够饱和度"的位置 —— 见 [normalizeTintColor]
+ * KDoc 里 `#080820` 的两组对照。第一版取 0.42 是**错的**（会洗白）。
+ */
+private const val TINT_TARGET_LUMINANCE = 0.22f
+
+/**
+ * 染色最低 HSV 饱和度。
+ *
+ * 依据：提取色饱和度中位 40%、但 47% 低于 30%。低于 30% 混到卡片上读作"脏灰"
+ * 而不是"有颜色"，所以补到 30% —— 保住"这张卡有主色"的可辨识度，
+ * 又不会把本来很艳的封面（如 `#d05018` 饱和度 88%）改得更艳。
+ */
+private const val TINT_MIN_SATURATION = 0.30f
 
 /**
  * 综合决策卡片底部组件的着色方案。
@@ -170,10 +341,16 @@ fun resolveVideoCardAmbientDrawSpec(
         // ② 壁纸开着但调色板还没加载好：保持中性玻璃表面，**不要**退回封面色。
         //    否则会先闪一下上一张卡/封面颜色，等壁纸色到位再跳变。
         wallpaperActive -> defaultContainerColor.copy(alpha = glassTransparency)
-        // ③ 封面路：与容器底色按比例混合（不直接铺满，否则卡片变成一块纯色板、失去玻璃感）
+        // ③ 封面路：先做**明度归一化 + 饱和度下限**再与容器底色混合。
+        //
+        // 必须做：实测提取色的相对亮度中位只有 0.051（61% 低于 0.10）、
+        // 饱和度中位 40%（47% 低于 30%）。不整理就直接混，大部分卡片会被冲成灰、
+        // 读作"没取到色"—— 这是本功能最大的观感问题。
+        // 详见 normalizeTintColor 的 KDoc（含 21 个真实样本的数据与两组对照）。
         hasValidCoverTint -> {
+            val tint = normalizeTintColor(coverTint!!, isDarkTheme)
             val blendFraction = if (isDarkTheme) 0.80f else 0.68f
-            lerp(defaultContainerColor, coverTint!!, blendFraction).copy(alpha = glassTransparency)
+            lerp(defaultContainerColor, tint, blendFraction).copy(alpha = glassTransparency)
         }
         // ④ 都没有：中性玻璃表面
         else -> defaultContainerColor.copy(alpha = glassTransparency)
@@ -187,11 +364,14 @@ fun resolveVideoCardAmbientDrawSpec(
         0f
     }
 
+    // 描边与微光跟**同一个归一化后的色**走，而不是原始封面色：
+    // 否则会出现"底色被提亮了、描边还是那个深色"的脱节（描边几乎看不见）。
     val finalBorderColor = if (hasValidCoverTint) {
+        val normalizedTint = normalizeTintColor(coverTint!!, isDarkTheme)
         val borderBlendFraction = if (isDarkTheme) 0.50f else 0.40f
         val borderAlpha = if (isDarkTheme) 0.28f else 0.40f
         val baseBorder = Color.White.copy(alpha = borderAlpha)
-        lerp(baseBorder, coverTint!!, borderBlendFraction).copy(alpha = borderAlpha)
+        lerp(baseBorder, normalizedTint, borderBlendFraction).copy(alpha = borderAlpha)
     } else {
         if (isDarkTheme) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.40f)
     }

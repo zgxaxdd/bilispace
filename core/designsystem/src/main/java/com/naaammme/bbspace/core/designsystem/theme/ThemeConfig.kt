@@ -21,18 +21,33 @@ data class ThemeConfig(
     val transitionStyle: TransitionStyle = TransitionStyle.SHARED_AXIS_X,
     val isPureBlack: Boolean = false,
     /**
-     * 推荐页卡片是否跟随**系统壁纸主色**染色（而非只用封面代表色）。
+     * 推荐页卡片是否跟随**系统壁纸主色**染色（而非用封面代表色）。
      *
-     * **默认 true** —— 这是与 BiliPai 上游对齐的默认观感：上游在开了壁纸背景时
-     * 壁纸是唯一取色来源，封面色只作回退。BBSpace 没有自定义壁纸背景功能，
-     * 所以这里直接取**系统壁纸**的主色（`WallpaperManager.getWallpaperColors`）。
+     * **默认 false —— 与 BiliPai 行为一致。**
      *
-     * 注意与 [useDynamicColor] 的区别：那个是 Android 12 的 **Monet**（影响整套
-     * 主题色板），这个是**卡片信息区的染色来源**，两者独立。
+     * ## 为什么默认关（这条是实测纠正的，别再翻回 true）
      *
-     * 关掉后卡片退回"只用封面代表色"的路径（即接入壁纸前的行为）。
+     * 上游 `VideoCard` 的 `wallpaperTintEnabled` 形参默认就是 `false`，实际值来自
+     * `homeWallpaperBackdropAppearance.visible`，而它在 `!hasWallpaper` 时恒为 false
+     * （见上游 `HomeGlassVisualPolicy.resolveHomeWallpaperBackdropAppearance`）。
+     * 也就是说：**用户没设自定义壁纸背景时，BiliPai 的推荐页卡片就是用封面（预览图）
+     * 取色的**，壁纸只是"开了壁纸背景"时的替代来源。
+     *
+     * BBSpace 没有自定义壁纸背景功能，所以正确的默认是**与上游无壁纸时一致**：
+     * 只用封面取色。
+     *
+     * 第一版这里误设成 `true`，实测后果（2026-09-22 真机像素采样）：
+     * 四张卡的封面色分别是深蓝黑 / 深红黑 / 蓝 / 深蓝，但信息区全部呈**同调淡绿**
+     * （`#ced9c7` / `#cad6c2` / `#c4d1bb` / `#b8c4af`）—— 即系统壁纸的绿色盖住了
+     * 每张卡各自的封面取色，整屏失去卡片个性。这正是用户报的"取色不对"。
+     *
+     * 打开后卡片会跟随系统壁纸主色（适合喜欢整屏统一色调的用户），但**不再是
+     * 每张卡各取封面色**。两者是互斥的取色来源，见 `shouldUseCoverTintForCard`。
+     *
+     * 与 [useDynamicColor] 的区别：那个是 Android 12 的 **Monet**（影响整套主题色板），
+     * 这个只影响**卡片信息区的染色来源**，两者独立。
      */
-    val wallpaperCardTint: Boolean = true,
+    val wallpaperCardTint: Boolean = false,
     val preferredFrameRate: FrameRateMode = FrameRateMode.AUTO,
     // 默认圆角由 STANDARD 提到 ROUNDED：STANDARD 下卡片圆角仅 12dp（medium），
     // 观感偏方、显得陈旧；ROUNDED 给到 16dp / 大容器 24dp，与当下主流客户端
