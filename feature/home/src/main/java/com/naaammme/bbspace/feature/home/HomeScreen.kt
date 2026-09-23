@@ -48,9 +48,6 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
-import com.naaammme.bbspace.core.designsystem.color.LocalWallpaperPalette
-import com.naaammme.bbspace.core.designsystem.color.WallpaperPaletteStore
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -111,20 +108,6 @@ fun HomeScreen(
 ) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
     val singleColumn = viewModel.homeSingleColumn.collectAsStateWithLifecycle().value
-    // ── 系统壁纸调色板（卡片动态取色的壁纸来源）──────────────────────────────
-    //
-    // 开关关闭时**不加载**：`getWallpaperColors` 是 Binder 调用，没必要为一个
-    // 用不到的调色板付这次往返。开关重新打开时 effect 会重跑并补加载。
-    val wallpaperCardTint = viewModel.wallpaperCardTint.collectAsStateWithLifecycle().value
-    val context = LocalContext.current
-    val paletteScope = rememberCoroutineScope()
-    val wallpaperPalette by WallpaperPaletteStore.currentPalette
-        .collectAsStateWithLifecycle()
-    LaunchedEffect(wallpaperCardTint) {
-        if (wallpaperCardTint) {
-            WallpaperPaletteStore.loadSystemPalette(context, paletteScope)
-        }
-    }
     LaunchedEffect(Unit) {
         viewModel.refreshPageAction()
     }
@@ -224,18 +207,6 @@ fun HomeScreen(
         GlassSourceRefresher { topBarOffsetPx < topBarHeightState.value }
     }
 
-    // 壁纸调色板必须 provide 在**包住 HorizontalPager 的那一层**，不能只 provide 给顶栏。
-    //
-    // 踩过的坑：第一版把 `LocalWallpaperPalette` 和玻璃那几个一起 provide 在顶栏那层
-    // （原 :312 的 CompositionLocalProvider），但 `HomeVideoPage` 在 pager 里、
-    // **位于那个 provider 之前** —— 卡片读到的永远是 null，等于壁纸色板整条链路没接上，
-    // 而且没有任何报错（staticCompositionLocalOf 的默认值就是 null）。
-    // 所以这里单开一层只负责调色板，作用域覆盖 pager 与顶栏。
-    CompositionLocalProvider(
-        // 开关关闭时 provide null：卡片据此退回"只用封面代表色"的路径，
-        // 与接入壁纸前的行为完全一致（不需要在卡片里再读一次开关）。
-        LocalWallpaperPalette provides if (wallpaperCardTint) wallpaperPalette else null
-    ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -365,7 +336,6 @@ fun HomeScreen(
                 }
         )
         }
-    }
     }
 }
 

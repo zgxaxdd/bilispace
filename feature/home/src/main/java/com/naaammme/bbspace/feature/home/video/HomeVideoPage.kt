@@ -33,8 +33,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,20 +43,15 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -72,9 +65,6 @@ import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.designsystem.color.LocalHomeCardDynamicTintEnabled
-import com.naaammme.bbspace.core.designsystem.color.VideoCardAmbientDrawSpec
-import com.naaammme.bbspace.core.designsystem.color.compositeTintOverBase
-import com.naaammme.bbspace.core.designsystem.color.LocalWallpaperPalette
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAdaptiveContentColors
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawSpec
@@ -83,7 +73,6 @@ import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.biliImageUrlForVariant
 import com.naaammme.bbspace.core.designsystem.component.feedCoverVariant
-import com.naaammme.bbspace.core.designsystem.component.resolveCoverCacheKey
 import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonShimmer
 import com.naaammme.bbspace.core.designsystem.component.SkeletonBlock
 import com.naaammme.bbspace.core.designsystem.component.rememberAdaptiveGridColumnCount
@@ -152,17 +141,16 @@ fun HomeVideoPage(
 ) {
     val context = LocalContext.current
     val gridState = rememberLazyStaggeredGridState()
-    // 预加载封面列表：**URL 与缓存键都要与卡片一致**，缺一个预加载就白做。
+    // 预加载封面 URL 列表。**必须与卡片请求的是同一个 URL**：Coil 的 memory / disk
+    // cache key 都由 ImageRequest.data（这里即解析后的 URL 字符串）派生，
+    // 差一个 `@640w_480h_1e_1c_85q.webp` 后缀就是另一个键。
     //
-    // URL 这一半的教训（上一轮修的）：原先传的是**未解析的 `item.cover`（原图地址）**，
-    // 于是预加载解出来的位图卡片永远取不到 —— 而且它下载的是原图，比不预加载更贵。
+    // 上一轮这里传的是**未解析的 `item.cover`（原图地址）**，于是：
+    // - 预加载解出来的位图，卡片永远取不到 → 预加载 100% 白做；
+    // - 而且它下载的是原图，比不预加载更贵（多一份带宽 + 多一份内存缓存）。
     // 现在与卡片共用 biliImageUrlForVariant / feedCoverVariant，结构上不可能再分叉。
     //
-    // 缓存键这一半（本次）：卡片现在**显式**指定 `memoryCacheKey`（见 coverCacheKey 的
-    // 注释），Coil 就不再按 URL 派生键了。若预加载仍按 URL 派生，两者又是两个键 ——
-    // 等于把上一轮修好的事换个地方再犯一次。所以预加载也必须带同一个键。
-    //
-    // 单独派生而不是直接用 items：预加载只需要 URL + 键，而 items 里任何字段变化
+    // 单独派生而不是直接用 items：预加载只需要 URL，而 items 里任何字段变化
     // （播放量、点赞数刷新）都不该重启预加载 effect。key 用 List 的 equals，
     // 只有真正换了内容才会变。
     val preloadVariant = feedCoverVariant(singleColumn)
@@ -176,16 +164,8 @@ fun HomeVideoPage(
     } else {
         COVER_PRELOAD_WIDTH_PX to COVER_PRELOAD_HEIGHT_PX
     }
-    val preloadCovers = remember(items, preloadVariant, singleColumn) {
-        items.map { item ->
-            CoverPreloadEntry(
-                url = biliImageUrlForVariant(item.cover, preloadVariant),
-                cacheKey = resolveCoverCacheKey(
-                    identity = item.actionKey,
-                    useLargeCover = singleColumn
-                )
-            )
-        }
+    val preloadCoverUrls = remember(items, preloadVariant) {
+        items.map { biliImageUrlForVariant(it.cover, preloadVariant) }
     }
     val homeFling = rememberHomeFlingBehavior()
     var wasRefreshing by remember { mutableStateOf(false) }
@@ -231,8 +211,8 @@ fun HomeVideoPage(
     //    静止时仍用 180ms 合并抖动。
     // 3. 相应地取消"滚动中直接 return"的门控 —— 它和第 2 点合起来让预加载只在
     //    列表完全静止时才有用。解码始终在 IO 线程，不占主线程。
-    LaunchedEffect(gridState, preloadCovers, preloadSizePx) {
-        if (preloadCovers.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(gridState, preloadCoverUrls, preloadSizePx) {
+        if (preloadCoverUrls.isEmpty()) return@LaunchedEffect
         snapshotFlow {
             val info = gridState.layoutInfo
             val lastVisible = info.visibleItemsInfo.maxOfOrNull { it.index } ?: -1
@@ -246,71 +226,24 @@ fun HomeVideoPage(
             .collect { (lastVisible, _) ->
                 if (lastVisible < 0) return@collect
                 val from = lastVisible + 1
-                val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCovers.lastIndex)
+                val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCoverUrls.lastIndex)
                 if (from > to) return@collect
-                val entries = (from..to).mapNotNull { preloadCovers.getOrNull(it) }
-                if (entries.isEmpty()) return@collect
+                val urls = (from..to).mapNotNull { preloadCoverUrls.getOrNull(it) }
+                if (urls.isEmpty()) return@collect
                 // 解码/网络都在 Coil 自己的调度器上，主线程只负责入队
                 withContext(Dispatchers.IO) {
                     val loader = SingletonImageLoader.get(context)
-                    entries.forEach { entry ->
-                        val url = entry.url ?: return@forEach
-                        val request = ImageRequest.Builder(context)
-                            .data(url)
-                            // 与卡片实际展示尺寸同档（见 preloadSizePx 的注释：
-                            // 预加载的位图比卡片需要的小，就会被判不可用而重新解码）
-                            .size(preloadSizePx.first, preloadSizePx.second)
-                            // **与卡片同一个键**（见 preloadCovers 的注释）：
-                            // 卡片显式指定了 memoryCacheKey，预加载不跟上的话
-                            // 两边就是两个键，预加载的位图卡片取不到。
-                            .apply {
-                                if (entry.cacheKey.isNotEmpty()) {
-                                    memoryCacheKey(entry.cacheKey)
-                                    diskCacheKey(entry.cacheKey)
-                                }
-                            }
-                            .memoryCachePolicy(CachePolicy.ENABLED)
-                            .diskCachePolicy(CachePolicy.ENABLED)
-                            .build()
-
-                        // ── 在预加载这一侧就取色（这是"很多卡片没取色"的关键修复）────
-                        //
-                        // 原先取色只挂在卡片的 `onSuccess` 上，而 `onSuccess` **只在真正
-                        // 解码时触发一次**。这有两个致命缺口：
-                        //  ① 卡片在图片解码完成前滚出屏幕 → 该回调被取消 → 这张卡永远没色；
-                        //  ② 预加载已经把位图解码进内存缓存 → 卡片拿到的是**缓存命中**，
-                        //     解码路径不重走 → `onSuccess` 不再触发 → 整屏卡片都没色。
-                        //     而预加载恰恰是为了让卡片命中缓存，所以这个缺口是**必然**发生的。
-                        //
-                        // 修法：在预加载拿到位图时就取色并写进同一个 colorCache（按 identity 键）。
-                        // 卡片首次组合时 `getCachedColor` 直接命中，不依赖任何回调时序。
-                        //
-                        // 用 execute 而非 enqueue：需要拿到位图本身。代价是这一路变同步，
-                        // 但它已经在 Dispatchers.IO 上，且 Coil 内部对同一 key 有请求去重，
-                        // 不会因此多下一次网络。
-                        if (entry.cacheKey.isNotEmpty() &&
-                            VideoCardCoverColorStore.getCachedColor(entry.cacheKey) == null
-                        ) {
-                            runCatching {
-                                val result = loader.execute(request)
-                                val bitmap = (result.image as? coil3.BitmapImage)?.bitmap
-                                if (bitmap != null) {
-                                    VideoCardCoverColorStore.extractAndCache(
-                                        entry.cacheKey,
-                                        bitmap
-                                    )?.let { color ->
-                                        if (Logger.isDebug) {
-                                            android.util.Log.i(
-                                                "BbDynamicTint",
-                                                "preload-extracted coverTint=#" +
-                                                    Integer.toHexString(color.toArgb()) +
-                                                    " key=${entry.cacheKey}"
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    urls.forEach { url ->
+                        loader.enqueue(
+                            ImageRequest.Builder(context)
+                                .data(url)
+                                // 与卡片实际展示尺寸同档（见 preloadSizePx 的注释：
+                                // 预加载的位图比卡片需要的小，就会被判不可用而重新解码）
+                                .size(preloadSizePx.first, preloadSizePx.second)
+                                .memoryCachePolicy(CachePolicy.ENABLED)
+                                .diskCachePolicy(CachePolicy.ENABLED)
+                                .build()
+                        )
                     }
                 }
             }
@@ -406,110 +339,30 @@ private fun FeedCard(
     val canOpen = !isDisliked && (item.target != null || item.liveRoute != null || isDynamic)
     var showMoreMenu by remember(item) { mutableStateOf(false) }
     // ── 封面动态取色（移植自 BiliPai 上游「卡片动态取色」）────────────────────────
-    //
-    // 缓存键用**列表稳定键**派生，不用封面 URL —— 这是与上游对齐的关键一步。
-    //
-    // 为什么不能用封面 URL：URL 会变（同一视频在不同推荐位/不同清晰度档拿到不同 URL），
-    // 一变就查不到之前算好的颜色，表现成"滚动回来颜色没了/这张卡没上色"。
-    // 上游用 `cover_{bvid}_n` 这样的身份键，正是为了让它**跨 URL 变化保持稳定**。
-    //
-    // 为什么必须同时传给 Coil（`cacheKey` 参数）：取色挂在下游 `onSuccess` 上，
-    // 若取色键与 Coil 的图片键各算各的，就会出现"算过色的封面查不到、查得到的没算过"。
-    // 上游把同一个键同时用作 memory/disk cache key，两边同源。
-    //
-    // 键里带质量档（单列 `l` / 双列 `n`）：单双列请求的是不同尺寸位图，
-    // 共用键会让小图命中大图槽位、Coil 因尺寸不足重新解码（等于白算）。
-    val coverCacheKey = resolveCoverCacheKey(
-        identity = item.actionKey,
-        useLargeCover = singleColumn
-    )
+    // 缓存键用封面 URL 本身：同一张封面在任意卡片/任意次滚动里都命中同一份取色结果。
+    // 用 `remember(coverKey)` 而非 `remember(item)`：列表复用 slot 时 item 变而
+    // coverKey 不变的情况（同一视频换推荐位）不该重置颜色。
+    val coverTintKey = item.cover.orEmpty()
     val dynamicTintEnabled = LocalHomeCardDynamicTintEnabled.current
-    // 壁纸调色板（宿主按开关 provide；关掉时为 null → 退回封面路）
-    val wallpaperPalette = LocalWallpaperPalette.current
-    val wallpaperTintEnabled = wallpaperPalette != null
-    // 卡片在屏幕上的纵向位置（0 顶部 / 1 底部），用于在壁纸色段之间插值。
-    //
-    // 用 **Float state + onGloballyPositioned 写** 而不是组合期读一个 Dp：
-    // 滚动时位置每帧都变，若它进组合就会让整张卡片每帧重组（本文件 :310 一带
-    // 已经在为顶栏避免同类问题）。这里只在绘制期读 floatValue，滚动帧只重绘不重组。
-    val cardYFraction = remember { mutableFloatStateOf(0.5f) }
     val tintScope = rememberCoroutineScope()
-    // 卡片自己拿一份 context：主动取色要用它构造 Coil 请求
-    // （外层 HomeVideoPage 的 `context` 不在本函数作用域内）
-    val cardContext = LocalContext.current
-    var coverTint by remember(coverCacheKey) {
-        mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverCacheKey))
-    }
-    // 主动取色 + 订阅结果，一次把"卡片先组合 / 取色后完成"和
-    // "可见卡不在预加载窗口内"两个缺口一起补掉。
-    //
-    // 为什么需要**两条**而不是一条：
-    // - `requestExtraction` 解决"这张卡根本没人给它取色"（可见卡不在预加载窗口、
-    //   而 onSuccess 又因缓存命中不触发）。它不依赖任何回调时机。
-    // - `collect` 解决"取色是异步的，卡片先组合读到 null，之后 remember 不再重算"。
-    //
-    // 两者合起来才能保证：**屏幕上的每一张卡最终都会有颜色**。
-    LaunchedEffect(coverCacheKey, dynamicTintEnabled) {
-        if (!dynamicTintEnabled) return@LaunchedEffect
-        // 已有颜色（滚动回来命中缓存）就直接用，不必再跑一遍
-        VideoCardCoverColorStore.getCachedColor(coverCacheKey)?.let {
-            coverTint = it
-            return@LaunchedEffect
-        }
-        VideoCardCoverColorStore.requestExtraction(
-            appContext = cardContext,
-            cacheKey = coverCacheKey,
-            url = biliImageUrlForVariant(
-                item.cover,
-                feedCoverVariant(singleColumn)
-            ).orEmpty(),
-            sizePx = if (singleColumn) {
-                COVER_PRELOAD_LARGE_WIDTH_PX to COVER_PRELOAD_LARGE_HEIGHT_PX
-            } else {
-                COVER_PRELOAD_WIDTH_PX to COVER_PRELOAD_HEIGHT_PX
-            },
-            scope = tintScope
-        )
-        VideoCardCoverColorStore.colorUpdates.collect { (key, color) ->
-            if (key == coverCacheKey) {
-                coverTint = color
-                return@collect
-            }
-        }
+    var coverTint by remember(coverTintKey) {
+        mutableStateOf(VideoCardCoverColorStore.getCachedColor(coverTintKey))
     }
     // 异步提取回来时，若卡片已被复用给别的封面，必须丢弃这次结果（上游同款防串色）
-    val activeCoverTintKey by rememberUpdatedState(coverCacheKey)
+    val activeCoverTintKey by rememberUpdatedState(coverTintKey)
     // 取色结果渐变入场：直接跳变会让整张卡片"啪"地换色，350ms 过渡读起来是"光渗进来"
-    //
-    // 保留 **State 引用**（不是 `by` 解构出的值）：绘制期要在 draw 块内读 `.value`，
-    // 这样 Compose 会把读取登记为该绘制节点的依赖、状态一变自动失效重绘。
-    // 若在这里就解构成值，绘制块捕获的是组合那一刻的常量，动画/取色到达都不会反映。
-    val animatedCoverTintState: State<Color> = animateColorAsState(
+    val animatedCoverTint by animateColorAsState(
         targetValue = coverTint ?: Color.Transparent,
         animationSpec = tween(durationMillis = 350),
         label = "videoCardCoverTint"
     )
-    val animatedCoverTint by animatedCoverTintState
     val tintSource = if (animatedCoverTint.alpha > 0f) animatedCoverTint else null
-    // 卡片染色底：**必须是不透明表面色**，不能是 Transparent。
-    //
-    // ## 为什么（2026-09-22 真机像素采样定位）
-    //
-    // 双列原先照 PiliPlus-Max 做成「无卡片底色，封面与文字直接落在页面背景上」，
-    // 即 `Color.Transparent`。当时没有动态染色，这样最干净。
-    //
-    // 但接入封面取色后它成了**染色不可见的根因**：染色是
-    // `lerp(底色, 封面色, 0.68).copy(alpha = 0.28)`，叠在 Transparent 上意味着
-    // 页面背景要透出 72%，色相被冲掉。实测同一张封面色 `#689098`：
-    //   - 叠在 Transparent 上 → 期望 `#c6cfca`，**实测 `#cac8c8`（灰，饱和度 1%）**
-    //   - 四张卡的信息区饱和度全部只有 1~8%，肉眼读作"没有取色"
-    //
-    // 上游 BiliPai 用的是 `AppSurfaceTokens.cardContainer()` = `surfaceContainer`
-    // （**不透明**，浅色下 `#EEEEEE`），所以同样 alpha 下色相保留、染色可见。
-    //
-    // 因此双列也改用不透明表面色。单列本来就是 `surfaceContainerLow`（同族、略深一档），
-    // 这里取同一个值，让两种布局的卡片底色一致 —— 单双列切换时不会换底色。
-    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val containerColor = if (singleColumn) {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    } else {
+        // 双列参考 PiliPlus-Max：无卡片底色，封面与文字直接落在页面背景上
+        Color.Transparent
+    }
     val defaultOnSurface = MaterialTheme.colorScheme.onSurface
     val defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     // 深浅判据与全站一致：以主题背景亮度为准（跟随主题模式，不直接问系统）
@@ -568,45 +421,20 @@ private fun FeedCard(
     // 最后 0.5dp 描边勾出玻璃棱镜边。
     // 无封面色时（未加载完 / 提取失败 / 开关关闭）全部退化：底色原样、无渐变、
     // 中性白描边，视觉与移植前一致。
-    // ── 染色在**绘制期**解析（照 BiliPai 的做法，这是本功能正确性的关键）────────
-    //
-    // BiliPai 把 `resolveVideoCardAmbientDrawSpec(...)` 放在 `drawBehind { }` 里，
-    // 而不是组合期算好再传给容器。这个差别不是风格问题，是**正确性**问题：
-    //
-    // - `drawBehind` 的 lambda 每次绘制都执行，且它读的状态（`animatedCoverTint`、
-    //   `cardYFraction`、`LocalWallpaperPalette`）都是 Compose State → 值一变自动失效重绘。
-    //   于是**无论取色什么时候到，下一帧就能画出来**，完全不依赖重组时序。
-    // - 组合期算好再传 `Surface(color = ...)` 则是"一次性参数"：首帧取色还没到（null）
-    //   就固定成底色，之后再也不会更新。
-    //
-    // 实测证据：BBSpace 原先在组合期算，日志里 `RENDER ... tint=null` 长期成立，
-    // 而同一时刻取色日志有 11 条 —— **取色在跑，屏上一张都没上色**。
-    //
-    // ⚠️ **关键细节：必须在绘制块内直接读 State，不能读它的值**。
-    // 第一版写成 `val spec = { yFrac -> resolve(coverTint = tintSource, ...) }` ——
-    // 那个 lambda 在**组合期**创建，捕获的是 `tintSource` 当时的值（null），
-    // 绘制期调用它并不会重新读状态。所以它既没有修复问题，也读不出新颜色。
-    // 正确做法是捕获 **State 对象本身**，在绘制块内 `.value` —— 这样 Compose 会把
-    // 这次读取登记为该绘制节点的依赖，状态一变就自动失效重绘。
-    val baseSurfaceColor = containerColor
-    val defaultBorderColorAtDraw = if (darkTheme) Color.White.copy(alpha = 0.25f)
-    else Color.White.copy(alpha = 0.40f)
-    // 捕获 State 而非值：见上面的 ⚠️
-    val tintStateAtDraw: State<Color> = animatedCoverTintState
-    val yFractionStateAtDraw = cardYFraction
-    // 绘制期解析器：**只捕获 State 引用**，不捕获任何已求值的结果
-    val resolveSpecAtDraw: DrawScope.() -> VideoCardAmbientDrawSpec = {
-        val tintNow = tintStateAtDraw.value
+    val infoDrawSpec = if (dynamicTintEnabled) {
         resolveVideoCardAmbientDrawSpec(
-            coverTint = if (tintNow.alpha > 0f) tintNow else null,
+            coverTint = tintSource,
             isDarkTheme = darkTheme,
-            defaultContainerColor = baseSurfaceColor,
-            defaultBorderColor = defaultBorderColorAtDraw,
-            wallpaperTintEnabled = wallpaperTintEnabled,
-            wallpaperPalette = wallpaperPalette,
-            yFraction = yFractionStateAtDraw.floatValue
+            defaultContainerColor = containerColor,
+            defaultBorderColor = if (darkTheme) Color.White.copy(alpha = 0.25f)
+            else Color.White.copy(alpha = 0.40f)
         )
+    } else {
+        null
     }
+    val showCoverGlow = infoDrawSpec != null &&
+        infoDrawSpec.coverGlowAlpha > 0f &&
+        tintSource != null
     // 信息区自身**不再铺底色**（底色已由整卡容器承担），只叠渐变与描边：
     // 再铺一层会让接缝处出现"双层色"的色阶断层。
     //
@@ -622,41 +450,38 @@ private fun FeedCard(
             fontWeight = FontWeight.Medium
         )
     }
-    // ── 信息区：光晕 + 描边，全部在**绘制期**解析 ──────────────────────────────
-    //
-    // 用 `drawBehind` 而不是 `drawWithCache`：`drawWithCache` 的 cache 块只在
-    // "尺寸或所读状态变化"时重跑，而这里要读的 `animatedCoverTint` 是 350ms 动画的
-    // 每帧都变的状态 —— 缓存块会每帧重跑，等于没缓存，还多一层间接。
-    // `drawBehind` 直接在绘制期读状态，语义最直白，也不会漏更新。
-    //
-    // 光晕强度与描边色都从**同一次** `resolveVideoCardAmbientDrawSpec` 取，
-    // 保证底色 / 光晕 / 描边三者永远同源（分开算会出现"底色变了描边没变"的脱节）。
-    //
-    // 描边也画在这里（而不是 `Modifier.border`）：`border` 的颜色是组合期参数，
-    // 同样会卡在首帧的 null 上；而 0.5dp 只落在边缘，画在内容之前不会盖住文字。
+    // `drawWithCache` 而不是 `drawBehind`：brush 的 3 个 Color、stops 数组与 Brush 对象
+    // 本身都要在缓存块外重建的话，等于**每次重绘**分配一份。滚动列表里重绘频率远高于
+    // 取色变化频率，所以把 brush 挪进 cache 块。在缓存块内读取状态是 Compose 认可的
+    // 用法（值变化会让缓存块重跑），`size.height` 也在块内读，因此 endY 仍跟随实际高度。
+    val glowSpec = if (showCoverGlow) infoDrawSpec else null
+    val glowTint = if (showCoverGlow) tintSource else null
     val infoModifier = Modifier
-        .drawBehind {
-            if (!dynamicTintEnabled) return@drawBehind
-            val spec = resolveSpecAtDraw()
-            val glowTint = tintStateAtDraw.value.takeIf { it.alpha > 0f }
-            if (glowTint != null && spec.coverGlowAlpha > 0f) {
-                drawRect(
-                    brush = Brush.verticalGradient(
+        .then(
+            if (glowSpec != null && glowTint != null) {
+                Modifier.drawWithCache {
+                    val brush = Brush.verticalGradient(
                         colors = listOf(
-                            glowTint.copy(alpha = spec.coverGlowAlpha),
-                            glowTint.copy(alpha = spec.coverGlowAlpha * 0.35f),
+                            glowTint.copy(alpha = glowSpec.coverGlowAlpha),
+                            glowTint.copy(alpha = glowSpec.coverGlowAlpha * 0.35f),
                             Color.Transparent
                         ),
                         startY = 0f,
                         endY = size.height * 0.85f
                     )
-                )
+                    onDrawBehind { drawRect(brush) }
+                }
+            } else {
+                Modifier
             }
-            drawRect(
-                color = spec.borderColor,
-                style = Stroke(width = 0.5.dp.toPx())
-            )
-        }
+        )
+        .then(
+            if (infoDrawSpec != null) {
+                Modifier.border(width = 0.5.dp, color = infoDrawSpec.borderColor, shape = FeedCardInfoShape)
+            } else {
+                Modifier
+            }
+        )
         .padding(horizontal = 8.dp, vertical = 6.dp)
 
     // ── 无缝过渡期间整卡内容的可见性 ────────────────────────────────────────
@@ -743,42 +568,11 @@ private fun FeedCard(
         },
         enabled = canOpen,
         shape = FeedCardShape,
-        // 容器用**不透明底色**，染色不在这里传 —— 见下方 drawBehind。
-        //
-        // 为什么不再传 `infoDrawSpec.containerColor`：
-        // 1. 它是**组合期参数**，首帧取色没到（null）就固定成底色，之后再也不会更新；
-        // 2. 它本身是**半透明**的（设计意图是"透出背后模糊"），而卡片底下是
-        //    不透明的 `surfaceContainerLow = White`，没有模糊可透 —— 直接铺会
-        //    透出**页面背景**而不是卡片底色，颜色偏冷偏淡。
-        // 现在改为绘制期合成（见 compositeTintOverBase）后覆盖绘制，两个问题一起解决。
-        containerColor = baseSurfaceColor,
-        // 记录卡片在屏幕上的纵向位置，供壁纸色按位置插值。
-        //
-        // 写的是 Float state（不是普通变量）：绘制期读 floatValue 时不进组合，
-        // 所以滚动帧只重绘不重组。分母用根窗口高度而非卡片自身高度 ——
-        // 要的是"卡片在屏幕上的相对位置"。
-        modifier = Modifier
-            .fillMaxWidth()
-            // 整卡染色：**绘制期**解析并合成到不透明底色上，再铺满整卡。
-            //
-            // 铺整卡而不是只铺信息区，是"卡片与简介成为一个整体"的关键：
-            // 只染信息区时封面是照片、下面是色块，中间会有明确分界。
-            .drawBehind {
-                if (!dynamicTintEnabled) return@drawBehind
-                val spec = resolveSpecAtDraw()
-                drawRect(
-                    color = compositeTintOverBase(spec.containerColor, baseSurfaceColor)
-                )
-            }
-            .onGloballyPositioned { coords ->
-                val screenH = coords.parentLayoutCoordinates
-                    ?.size?.height?.toFloat()
-                    ?: coords.size.height.toFloat()
-                if (screenH > 0f) {
-                    cardYFraction.floatValue =
-                        (coords.positionInParent().y / screenH).coerceIn(0f, 1f)
-                }
-            },
+        // 整卡染色底：有封面色时是与封面同调的半透明色，无封面色时原样返回
+        // containerColor（双列即 Transparent），行为不变。
+        // 铺在**整卡**上而不是信息区，是"卡片与简介成为一个整体"的关键。
+        containerColor = infoDrawSpec?.containerColor ?: containerColor,
+        modifier = Modifier.fillMaxWidth(),
         // 无缝动画锚点铺满**整张卡片**（封面 + 简介区）。
         //
         // 依据：OPPO 无缝动画里**锚点矩形就是过渡的几何范围**。官方 B 站客户端
@@ -833,45 +627,30 @@ private fun FeedCard(
                 shape = FeedCardCoverShape,
                 coverLarge = singleColumn,
                 coverFourThree = !singleColumn,
-                // 与取色共用同一个键：Coil 的位图缓存与取色结果缓存因此同源
-                cacheKey = coverCacheKey,
                 // 取色挂在 Coil 解码成功回调上：**复用已解码位图**，不额外发请求、
                 // 不额外解码。已有颜色时跳过（滚动回来命中缓存，无需重复提取）。
                 onImageLoaded = if (dynamicTintEnabled && coverTint == null) {
                     { bitmap ->
                         VideoCardCoverColorStore.extractColorAsync(
-                            cacheKey = coverCacheKey,
+                            cacheKey = coverTintKey,
                             bitmap = bitmap,
-                            scope = tintScope,
-                            onColorExtracted = { extracted ->
-                                // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
-                                if (activeCoverTintKey == coverCacheKey) {
-                                    coverTint = extracted
-                                    // 诊断：仅 debug 构建输出。取色是"看不见的"功能，
-                                    // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
-                                    // 本模块未开启 buildConfig 生成，故用 Logger.isDebug 门控。
-                                    if (Logger.isDebug) {
-                                        android.util.Log.i(
-                                            "BbDynamicTint",
-                                            "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
-                                                "key=$coverCacheKey dark=$darkTheme " +
-                                                "wallpaper=${wallpaperTintEnabled}"
-                                        )
-                                    }
-                                }
-                            },
-                            // 失败分支：**必须有**。原实现静默 return，导致用户报
-                            // 「很多卡片没有取色」时现场没有任何痕迹，分不清是
-                            // 位图不可用、Palette 没出结果、还是键算错。
-                            onExtractionFailed = { reason ->
+                            scope = tintScope
+                        ) { extracted ->
+                            // 卡片可能已被复用给别的封面：key 不匹配就丢弃，防止串色
+                            if (activeCoverTintKey == coverTintKey) {
+                                coverTint = extracted
+                                // 诊断：仅 debug 构建输出。取色是"看不见的"功能，
+                                // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
+                                // 本模块未开启 buildConfig 生成，故用 Logger.isDebug 门控。
                                 if (Logger.isDebug) {
-                                    android.util.Log.w(
+                                    android.util.Log.i(
                                         "BbDynamicTint",
-                                        "extraction FAILED reason=$reason key=$coverCacheKey"
+                                        "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
+                                            "key=${coverTintKey.takeLast(28)} dark=$darkTheme"
                                     )
                                 }
                             }
-                        )
+                        }
                     }
                 } else {
                     null
@@ -1167,21 +946,6 @@ private val FeedCardInfoShape: Shape = BiliRadius.bottomRounded(BiliRadius.card)
 
 /** 封面角标（时长 / 播放量）形状。 */
 private val CoverBadgeShape = RoundedCornerShape(8.dp)
-
-/**
- * 预加载的一条封面：**URL 与缓存键成对**。
- *
- * 为什么必须是成对的、不能只存 URL：卡片现在**显式**给 Coil 指定 `memoryCacheKey`
- * （见 `resolveCoverCacheKey` 的注释），Coil 不再按 URL 派生键。预加载若只带 URL，
- * 它填的缓存与卡片读的缓存就是两个键 —— 预加载会静默白做，且没有任何报错。
- *
- * 这类"两边各算一个键"的问题在本项目已经犯过两次（预加载 URL 未解析、
- * 取色键与 Coil 键不同源），所以这里用类型把两者绑在一起，而不是靠人记得同步。
- */
-private data class CoverPreloadEntry(
-    val url: String?,
-    val cacheKey: String
-)
 
 // ── 封面预加载参数（见 HomeVideoPage 内 preload effect 的注释）────────────────
 /** 合并"手指停下/惯性将尽"后的抖动；滚动中不走这个值（见 preload effect 修正点 2）。 */

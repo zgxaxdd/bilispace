@@ -61,60 +61,19 @@ fun biliImageUrlForVariant(url: String?, variant: BiliImageVariant): String? = w
 fun feedCoverVariant(singleColumn: Boolean): BiliImageVariant =
     if (singleColumn) BiliImageVariant.CardCoverLarge else BiliImageVariant.CardCover43
 
-/**
- * 封面在 Coil 里的**显式缓存键**。
- *
- * ## 为什么需要它（而不是让 Coil 自己按 URL 算）
- *
- * 卡片动态取色要把"取色结果的缓存键"与"Coil 图片缓存的键"对齐：
- * 取色挂在下游的 `onSuccess` 上，如果两者用不同的键，就会出现
- * 「同一张封面在 A 处算过色、B 处却查不到」这类不一致。
- *
- * 上游 BiliPai 的做法是**显式指定** memory/disk cache key（`cover_{bvid}_n`），
- * 让取色键与图片键同源。BBSpace 此前只把原始 URL 当取色键、且**没有**把任何键
- * 传给 Coil —— 于是取色键与 Coil 实际用的键各算各的。
- *
- * ## 键的形状
- *
- * `cover_{identity}_{quality}`，quality 取 `l`（大图/单列）或 `n`（普通/双列）。
- * 带上质量档是必要的：单列与双列请求的是**不同尺寸的位图**，共用键会让
- * 小图命中大图槽位（Coil 会因尺寸不足重新解码，等于白算）。
- *
- * @param identity 视频的稳定身份。调用方应传列表稳定键（`FeedItem.actionKey`），
- *   它在同一视频的任意次滚动/刷新里都不变，因此键可跨帧复用。
- * @param useLargeCover 是否请求大图变体（单列用大图）。
- */
-fun resolveCoverCacheKey(identity: String, useLargeCover: Boolean): String {
-    val trimmed = identity.trim()
-    if (trimmed.isEmpty()) return ""
-    return "cover_${trimmed}_${if (useLargeCover) "l" else "n"}"
-}
-
 @Composable
 fun rememberBiliImageRequest(
     url: String?,
-    variant: BiliImageVariant = BiliImageVariant.CardCover,
-    /**
-     * 可选的显式缓存键。传了就同时用于 memory 与 disk cache key，
-     * 让调用方（如卡片动态取色）能用**同一个键**索引 Coil 的缓存。
-     * 传 null/空则退回 Coil 的默认行为（按解析后的 URL 算）。
-     */
-    cacheKey: String? = null
+    variant: BiliImageVariant = BiliImageVariant.CardCover
 ): ImageRequest? {
     if (url.isNullOrBlank()) return null
     val context = LocalContext.current
-    return remember(context, url, variant, cacheKey) {
+    return remember(context, url, variant) {
         val resolvedUrl = biliImageUrlForVariant(url, variant)
         ImageRequest.Builder(context)
             .data(resolvedUrl)
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCachePolicy(CachePolicy.ENABLED)
-            .apply {
-                if (!cacheKey.isNullOrBlank()) {
-                    memoryCacheKey(cacheKey)
-                    diskCacheKey(cacheKey)
-                }
-            }
             .build()
     }
 }
@@ -133,11 +92,9 @@ fun BiliAsyncImage(
      * 复用 Coil 已经解码好的位图，**不额外发一次图片请求**——这是上游的实现方式，
      * 也是这个功能能做到零额外网络/解码开销的原因。
      */
-    onSuccess: ((Bitmap) -> Unit)? = null,
-    /** 显式缓存键，见 [rememberBiliImageRequest] 的 `cacheKey`。 */
-    cacheKey: String? = null
+    onSuccess: ((Bitmap) -> Unit)? = null
 ) {
-    val request = rememberBiliImageRequest(url = url, variant = variant, cacheKey = cacheKey)
+    val request = rememberBiliImageRequest(url = url, variant = variant)
     AsyncImage(
         model = request,
         contentDescription = contentDescription,

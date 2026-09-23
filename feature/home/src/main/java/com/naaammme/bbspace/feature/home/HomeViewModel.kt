@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.home
+﻿package com.naaammme.bbspace.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,8 +13,6 @@ import com.naaammme.bbspace.core.model.ThreePointReason
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -63,22 +61,6 @@ class HomeViewModel @Inject constructor(
         kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
         true
     )
-
-    /**
-     * 卡片是否跟随系统壁纸取色（**默认关**，见 `ThemeConfig.wallpaperCardTint` 的注释：
-     * 上游在无自定义壁纸时也是关的，推荐页卡片用封面取色）。
-     *
-     * 初值必须与数据类默认值一致：若给 true，首帧会先按"壁纸路"渲染一次、
-     * 等 DataStore 回来再切回封面路 —— 卡片会闪一下壁纸色（实测过：整屏淡绿）。
-     */
-    val wallpaperCardTint = appSettings.themeConfig
-        .map { it.wallpaperCardTint }
-        .distinctUntilChanged()
-        .stateIn(
-            viewModelScope,
-            kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
-            false
-        )
 
     fun toggleHomeSingleColumn() {
         viewModelScope.launch {
