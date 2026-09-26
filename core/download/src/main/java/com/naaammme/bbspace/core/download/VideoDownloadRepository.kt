@@ -80,7 +80,24 @@ class VideoDownloadRepository @Inject constructor(
     init {
         repoScope.launch {
             recoverRunningTasks()
+            sweepOrphanTaskDirsSafely()
             ensureDrain()
+        }
+    }
+
+    /**
+     * 启动时清一次孤儿目录（ST-11）。**拿不到活的 id 集合就一个都不删** ——
+     * "查询失败被当成没有任务"会把用户所有缓存视频抹掉，这个代价不对称，所以 fail closed。
+     * 放在 `recoverRunningTasks` 之后、`ensureDrain` 之前：此时还没有任何 runTask 在写目录。
+     */
+    private suspend fun sweepOrphanTaskDirsSafely() {
+        val ids = runCatchingCancellable { dao.allIds() }
+            .onFailure { err -> Logger.w(TAG) { "orphan sweep skipped: id query failed ${err.message}" } }
+            .getOrNull() ?: return
+        val root = File(context.filesDir, ROOT_DIR_NAME)
+        val removed = sweepOrphanTaskDirs(root, ids.mapTo(HashSet(ids.size)) { it.toString() })
+        if (removed.isNotEmpty()) {
+            Logger.w(TAG) { "orphan download dirs removed: count=${removed.size} names=${removed.joinToString()}" }
         }
     }
 

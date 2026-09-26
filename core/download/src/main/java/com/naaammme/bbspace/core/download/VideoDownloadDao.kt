@@ -54,6 +54,10 @@ interface VideoDownloadDao {
     @Query("DELETE FROM video_download_task WHERE id = :taskId")
     suspend fun delete(taskId: Long)
 
+    /** 孤儿目录清理用：只问"哪些 id 还有行"，不读整表（见 sweepOrphanTaskDirs）。 */
+    @Query("SELECT id FROM video_download_task")
+    suspend fun allIds(): List<Long>
+
     @Query(
         "UPDATE video_download_task " +
             "SET status = :pausedStatus, error = :message, video_path = NULL, audio_path = NULL, duration_ms = 0 " +
