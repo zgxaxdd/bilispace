@@ -154,6 +154,18 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 不是回归。判据：`--stop` 清干净守护进程后单跑一次 → BUILD SUCCESSFUL。
 顺带：两次构建写**同一个日志文件名**会让日志交错成不可读的碎片，`> log` 每次用唯一名字。
 
+**W13 Kotlin 的块注释可以嵌套** —— KDoc 里出现"斜杠+星号"的任意组合都会撑开一层注释。
+在 KDoc 里写 `` `feature/*` `` 会让整个文件 `Syntax error: Unclosed comment`（Java 不会这样）。
+写中文文档注释时常想写"某某/\*"表示目录通配，改成"某某 层"或转义空格。编译器会接住，但会白跑一次构建。
+
+**W14 "看起来同类的缺陷"里藏着必须反向处理的点。**
+`runCatching { save(记录) }` 出现在"网络请求已成功之后"和"请求本身"是两件不同的事：
+前者传播取消会把**成功的操作改判为失败**（用户可见回归比原缺陷更大），正解是
+`withContext(NonCancellable)` 而不是 `runCatchingCancellable`。
+**所以批量收口必须逐个读上下文，不能按正则一把梭**；并且把"为什么不改"写成注释 +
+让守卫断言注释还在（`CancellationSweepGuardTest.deferredSitesKeepTheirExplanation`），
+否则下一个批量操作的人会顺手把它一起改掉。
+
 ## 4.1 待修的"设计约束"类结论
 
 **D1 `@Singleton` 上的 `var callback` 必须有清理路径。**

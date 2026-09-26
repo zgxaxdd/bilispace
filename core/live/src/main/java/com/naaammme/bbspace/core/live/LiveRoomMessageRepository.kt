@@ -191,6 +191,9 @@ class LiveRoomMessageRepository @Inject constructor(
             },
             profile = BiliRestProfile.APP
         )
+        // 刻意保留裸 runCatching（BACKLOG ST-06b）：弹幕此刻已发送成功，
+        // 传播取消会把成功的发送改判为失败。正解是把这条本地记录写进
+        // `withContext(NonCancellable)`，见 CommentRepository 同款注释。
         runCatching {
             publishedRecordRepo.save(
                 buildLiveDanmakuRecord(

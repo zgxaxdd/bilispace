@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.core.sponsorblock
 
 import android.content.Context
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -50,7 +51,7 @@ class SponsorBlockClient @Inject constructor(
      */
     suspend fun getSegments(bvid: String, cid: Long): Result<List<SbSegment>> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 var url = "${serverUrl()}/api/skipSegments?videoID=$bvid"
                 if (cid > 0L) url += "&cid=$cid"
                 val request = Request.Builder().url(url).sbHeaders().get().build()
@@ -104,7 +105,7 @@ class SponsorBlockClient @Inject constructor(
      */
     suspend fun viewedSegment(uuid: String) {
         withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val url = "${serverUrl()}/api/viewedVideoSponsorTime?UUID=$uuid"
                 val request = Request.Builder().url(url).sbHeaders()
                     .post(ByteArray(0).toRequestBody())
@@ -120,7 +121,7 @@ class SponsorBlockClient @Inject constructor(
      * 检查服务器连通性（GET /api/ready）。
      */
     suspend fun checkServer(rawUrl: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val base = rawUrl.trim().trimEnd('/').ifBlank { DEFAULT_SERVER }
             val request = Request.Builder().url("$base/api/ready").sbHeaders().get().build()
             okHttpClient.newCall(request).execute().use { it.isSuccessful }

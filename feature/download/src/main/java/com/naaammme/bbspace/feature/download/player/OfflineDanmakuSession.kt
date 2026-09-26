@@ -1,5 +1,6 @@
 ﻿package com.naaammme.bbspace.feature.download.player
 
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.download.VideoDownloadRepository
 import com.naaammme.bbspace.core.model.DanmakuItem
 import com.naaammme.bbspace.core.model.DanmakuSessionState
@@ -63,7 +64,7 @@ internal class OfflineDanmakuSession(
             aid = task?.aid ?: 0L,
             cid = task?.cid ?: 0L
         )
-        val cache = runCatching {
+        val cache = runCatchingCancellable {
             repository.loadDanmaku(taskId)
         }.getOrElse { error ->
             reset()

@@ -174,7 +174,28 @@
 - 新增台账：ST-27（本地侧只立口径，不改默认行为）
 - commit：`ci: PR 门禁的单元测试加 --rerun，结构守卫不再可能被缓存跳过`
 
-## 批次 B8 · （下一批）· ST-06 core/infra 剩余吞取消
+## 批次 B8 · 2026-09-26 · core 层取消语义收口（含两处刻意不收口）
+
+**分区**：A-稳定 P1（ST-06 的 core 半边 + 新条目 ST-06b）｜**级别**：A 级｜**详情**：`report-2026-09-26-B8.md`
+
+- 收口 4 处：`SponsorBlockClient.getSegments/viewedSegment/checkServer` + `OfflineDanmakuSession.load`
+  → `runCatchingCancellable`（前者把取消打成"获取空降片段失败"并把无片段渲染成网络失败；
+  后者在会话已拆除后回写 `lastError`）
+- **两处刻意不改**（本批最有价值的判断）：`CommentRepository:176` / `LiveRoomMessageRepository:194`
+  是"评论已发送成功之后写本地记录"，传播取消会把**成功的发送改判为失败**（输入框不清空/列表不刷新），
+  比原缺陷更伤用户 → 正解是 `withContext(NonCancellable)`，登记 **ST-06b**；
+  两处的 `ST-06b` 注释由守卫 `deferredSitesKeepTheirExplanation` 钉住，防止下一个人顺手一起改
+- 新增 `CancellationSweepGuardTest`（3 条，逐文件"cancellable 下限 + 裸 runCatching 上限"，
+  沿用 `VideoLogicGuardTest` 范式而不是写通配禁令）
+- 踩到 **W13：Kotlin 块注释可嵌套** —— KDoc 里写 `feature/*` 直接 `Unclosed comment`（编译器接住了）
+- 破坏性验证：把 `checkServer` 退回裸 runCatching → `migratedFilesStayMigrated FAILED`；恢复后绿
+- 全量（先删 `build/test-results` 保证守卫真跑）：`BUILD SUCCESSFUL in 4m37s`，
+  **193 单测 / 0 失败**；日志核对 `:app` 与 `:core:designsystem` 的测试任务是 `> Task`
+  而非 `UP-TO-DATE`（`:core:common` FROM-CACHE，它是纯逻辑测试、不扫源码，可接受）
+- commit：`fix(core): 空降/离线弹幕的取消不再被当成失败`
+
+## 批次 B9 · （下一批）· ST-06 infra 半边
+
 
 
 
