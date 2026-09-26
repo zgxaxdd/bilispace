@@ -41,6 +41,15 @@ class PlaybackHostState @Inject constructor(
     private val playbackSession: StreamPlaybackSession,
     playerSettings: AppSettings
 ) {
+    /**
+     * 进程级作用域，**刻意没有 cancel()**（BACKLOG ST-15 定为设计约束）：
+     * 本类是 @Singleton，活到进程结束，进程死时协程自然结束；给它加一个 close()
+     * 没有任何合法调用时机（Android 不提供"进程即将销毁"的可靠回调），只会变成
+     * 一段没人调用的死代码。
+     *
+     * **约束**：这个 scope 不许被改成 Activity / ViewModel 作用域 —— 那才会真的漏。
+     * 同理，任何往本类添加的长驻协程都必须能容忍活到进程结束。
+     */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** 进程内当前播放目标；与播放器同生命周期（见 StreamPlaybackSessionImpl）。 */
@@ -66,6 +75,19 @@ class PlaybackHostState @Inject constructor(
     @Volatile
     var isUserClosedVideo: Boolean = false
         private set
+
+    /**
+     * 「等下一个安全前台时刻再问通知权限」的意图（BACKLOG ST-23）。
+     *
+     * 原先这个布尔量是 MainActivity 的字段：后台播放场景下 Activity 可以先被销毁
+     * （进程靠 PlaybackService 活着），于是标志随实例一起消失，这一次用户永远不会被问。
+     * 挪到进程级单例就活得过 Activity 重建。
+     *
+     * **只存布尔量**：权限弹窗只能由 Activity 的 launcher 发起，所以这里刻意不保存
+     * 任何 Activity/回调引用 —— 那正是 ST-03 修掉的"单例拖住已销毁 Activity"的形状。
+     */
+    @Volatile
+    var notificationPromptPending: Boolean = false
 
     init {
         // 目标消失即收起（悬浮胶囊激活与 hostMode 无关，目标消失必然无处可回）。

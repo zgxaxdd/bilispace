@@ -40,6 +40,11 @@ class CapsuleIndicatorState @Inject constructor(
     // 放在 _active 声明之前就是 NPE（ParcelableSnapshotMutableState 未初始化）。
     private val _active = mutableStateOf(false)
 
+    /**
+     * 进程级作用域，无 cancel() —— 与 `PlaybackHostState.scope` 同一决定与同一理由
+     * （ST-15 定为设计约束，不是遗漏）：@Singleton 没有"进程即将销毁"的可靠回调，
+     * 加 close() 只会得到一段没人调用的死代码。**不许把它改成 Activity / ViewModel 作用域。**
+     */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     init {

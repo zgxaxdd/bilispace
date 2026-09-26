@@ -93,25 +93,25 @@ class MainActivity : ComponentActivity() {
             Logger.d(TAG) { "POST_NOTIFICATIONS granted=$granted" }
         }
 
-    private var pendingNotificationPermission = false
-
     /**
      * 挂到进程级单例 [hostState] 上的回调。存成字段是为了能在 onDestroy 里
      * **按身份比对**清理：无条件置 null 会在重建时序下把新实例刚装好的回调清掉。
+     *
+     * 它只往单例写一个布尔量（ST-23），不写 this、也不捕获 Activity。
      */
-    private val playbackUiStartedCallback: () -> Unit = { pendingNotificationPermission = true }
+    private val playbackUiStartedCallback: () -> Unit = { hostState.notificationPromptPending = true }
 
     private fun maybeRequestNotificationPermission() {
         val granted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
-            pendingNotificationPermission = false
+            hostState.notificationPromptPending = false
             return
         }
         val prefs = getSharedPreferences("app_flags", Context.MODE_PRIVATE)
         if (prefs.getBoolean("notif_perm_asked", false)) {
-            pendingNotificationPermission = false
+            hostState.notificationPromptPending = false
             return
         }
         prefs.edit().putBoolean("notif_perm_asked", true).apply()
@@ -124,9 +124,9 @@ class MainActivity : ComponentActivity() {
      * 绝不落在动画窗口内，也不落在视频详情页上。
      */
     private fun maybeShowPendingNotificationPermission() {
-        if (!pendingNotificationPermission) return
+        if (!hostState.notificationPromptPending) return
         if (com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState.isReturnRunning) return
-        pendingNotificationPermission = false
+        hostState.notificationPromptPending = false
         maybeRequestNotificationPermission()
     }
 
@@ -155,7 +155,7 @@ class MainActivity : ComponentActivity() {
             // onResume 落地，focus 时刻重查一次。展开后 hostMode!=Hidden，
             // shouldRestoreVideoPage 自身即去重，不会重复恢复。
             tryRestoreVideoPage("onWindowFocus")
-            if (pendingNotificationPermission) {
+            if (hostState.notificationPromptPending) {
                 // 焦点刚落定可能还在返回 morph 里：等一段再试一次，仍进行中就
                 // 交给下一次 onResume（标记保留，只弹一次的语义不变）
                 lifecycleScope.launch {
