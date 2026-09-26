@@ -102,8 +102,16 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 同类任务书曾给出三处错误断言（"ActionChip 只有 42dp"实测约 56dp；要移植的写法本仓不存在；
 把某日志读成"与逐帧绘制成本无关"是误诊）。复核后若发现错，改注释并写明，不要照做。
 
-**W5 扫源码型单测会被 Gradle 判 UP-TO-DATE 跳过。**
-改完守卫测试必须 `--rerun-tasks` 或强制 clean 该测试任务的输入，否则"全绿"可能来自缓存。
+**W5 扫源码型单测会被 Gradle 判 UP-TO-DATE 跳过 —— 本会话实测复现，这是全仓守卫的系统性漏洞。**
+机制：这类测试在运行时自己 `File(...).readLines()`，**被扫的文件不是测试任务的声明输入**；
+`Test` 任务只以 `testClassesDirs` + `classpath` 为输入，所以只要字节码没变，任务就直接跳过。
+实测证据：把 `PackageDirectoryConsistencyTest` 自己 `mv` 到拼错的目录（它应当立刻自检失败）→
+`--tests` 跑 → **BUILD SUCCESSFUL in 22s（被跳过）**；同一状态加 `--rerun-tasks` →
+`declaredPackageMatchesDirectory FAILED`。
+**推论**：改注释、改测试自身、改任何不进字节码的文件，都不会让守卫重跑。
+**因此本仓每次宣称"守卫会咬人"的破坏性验证，必须确认那一轮测试任务真的执行了**
+（看日志里有没有 `> Task :x:testDebugUnitTest` 而不是 `UP-TO-DATE`，或直接 `--rerun-tasks`）。
+修法见 BACKLOG ST-26（注册 inputs / CI 加 `--rerun-tasks` / `cacheIf{false}`）。
 
 **W6 判断"某个 schema 版本号有没有真把用户坑过"，用 `git log -L` 看那行的历史。**
 `git log -L '/version =/,+1:path'` 能直接给出该值的每次变更与提交。

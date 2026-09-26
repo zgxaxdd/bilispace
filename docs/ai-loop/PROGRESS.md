@@ -124,7 +124,46 @@
   （B0 165 → B1 174 → B2/B3 181 → B4 184）
 - commit：`fix(auth): 极验 WebView 在 onRelease 里摘桥并销毁`
 
-## 批次 B5 · 2026-09-26 · （待开始）ST-08 onNewIntent 交接漏三步
+## 批次 B5 · 2026-09-26 · ST-08 singleTop 复用实例的新目标交接
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B5.md`
+
+- 复核成立：`VideoDetailActivity` 是 `singleTop`（`AndroidManifest.xml:79`），详情页内点开下一个视频
+  走 `onNewIntent`、不重跑 `onCreate` → 原三行实现漏了 `cancelPendingClose()`
+  （`PlaybackHostState` 写死的契约："期间重新打开视频由它取消，避免误杀新会话"），
+  并且 `setIntent` 排在解析前（解析失败会把可用 intent 换成带不了目标的那个）
+- 改动：`onNewIntent` 先 `consumeIntent` 后 `setIntent`、失败即 return、补 `cancelPendingClose()`；
+  新增 `VideoDetailHandoffGuardTest`（3 条，钉"两条打开路径都要 cancelPendingClose + consumeIntent"与 adopt 顺序）
+- **刻意没做**：`capsuleState.deactivate()` 没同步到复用路径 —— 它背后的锚点 detach 时序来自
+  真机 OEM 日志实验，无设备不可判 → 转 L4-13，并写进守卫测试注释防止"以为已完全等价"
+- 验证：`:app:compileDebugKotlin` + 守卫绿；**破坏性验证**：故意改坏两处 →
+  `newIntentIsOnlyAdoptedAfterItParses` 与 `bothOpenPathsCancelThePendingClose` 双双 FAILED，恢复后全量绿
+- 再次踩 W8（目录写成 `com/naammmee`，照样编译跑绿）→ 已 `mv` 归位，并登记 ST-24 做机器拦截
+- commit：`fix(app): singleTop 复用详情页时按新目标交接状态`
+
+## 批次 B6 · 2026-09-26 · 包名/目录一致性守卫 + 暴露全仓守卫的跳过漏洞
+
+**分区**：D 防回归（ST-24 关闭，新增 ST-25/ST-26）｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B6.md`
+
+- 动机：B5 建测试时我**第二次**把目录写成 `com/naammmee/`（本仓包名易抄错），照样编译跑绿
+- 先量现状：437 个 `src/*/java` 的 .kt 里 39 个目录≠包名，其中 35 个是 `core/model` 的
+  **既有约定**（分层目录 + 扁平包）→ 规则写成"相等"会第一天红 35 条被逼加豁免，
+  故采用**前缀规则**（当前违规数实测 0）
+- 顺带查清 4 个文件"读不到 package"的根因是**文件头 UTF-8 BOM**（`od -c` 实证）→ 登记 ST-25
+- **意外收获（重要）**：破坏性验证时把守卫自己 `mv` 到错目录，`--tests` 跑出 BUILD SUCCESSFUL（22s，
+  被跳过），加 `--rerun-tasks` 才 FAILED → **扫源码型守卫的被扫文件不是任务输入，
+  改注释/改测试自身都不会让它重跑**。登记 **ST-26（P1）**，三种修法列在报告里，
+  改构建链影响面大不在本批顺手做
+- 影响既有结论吗：B2–B5 的破坏性验证当时都真的打出了 FAILED，结论仍成立；
+  但"全量绿"若以 `UP-TO-DATE` 为主，只能算"未复跑" → 本批验证前先删掉全部 `build/test-results`
+- 验证：删输出后全量 → `BUILD SUCCESSFUL in 4m49s`，**190 单测 / 0 失败 0 错误**
+  （曲线 165→174→178→181→184→187→190）
+- commit：`test(hygiene): 包名与目录一致性守卫（前缀规则 + BOM 容忍）`
+
+## 批次 B7 · （下一批）· ST-26 让守卫真的重跑
+
+
+
 
 
 
