@@ -254,7 +254,25 @@
 - commits：`build(room)` 导出配置与快照 / `fix(history,published)` 真实迁移与回退清零 /
   `test(room)` 两道守卫 / `docs(ai-loop)` 台账与报告
 
-## 批次 B12 · （下一批）· A-稳定 P1 剩余：ST-06 最后一处 + ST-07 单 Owner 仲裁
+## 批次 B12 · 2026-09-26 · ST-06 收尾最后一处（取消语义全线收口）
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B12.md`
+
+- 复核成立：`BbSpaceScreen.kt` 的导入 json 用 `withContext(IO) { runCatching { … } }`，
+  离开界面会取消 `scope`，于是"用户自己关掉了页面"被渲染成 Toast「导入失败」。
+  这不是 ST-06b 那种反向案例（操作本身没成功，只是被取消），所以传播取消是对的
+- 改动：`runCatching` → `runCatchingCancellable`（`feature/bbspace` 原已依赖 `:core:common`，未动依赖方向）
+- 守卫登记表补一条 `BbSpaceScreen.kt to (1 to 0)`：该文件此前全仓**只有 1 处** runCatching，
+  所以上限取 0；B8/B9 的教训是上限不能拍脑袋，拍了事实值才能拦住"顺手新增第二处"
+- **ST-06 至此关闭**：core（B8，4 处）→ infra（B9，5 处）→ 再收 2 处（B10）→ 最后 1 处（B12）。
+  仍刻意不收口的是 ST-06b 两处（评论已发送成功之后的本地记账），由
+  `deferredSitesKeepTheirExplanation` 钉住注释
+- 破坏性验证：把它退回裸 `runCatching` → `migratedFilesStayMigrated` FAILED（"现在只有 0 处，登记下限 1"）；
+  还原后全量 `:app:assembleDebug testDebugUnitTest` → BUILD SUCCESSFUL in 4m8s，**206 单测 / 0 失败**
+  （本批不新增测试，只加登记条目），`:app` 与 `:core:designsystem` 的测试任务均为裸 `> Task`（ST-26 口径）
+- commits：`fix(bbspace)` 收口 + 守卫登记 / `docs(ai-loop)` 台账
+
+## 批次 B13 · （下一批）· ST-07 离线播放与流会话共用 PlayerEngine 的单 Owner 仲裁
 
 
 
