@@ -22,8 +22,8 @@ import java.io.File
  * ## 防假绿
  * 1. 断言扫描文件数 > 300（实测 437）且含已知样本；
  * 2. 单独一条断言"每个文件都读到了 package 声明" —— 否则前缀规则对读不到声明的文件
- *    是**永久成立**的，而那正是最需要报警的情况（本仓有 4 个文件以 UTF-8 BOM 开头，
- *    `^package` 会静默失配，见 BACKLOG ST-25）。
+ *    是**永久成立**的，而那正是最需要报警的情况（本仓曾有 4 个文件以 UTF-8 BOM 开头，
+ *    `^package` 会静默失配；B18 已剥掉并加了 `mainSourcesDoNotStartWithABom` 钉住，见 ST-25）。
  */
 class PackageDirectoryConsistencyTest {
 
@@ -85,6 +85,48 @@ class PackageDirectoryConsistencyTest {
                 "core/model 的\"扁平包 + 分层目录\"是既有约定，前缀规则已容忍。",
             offenders.isEmpty()
         )
+    }
+
+    /**
+     * `src/main` 源码不许以 UTF-8 BOM 开头（BACKLOG ST-25）。
+     *
+     * BOM 不影响 Kotlin 编译，但会让任何**锚定行首**的守卫静默失配 ——
+     * `^package` 匹配不到，于是那条文件在结构守卫眼里等于"没有声明"，
+     * 前缀规则对它永久成立。本仓曾有 4 个这样的文件（`OfflineDanmakuSession`、
+     * `ListenDetailViewModel`、`LiveDetailPane`、`SpaceViewModel`）。
+     *
+     * 只查 `src/main`：`src/test` 的 BOM 同样不该有，但先守住真正被守卫扫描的那一侧，
+     * 避免一次改动牵动过多文件。
+     */
+    @Test
+    fun mainSourcesDoNotStartWithABom() {
+        val mainFiles = repoRoot.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .filter { it.path.contains("${File.separator}src${File.separator}main${File.separator}") }
+            .filterNot { it.path.contains("${File.separator}build${File.separator}") }
+            .toList()
+        // 防这条自己空转：扫不到文件时下面那条断言是对空集合成立的
+        assertTrue(
+            "BOM 扫描只看到 ${mainFiles.size} 个 main 源码（预期 >300），说明路径推导失效",
+            mainFiles.size > 300
+        )
+        val withBom = mainFiles.filter { startsWithBom(it) }
+            .map { it.relativeTo(repoRoot).path.replace('\\', '/') }
+        assertTrue(
+            "这些 main 源码以 UTF-8 BOM 开头，任何锚定行首的守卫都会静默漏掉它们：\n" +
+                withBom.joinToString("\n") +
+                "\n修法：剥掉首 3 个字节（EF BB BF），**不要**整文件重写以免动到行尾与中文。",
+            withBom.isEmpty()
+        )
+    }
+
+    /** 只看首 3 个字节，不把整个文件读成字符串（BOM 会被解码进首字符，容易看漏）。 */
+    private fun startsWithBom(file: File): Boolean {
+        val head = ByteArray(3)
+        file.inputStream().use { input ->
+            val read = input.read(head)
+            return read == 3 && head[0] == 0xEF.toByte() && head[1] == 0xBB.toByte() && head[2] == 0xBF.toByte()
+        }
     }
 
     /** `src/<variant>/java/` 之后的目录，点分形式。 */

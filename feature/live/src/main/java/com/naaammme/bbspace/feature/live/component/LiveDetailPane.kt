@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.live.component
+package com.naaammme.bbspace.feature.live.component
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement

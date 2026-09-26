@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.download.player
+package com.naaammme.bbspace.feature.download.player
 
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.download.VideoDownloadRepository

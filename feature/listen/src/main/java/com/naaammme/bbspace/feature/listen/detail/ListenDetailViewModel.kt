@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.listen.detail
+package com.naaammme.bbspace.feature.listen.detail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

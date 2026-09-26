@@ -1,4 +1,4 @@
-﻿package com.naaammme.bbspace.feature.space
+package com.naaammme.bbspace.feature.space
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
