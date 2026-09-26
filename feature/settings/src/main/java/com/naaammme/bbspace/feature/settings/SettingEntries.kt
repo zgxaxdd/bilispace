@@ -17,7 +17,7 @@ val appearanceEntries = listOf(
     SettingEntry("纯色背景", "深色纯黑 浅色纯白", APPEARANCE_ROUTE),
     SettingEntry("字体大小", "调整应用字体大小", APPEARANCE_ROUTE),
     SettingEntry("动画速度", "调整界面动画速度", APPEARANCE_ROUTE),
-    SettingEntry("过渡动画", "调整页面切换动画样式", APPEARANCE_ROUTE),
+    SettingEntry("过渡动画", "调整二级页面切换动画（视频页开合与底栏 Tab 切换不在此列）", APPEARANCE_ROUTE),
     SettingEntry("圆角风格", "调整界面圆角风格", APPEARANCE_ROUTE),
 )
 

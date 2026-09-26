@@ -41,6 +41,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRa
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
+import com.naaammme.bbspace.core.designsystem.seamless.coverExpandSourceFade
 import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
 import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
@@ -89,6 +90,9 @@ fun RankScreen(
         items = state.entries,
         isRefreshing = state.isRefreshing || (state.isLoading && state.entries.isEmpty()),
         isLoadingMore = state.isLoadingMore,
+        // 必须把错误接进网格：不传时网格视为无错误，失败一律渲染成 emptyContent
+        // 的"暂无内容"——请求被风控/断网时用户只看到空态，无从重试也无法得知原因。
+        errorMessage = state.errorMessage,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
         loadMoreEnabled = state.canLoadMore,
@@ -303,7 +307,8 @@ private fun RankVideoCard(
         },
         shape = MaterialTheme.shapes.large,
         containerColor = Color.Transparent,
-        modifier = Modifier.fillMaxWidth()
+        // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
+        modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
     ) {
         Box(
             modifier = Modifier
@@ -420,7 +425,8 @@ private fun RankPgcCard(
         enabled = target != null,
         shape = MaterialTheme.shapes.large,
         containerColor = Color.Transparent,
-        modifier = Modifier.fillMaxWidth()
+        // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
+        modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
     ) {
         Box(
             modifier = Modifier

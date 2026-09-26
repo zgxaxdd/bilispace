@@ -55,10 +55,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
-import androidx.compose.material3.BottomSheetDefaults
-import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
-import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import androidx.compose.ui.graphics.Color
 import coil3.compose.AsyncImage
 import com.naaammme.bbspace.core.common.ShareUtils
@@ -249,12 +247,11 @@ private fun DynamicPublishSheet(
     }
 
     ModalBottomSheet(
-        // iOS：弹层顶部圆角 28dp，只圆上两角（见 BiliRadius.sheetTop）
-        shape = if (LocalUiStyle.current == UiStyle.IOS) {
-            BiliRadius.topRounded(BiliRadius.sheetTop)
-        } else {
-            BottomSheetDefaults.ExpandedShape
-        },
+        // 弹层形状唯一来源（见 biliSheetShape）：iOS 28dp 只圆上两角，Material M3 默认
+        shape = biliSheetShape(),
+        // 风格自适应 grabber：iOS 36×5dp 细拉手，Material 保持 M3 默认
+        dragHandle = { BiliSheetGrabber() },
+
         scrimColor = Color.Black.copy(alpha = 0.40f),
         onDismissRequest = onDismiss,
         sheetState = sheetState

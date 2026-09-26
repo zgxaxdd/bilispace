@@ -9,13 +9,11 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
@@ -36,10 +34,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.naaammme.bbspace.core.designsystem.component.IOSChevron
+import com.naaammme.bbspace.core.designsystem.component.BiliBackButton
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
-import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
-import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -140,26 +136,14 @@ internal fun SearchTopBar(
             }
         },
         navigationIcon = {
-            IconButton(
+            // 风格感知返回按钮（iOS chevron / Material ArrowBack），决策收口进 designsystem
+            BiliBackButton(
                 onClick = {
                     focusManager.clearFocus(force = true)
                     keyboard?.hide()
                     onBack()
                 }
-            ) {
-                // iOS：返回 chevron；Material：M3 ArrowBack
-                if (LocalUiStyle.current == UiStyle.IOS) {
-                    IOSChevron(
-                        color = MaterialTheme.colorScheme.onBackground,
-                        pointingRight = false
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回"
-                    )
-                }
-            }
+            )
         },
         scrollBehavior = scrollBehavior
     )

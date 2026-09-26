@@ -42,6 +42,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.designsystem.component.IOSAlertDialog
+import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
+import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.model.LoginCredential
@@ -112,38 +115,53 @@ fun AccountScreen(
 
     pendingRemoveAccount?.let { account ->
         val isCurrent = account.mid == currentMid
-        AlertDialog(
-            onDismissRequest = { pendingRemoveAccount = null },
-            title = { Text(if (isCurrent) "退出当前账号" else "删除账号") },
-            text = {
-                Text(
-                    if (isCurrent) {
-                        "确认退出并删除当前账号吗？"
-                    } else {
-                        "确认删除这个账号吗？"
-                    }
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingRemoveAccount = null
-                        if (isCurrent) {
-                            viewModel.logout(account)
-                        } else {
-                            viewModel.removeAccount(account.mid)
-                        }
-                    }
-                ) {
-                    Text("确认")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRemoveAccount = null }) {
-                    Text("取消")
-                }
+        val confirm = {
+            pendingRemoveAccount = null
+            if (isCurrent) {
+                viewModel.logout(account)
+            } else {
+                viewModel.removeAccount(account.mid)
             }
-        )
+        }
+        val cancel = { pendingRemoveAccount = null }
+        if (LocalUiStyle.current == UiStyle.IOS) {
+            // iOS：居中警告框（270dp/14dp 圆角/44dp 按钮/发丝分隔线），
+            // 破坏性动作走 systemRed。MATERIAL 档保留 M3 AlertDialog。
+            IOSAlertDialog(
+                onDismiss = cancel,
+                title = if (isCurrent) "退出当前账号" else "删除账号",
+                message = if (isCurrent) "确认退出并删除当前账号吗？" else "确认删除这个账号吗？",
+                confirmLabel = "确认",
+                dismissLabel = "取消",
+                destructive = true,
+                onConfirm = confirm,
+                onDismissAction = cancel
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = cancel,
+                title = { Text(if (isCurrent) "退出当前账号" else "删除账号") },
+                text = {
+                    Text(
+                        if (isCurrent) {
+                            "确认退出并删除当前账号吗？"
+                        } else {
+                            "确认删除这个账号吗？"
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = confirm) {
+                        Text("确认")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = cancel) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
     }
 }
 

@@ -31,6 +31,7 @@ import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.component.BiliTopBar
 import com.naaammme.bbspace.core.designsystem.component.rememberBiliLargeTitleScrollState
+import com.naaammme.bbspace.core.designsystem.component.BiliGroupHeader
 import com.naaammme.bbspace.feature.settings.components.SettingSwitch
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import kotlin.math.roundToInt
@@ -60,11 +61,23 @@ fun AppearanceSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item(key = "hdr_风格") {
+                if (isIOS) {
+                    BiliGroupHeader("风格")
+                }
+            }
+
             item {
                 UiStyleSelector(
                     selected = config.uiStyle,
                     onSelect = viewModel::updateUiStyle
                 )
+            }
+
+            item(key = "hdr_颜色") {
+                if (isIOS) {
+                    BiliGroupHeader("颜色")
+                }
             }
 
             item {
@@ -118,6 +131,12 @@ fun AppearanceSettingsScreen(
                 )
             }
 
+            item(key = "hdr_材质") {
+                if (isIOS) {
+                    BiliGroupHeader("材质")
+                }
+            }
+
             item {
                 GlassSection(
                     isIOS = isIOS,
@@ -126,6 +145,12 @@ fun AppearanceSettingsScreen(
                     onMaterialChange = viewModel::updateGlassMaterial,
                     onStrengthChange = viewModel::updateGlassStrength
                 )
+            }
+
+            item(key = "hdr_排版与显示") {
+                if (isIOS) {
+                    BiliGroupHeader("排版与显示")
+                }
             }
 
             item {
@@ -147,6 +172,12 @@ fun AppearanceSettingsScreen(
                     scale = config.roundScreenSafePaddingScale,
                     onScaleChange = viewModel::updateRoundScreenSafePaddingScale
                 )
+            }
+
+            item(key = "hdr_列表与手势") {
+                if (isIOS) {
+                    BiliGroupHeader("列表与手势")
+                }
             }
 
             item {
@@ -175,6 +206,12 @@ fun AppearanceSettingsScreen(
                 )
             }
 
+            item(key = "hdr_播放页") {
+                if (isIOS) {
+                    BiliGroupHeader("播放页")
+                }
+            }
+
             item {
                 val playerBlur by viewModel.playerControlsBlur.collectAsStateWithLifecycle()
                 SettingSwitch(
@@ -194,6 +231,12 @@ fun AppearanceSettingsScreen(
                     // 模糊关掉时材质无从谈起，置灰避免"选了没反应"
                     enabled = playerBlur
                 )
+            }
+
+            item(key = "hdr_动效") {
+                if (isIOS) {
+                    BiliGroupHeader("动效")
+                }
             }
 
             item {
@@ -627,6 +670,13 @@ private fun TransitionStyleSelector(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("过渡动画", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "作用于二级页面的推入/返回（设置、空间、搜索、历史等）；" +
+                    "视频页开合走无缝过渡（见播放设置）、底栏 Tab 切换为固定淡入淡出，均不受此项影响。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(12.dp))
             TransitionStyle.entries.forEach { style ->
                 Row(

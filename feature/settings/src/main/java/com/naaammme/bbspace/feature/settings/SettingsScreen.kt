@@ -177,8 +177,18 @@ fun SettingsScreen(
                     }
                 }
             } else {
+                item(key = "hdr_settings") {
+                    if (isIOSStyle) {
+                        com.naaammme.bbspace.core.designsystem.component.BiliGroupHeader("设置")
+                    }
+                }
                 item {
                     SettingsHomeGroup(items = homeItems)
+                }
+                item(key = "ftr_settings") {
+                    if (isIOSStyle) {
+                        com.naaammme.bbspace.core.designsystem.component.BiliGroupFooter("部分设置重启后生效；反馈入口在「关于」页")
+                    }
                 }
                 item {
                     Card(
@@ -210,28 +220,45 @@ fun SettingsScreen(
         }
 
         if (showResetDialog) {
-            AlertDialog(
-                onDismissRequest = { showResetDialog = false },
-                title = { Text("恢复默认设置") },
-                text = {
-                    Text("这会把当前各项设置恢复到默认值 不会退出登录")
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            viewModel.resetAllSettings()
-                            showResetDialog = false
+            if (isIOSStyle) {
+                // iOS：居中警告框（破坏性操作走 systemRed）
+                com.naaammme.bbspace.core.designsystem.component.IOSAlertDialog(
+                    onDismiss = { showResetDialog = false },
+                    title = "恢复默认设置",
+                    message = "这会把当前各项设置恢复到默认值 不会退出登录",
+                    confirmLabel = "确定",
+                    dismissLabel = "取消",
+                    destructive = true,
+                    onConfirm = {
+                        viewModel.resetAllSettings()
+                        showResetDialog = false
+                    },
+                    onDismissAction = { showResetDialog = false }
+                )
+            } else {
+                AlertDialog(
+                    onDismissRequest = { showResetDialog = false },
+                    title = { Text("恢复默认设置") },
+                    text = {
+                        Text("这会把当前各项设置恢复到默认值 不会退出登录")
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.resetAllSettings()
+                                showResetDialog = false
+                            }
+                        ) {
+                            Text("确定")
                         }
-                    ) {
-                        Text("确定")
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showResetDialog = false }) {
+                            Text("取消")
+                        }
                     }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showResetDialog = false }) {
-                        Text("取消")
-                    }
-                }
-            )
+                )
+            }
         }
     }
 

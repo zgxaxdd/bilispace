@@ -56,10 +56,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
-import androidx.compose.material3.BottomSheetDefaults
-import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
-import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -111,18 +109,20 @@ internal fun CommentEditorSheet(
     }
 
     ModalBottomSheet(
-        // iOS：弹层顶部圆角 28dp，只圆上两角（见 BiliRadius.sheetTop）
-        shape = if (LocalUiStyle.current == UiStyle.IOS) {
-            BiliRadius.topRounded(BiliRadius.sheetTop)
-        } else {
-            BottomSheetDefaults.ExpandedShape
-        },
+        // 弹层形状唯一来源（见 biliSheetShape）：iOS 28dp 只圆上两角，Material M3 默认
+        shape = biliSheetShape(),
+        // 风格自适应 grabber：iOS 36×5dp 细拉手，Material 保持 M3 默认
+        dragHandle = { BiliSheetGrabber() },
+
         scrimColor = Color.Black.copy(alpha = 0.40f),
-        onDismissRequest = {
-            if (!busy) {
-                onDismiss()
-            }
-        },
+        // M3 ModalBottomSheet 契约：下拉/返回时组件已自行播放隐藏动画，然后回调
+        // onDismissRequest，此时唯一正确的动作是把 composable 移出组合。
+        // busy 时吞掉回调会让"已隐藏的 popup 壳"驻留组合树——其 focusable 窗口与
+        // 全屏 scrim（alpha=0 但 pointerInput 仍活）会拦截整页触摸与按键，且失败
+        // 路径不自愈（submitEditor 失败只复位 loading，visible 仍为 true），
+        // 表现为"评论页从此点不动，只能杀进程"。关闭期间的上传/提交照常在
+        // viewModelScope 完成，结果经 toast/列表刷新反馈，无副作用。
+        onDismissRequest = { onDismiss() },
         sheetState = sheetState,
         contentWindowInsets = { WindowInsets.navigationBars }
     ) {
