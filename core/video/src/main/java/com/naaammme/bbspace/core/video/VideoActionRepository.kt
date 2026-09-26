@@ -30,7 +30,10 @@ class VideoActionRepository @Inject constructor(
     suspend fun setLike(aid: Long, like: Boolean): String {
         val json = postApp(LIKE_ENDPOINT) {
             put("aid", aid.toString())
-            put("like", if (like) "1" else "0")
+            // App 协议语义与直觉相反：like=0 是点赞、like=1 是取消点赞
+            // （对照 piliplus lib/http/video.dart 的 likeVideo：想点赞传 '0'）。
+            // 传反表现为"点赞报 取消点赞失败/未点赞过，已点赞再点反而取消"。
+            put("like", if (like) "0" else "1")
         }
         return json.optJSONObject("data")?.optString("toast").orEmpty()
     }

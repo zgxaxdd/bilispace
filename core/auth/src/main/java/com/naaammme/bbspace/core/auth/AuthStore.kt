@@ -10,6 +10,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.util.Locale
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,10 +47,27 @@ class AuthStore @Inject constructor(
      * 凭证唯一来源是短信登录（loginBySms 解析 cookie_info），扫码只绑定 HD key
      */
     fun cookieHeader(): String {
-        if (guestMode) return ""
-        return cookiesFromJson(prefs.getString("cookies_json", null))
+        // buvid3 对齐真实浏览器（每个 Web 请求都带）：缺失时手机网络 IP 上的
+        // Web 请求更容易被风控拒绝（-352 一类），表现为排行等 Web 页"暂无内容"。
+        // 未登录/游客同样携带——游客最缺这层风险缓冲。
+        val buvid3 = "buvid3=$webBuvid3"
+        val loginCookies = if (guestMode) "" else cookiesFromJson(prefs.getString("cookies_json", null))
             .joinToString("; ") { "${it.name}=${it.value}" }
+        return if (loginCookies.isEmpty()) buvid3 else "$buvid3; $loginCookies"
     }
+
+    /**
+     * Web 端 buvid3 cookie 值：首次访问生成并持久化，格式对齐浏览器
+     * （UUID + "infoc" 后缀）。与 app 协议的 DeviceIdentity.buvid（XU/XY 前缀）
+     * 是两套标识，互不通用。
+     */
+    private val webBuvid3: String
+        get() {
+            prefs.getString("web_buvid3", null)?.let { return it }
+            val generated = UUID.randomUUID().toString().uppercase(Locale.US) + "infoc"
+            prefs.edit { putString("web_buvid3", generated) }
+            return generated
+        }
 
     /**
      * Web 端 csrf 令牌（bili_jct cookie 值），未登录或缺失时为空串
@@ -62,7 +81,13 @@ class AuthStore @Inject constructor(
     /**
      * 是否具备 Web 端交互所需凭证（cookie + csrf 齐备）
      */
-    fun hasWebCredential(): Boolean = cookieHeader().isNotEmpty() && csrfToken().isNotEmpty()
+    /**
+     * 是否具备 Web 端交互所需凭证（登录 cookie + csrf 齐备）。
+     * 不再用 `cookieHeader().isNotEmpty()` 判断——buvid3 常驻后它恒为真；
+     * 真正的凭证是登录 cookie（SESSDATA）与 csrf（bili_jct）。
+     */
+    fun hasWebCredential(): Boolean =
+        !guestMode && csrfToken().isNotEmpty() && cookiesFromJson(prefs.getString("cookies_json", null)).isNotEmpty()
 
     fun saveHdAccessKey(mid: Long, key: String, expiresIn: Long) {
         if (mid == 0L || key.isEmpty()) return

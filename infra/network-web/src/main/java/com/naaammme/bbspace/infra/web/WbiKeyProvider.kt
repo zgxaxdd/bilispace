@@ -26,10 +26,16 @@ class WbiKeyProvider @Inject constructor(
     @Volatile
     private var cached: WbiKeys? = null
 
+    /** 缓存对应的日期（epoch day）：wbi img_key/sub_key 服务端按天轮换，跨天必须重取，
+     *  否则签名持续校验失败（对照 piliplus getWbiKeys 的按天比较）。 */
+    @Volatile
+    private var cachedEpochDay: Long = -1
+
     suspend fun getKeys(): WbiKeys {
-        cached?.let { return it }
+        cached?.takeIf { cachedEpochDay == todayEpochDay() }?.let { return it }
         return withContext(Dispatchers.IO) {
-            cached?.let { return@withContext it }
+            val now = todayEpochDay()
+            cached?.takeIf { cachedEpochDay == now }?.let { return@withContext it }
             val request = Request.Builder()
                 .url("${BiliConstants.BASE_URL_API}$NAV_ENDPOINT")
                 .get()
@@ -45,9 +51,14 @@ class WbiKeyProvider @Inject constructor(
             WbiKeys(
                 imgKey = wbiImg.optString("img_url").extractWbiKey(),
                 subKey = wbiImg.optString("sub_url").extractWbiKey()
-            ).also { cached = it }
+            ).also {
+                cached = it
+                cachedEpochDay = now
+            }
         }
     }
+
+    private fun todayEpochDay(): Long = java.time.LocalDate.now().toEpochDay()
 
     private fun String.extractWbiKey(): String {
         return substringAfterLast('/').substringBefore('.').take(WBI_KEY_LENGTH)

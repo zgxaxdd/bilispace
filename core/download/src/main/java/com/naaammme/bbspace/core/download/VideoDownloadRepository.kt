@@ -107,10 +107,27 @@ suspend fun pause(taskId: Long) {
         val task = dao.find(taskId) ?: return
         when (VideoDownloadTaskStatus.valueOf(task.status)) {
             VideoDownloadTaskStatus.WAITING -> {
-                // 重检最新状态：任务可能已被 drain 抢占为 RUNNING，直接覆写会状态错乱
-                val latest = dao.find(taskId) ?: return
-                if (VideoDownloadTaskStatus.valueOf(latest.status) == VideoDownloadTaskStatus.WAITING) {
-                    dao.update(latest.pause())
+                // 审查 D11：drain 抢占窗口内 DB 仍是 WAITING，"重读再写"挡不住 runTask
+                // 随后的无条件 @Update(RUNNING) 覆写（后写者赢，暂停静默失效）。
+                // runningTaskId 命中 = drain 已真实抢占：cancelAndJoin 让 runTask 必死，
+                // 之后无论行停在 WAITING（死在写 RUNNING 之前）还是已 RUNNING 都落 PAUSED；
+                // 终态（DONE/FAILED）不覆写。未命中才是纯 WAITING，直接写 PAUSED 无竞态
+                //（drain 只在 drainMutex 内从 DB 查 WAITING，与本次写串行）。
+                if (runningTaskId == taskId) {
+                    stopRunningTask(taskId)
+                    val latest = dao.find(taskId) ?: return
+                    val latestStatus = VideoDownloadTaskStatus.valueOf(latest.status)
+                    if (latestStatus == VideoDownloadTaskStatus.WAITING ||
+                        latestStatus == VideoDownloadTaskStatus.RUNNING
+                    ) {
+                        dao.update(latest.pause())
+                    }
+                    ensureDrain()
+                } else {
+                    val latest = dao.find(taskId) ?: return
+                    if (VideoDownloadTaskStatus.valueOf(latest.status) == VideoDownloadTaskStatus.WAITING) {
+                        dao.update(latest.pause())
+                    }
                 }
             }
 
@@ -138,7 +155,15 @@ suspend fun resume(taskId: Long) {
 
 suspend fun delete(taskId: Long) {
         val task = dao.find(taskId) ?: return
-        if (VideoDownloadTaskStatus.valueOf(task.status) == VideoDownloadTaskStatus.RUNNING) {
+        // 审查 D1：不能只看 DB 状态——drain 在 `runningTaskId = task.id`（drain() :220）与
+        // runTask 把状态写成 RUNNING（:234）之间存在 DB 仍为 WAITING 的窗口；此时跳过
+        // stopRunningTask 直接删行删文件，runTask 会带着已删实体继续：mkdirs 重建目录、
+        // 写完整段下载，而终态 dao.update 对已删行是静默 0 行更新——产出无 DB 记录的
+        // 孤儿目录（数百 MB）且无任何清理机制。stopRunningTask 内部以 runningTaskId
+        // 仲裁并 cancelAndJoin drain 协程，join 返回后 runTask 必已死亡，随后才删行删文件。
+        if (VideoDownloadTaskStatus.valueOf(task.status) == VideoDownloadTaskStatus.RUNNING ||
+            runningTaskId == taskId
+        ) {
             stopRunningTask(taskId)
         }
         dao.delete(taskId)
@@ -537,6 +562,21 @@ suspend fun loadDanmaku(taskId: Long): DownloadDanmakuCache? {
                 if (start > 0L && response.code != HTTP_PARTIAL_CONTENT) {
                     error("服务器不支持断点续传")
                 }
+                // 审查 D8：206 只表示"返回了某个 range"，不保证从本地续传偏移开始
+                //（RFC 9110 §15.3.7 要求客户端校验 range 匹配后才能合并）。CDN 前置
+                // 代理吞掉 Range 头、或 URL 漂移到不同转码变体时，返回的起点可能是 0
+                // —— 此处若照常从 start 追加，前后两段不同源字节拼进同一 .part 并转正，
+                // 得到长度正确但内容错位的媒体文件（播放花屏/解封装失败，无检测点）。
+                // 起点不匹配 → 丢弃 .part 报错，用户重试时从 0 重新整段下载。
+                if (start > 0L) {
+                    val begin = contentRangeBegin(response.header("Content-Range"))
+                    if (begin != null && begin != start) {
+                        if (!part.delete()) {
+                            part.deleteOnExit()
+                        }
+                        error("断点续传位置无效（服务器返回起点 $begin，本地 $start），已重置下载进度")
+                    }
+                }
                 if (!response.isSuccessful) {
                     error("下载失败 HTTP ${response.code}")
                 }
@@ -579,6 +619,12 @@ suspend fun loadDanmaku(taskId: Long): DownloadDanmakuCache? {
 
     private fun contentRangeTotal(value: String?): Long? {
         return value?.substringAfter('/', missingDelimiterValue = "")?.toLongOrNull()
+    }
+
+    /** 解析 Content-Range 的起始字节（"bytes 100-199/200" → 100）；格式异常返回 null（不误杀）。 */
+    private fun contentRangeBegin(value: String?): Long? {
+        val spec = value?.trim()?.removePrefix("bytes")?.trim() ?: return null
+        return spec.substringBefore('-').trim().toLongOrNull()
     }
 
     private fun taskDir(taskId: Long): File {

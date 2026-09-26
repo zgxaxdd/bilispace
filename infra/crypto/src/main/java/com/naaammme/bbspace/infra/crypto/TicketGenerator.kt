@@ -232,7 +232,10 @@ class TicketGenerator(
     }
 
     private fun decodeGrpcFrame(responseBytes: ByteArray, grpcEncoding: String?): ByteArray {
-        if (responseBytes.size < 5) return ByteArray(0)
+        // 审查 D10：静默空数组会被 parseFrom 解析成全默认实例（ticket=""/ttl=0）并照存，
+        // 之后每个请求头构建都命中"未过期阈值"触发一轮 GetTicket 刷新（带 2 次重试），
+        // 形成自持刷新循环。与 GrpcFrameCodec.decode 的同类修复保持一致：短帧必须抛错。
+        if (responseBytes.size < 5) error("gRPC frame too short: ${responseBytes.size} bytes")
         val compressionFlag = responseBytes[0].toInt()
         val payload = responseBytes.copyOfRange(5, responseBytes.size)
         return if (compressionFlag != 0 && (grpcEncoding == "gzip" || compressionFlag == 1)) {
@@ -310,6 +313,9 @@ class TicketGenerator(
     }
 
     private fun saveTicket(ticket: String, createdAtSeconds: Long, ttlSeconds: Long) {
+        // 审查 D10：空 ticket / 零 TTL 不落库——落库后 getTicketForHeader 的
+        // "将过期"判定每次为真，同样形成每请求一轮刷新的循环。抛错走既有的重试/放弃路径。
+        if (ticket.isBlank() || ttlSeconds <= 0L) error("无效的 ticket 响应（ticket 为空或 ttl<=0）")
         val createdAtMs = if (createdAtSeconds > 0) createdAtSeconds * 1000 else System.currentTimeMillis()
         val expireAtMs = createdAtMs + ttlSeconds * 1000
         prefs.edit {

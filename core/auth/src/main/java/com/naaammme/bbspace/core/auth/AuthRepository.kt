@@ -112,7 +112,13 @@ class AuthRepository @Inject constructor(
         Logger.d(TAG) { "Poll response code: $code" }
 
         when (code) {
-            86039 -> 0 to null
+            // TV 协议轮询返回码（对照 bilibili-API-collect / piliplus 登录实现）：
+            // 86101=未扫码（轮询常态）→ 继续等；此前落入 else 分支抛异常，
+            // 二维码出现 2 秒就会以"轮询失败"终止，扫码登录整个不可用。
+            86101 -> 0 to null
+            // 86039=二维码已失效 → 终止轮询并提示刷新。此前被当成"无事发生"
+            // 继续空转，同一个死 auth_code 永远等不出结果。
+            86039 -> throw Exception("二维码已失效，请刷新二维码后重试")
             86090 -> 1 to null
             0 -> {
                 val data = json.getJSONObject("data")
