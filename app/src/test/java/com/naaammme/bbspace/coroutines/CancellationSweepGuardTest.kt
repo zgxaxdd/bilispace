@@ -39,7 +39,10 @@ class CancellationSweepGuardTest {
         // AppInitializer 裸 runCatching 上限 3（B10 从 4 降下来）：这 3 处包的都是非挂起代码
         // （execute().close() 连接预热 ×2、startService 兜底），语义上就该吞异常。
         "app/src/main/java/com/naaammme/bbspace/AppInitializer.kt" to (2 to 3),
-        "core/download/src/main/java/com/naaammme/bbspace/core/download/VideoDownloadRepository.kt" to (1 to 0)
+        "core/download/src/main/java/com/naaammme/bbspace/core/download/VideoDownloadRepository.kt" to (1 to 0),
+        // B12 关掉 ST-06 最后一处：导入 json 的整个操作被取消时不该 Toast「导入失败」。
+        // 该文件此前全仓只有 1 处 runCatching，所以上限取 0 —— 再出现第二处就该先说明理由。
+        "feature/bbspace/src/main/java/com/naaammme/bbspace/feature/bbspace/BbSpaceScreen.kt" to (1 to 0)
     )
 
     /**

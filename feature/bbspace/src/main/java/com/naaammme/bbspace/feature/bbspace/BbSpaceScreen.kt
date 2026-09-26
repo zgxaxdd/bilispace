@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_LIVE_DANMAKU
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_VIDEO_DANMAKU
@@ -128,7 +129,9 @@ fun BbSpaceScreen(
         if (uri != null) {
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching {
+                    // 取消不是失败：离开本界面会取消这个 scope，原先裸 runCatching 会把
+                    // "用户自己关掉了页面"渲染成 Toast「导入失败」（BACKLOG ST-06 的最后一处）。
+                    runCatchingCancellable {
                         val json = context.contentResolver.openInputStream(uri)?.use { input ->
                             String(input.readBytes(), Charsets.UTF_8)
                         } ?: error("导入文件读取失败")
