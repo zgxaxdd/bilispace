@@ -185,3 +185,8 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 - wiliwili 的低配设备优化思路（内存分级、图片降采样）→ 对照本仓 P5/V3
 - Material 3 Expressive 动效规范（spring 族参数）→ 服务 iOS 升级阶段 D
 - PiliPlus / BiliRoaming 的深色 `darkenTheme` 取值 → 已在 V3 采纳，待补 vibrancy 层级对照
+
+**W15 多行 git 提交说明一律用 heredoc，正文里不要出现反引号。**
+本会话用 `git commit -m "..."`（双引号）写带反引号的中文说明，bash 把反引号当命令替换执行，
+`?:` 被当命令跑掉、那一段直接从消息里消失，构建与 diff 都正常 —— 只有日志烂了。
+用 `git commit -F - <<'EOF'`（带引号的 heredoc）或 `git commit -m` 单引号可避免。
