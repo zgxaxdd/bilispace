@@ -92,6 +92,24 @@
   `git mv` 归位（`bb0edd3a`）→ 教训入 FINDINGS W8
 - commit：`fix(app): 单例回调在 onDestroy 按身份比对清理`
 
-## 批次 B3 · 2026-09-26 · （待开始）ST-04 + ST-05 一次性资源未关闭
+## 批次 B3 · 2026-09-26 · ST-05 同步 execute() 的 Response 成对释放
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B3.md`
+
+- 复核修正：审计说"三条早退都漏 body"**不成立** —— `ResponseBody.string()` 正常读完会自己关流；
+  真实漏点是 `string()` **自己抛**（连接被掐/超时）与 body 为空的分支。仍按 P1 处理：
+  全仓共用一个 10 连接的 `ConnectionPool`，而这条是冷启动必走的远程 buvid 请求
+- 改动：`BuvidFetcher.kt` 整段响应处理移进 `execute().use{}`（`return@runCatching` → `return@use`，行为不变）；
+  新增 `HttpResponseReleaseGuardTest`（3 条，全仓扫 `.execute()`，实测共 19 处）
+- 白名单：`TicketGenerator.kt:203` 是"赋值后紧跟 `response.use{}`"，语义已闭合，
+  改表达式形式要动 `withContext` 里的非局部 return → 归入 ST-06 那批
+- 验证：全量 `:app:assembleDebug testDebugUnitTest`（结果计数见下）；
+  **破坏性验证**：清空白名单 → 守卫如实报出 TicketGenerator 那一行并转红，恢复后绿
+- **过程失察并已改**：破坏性验证最初用 `sed -i` 改测试文件（任务书 §2.3 第一条禁止的做法），
+  已改回 Edit 工具并核对中文注释未坏 → 教训入 FINDINGS W10
+- commit：`fix(crypto): 远程 buvid 的 Response 包进 use，连接不再被漏掉`
+
+## 批次 B4 · 2026-09-26 · （待开始）ST-04 Geetest WebView 未 destroy
+
 
 

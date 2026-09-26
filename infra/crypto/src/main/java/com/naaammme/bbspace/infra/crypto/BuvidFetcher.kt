@@ -74,25 +74,29 @@ class BuvidFetcher(
             .build()
 
         runCatching {
-            val response = okHttpClient.newCall(request).execute()
-            val body = response.body?.string() ?: return@runCatching null
+            // Response 必须整体包在 use 里：`body.string()` 自己会关流，但**它抛错时**
+            // （读体途中连接被掐/超时）响应就没人关掉，那条 Exchange 一直占着共享连接池
+            // （NetworkModule 只给 10 个连接），而这条路是冷启动必走的。
+            okHttpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: return@use null
 
-            val json = JSONObject(body)
-            if (json.optInt("code") != 0) {
-                Logger.w(TAG) { "远程 buvid 获取失败: ${json.optString("message")}" }
-                return@runCatching null
+                val json = JSONObject(body)
+                if (json.optInt("code") != 0) {
+                    Logger.w(TAG) { "远程 buvid 获取失败: ${json.optString("message")}" }
+                    return@use null
+                }
+
+                val data = json.optJSONObject("data") ?: return@use null
+                val remote = data.optString("buvid")
+                if (remote.isEmpty()) {
+                    Logger.w(TAG) { "远程 buvid 为空" }
+                    return@use null
+                }
+
+                Logger.i(TAG) { "远程 buvid: $remote 匹配: ${data.optString("match_device")} 类型: ${data.optString("device_type")}" }
+                deviceIdentity.updateRemoteBuvid(remote)
+                remote
             }
-
-            val data = json.optJSONObject("data") ?: return@runCatching null
-            val remote = data.optString("buvid")
-            if (remote.isEmpty()) {
-                Logger.w(TAG) { "远程 buvid 为空" }
-                return@runCatching null
-            }
-
-            Logger.i(TAG) { "远程 buvid: $remote 匹配: ${data.optString("match_device")} 类型: ${data.optString("device_type")}" }
-            deviceIdentity.updateRemoteBuvid(remote)
-            remote
         }.getOrElse { e ->
             Logger.e(TAG, e) { "远程 buvid 请求异常" }
             null
