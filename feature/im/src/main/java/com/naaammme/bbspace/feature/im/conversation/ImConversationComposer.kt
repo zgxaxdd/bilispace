@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.withTextColor
 
 @Composable
 internal fun ImConversationComposer(
@@ -96,8 +97,8 @@ internal fun ImConversationComposer(
                         singleLine = true,
                         minLines = 1,
                         maxLines = 1,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface
+                        textStyle = MaterialTheme.typography.bodyMedium.withTextColor(
+                            MaterialTheme.colorScheme.onSurface
                         ),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(

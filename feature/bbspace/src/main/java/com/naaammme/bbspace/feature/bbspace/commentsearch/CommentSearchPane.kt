@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.model.PublishedRecord
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_COMMENT
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.asBold
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -257,7 +258,7 @@ private fun CommentSearchCard(
         }
         Text(
             text = item.message.ifBlank { "(空评论)" },
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.bodyMedium.asBold(),
             maxLines = 6,
             overflow = TextOverflow.Ellipsis
         )

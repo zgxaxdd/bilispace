@@ -78,23 +78,42 @@ class ListAllocationStructureTest {
     }
 
     /**
-     * 全仓 `typography.x.copy(` 棘轮。制定日（2026-09-22）实测 7 处，
-     * T3 修掉信息流卡片这 1 处后**冻结为 6，只许减**。
+     * 全仓 `typography.x.copy(` 棘轮：制定日（2026-09-22）实测 7 处，T3 收 1 处后
+     * 冻结为 6；**B21 把剩下 6 处全部收口，上限降到 0**（UI-02）。
      *
-     * 为什么不直接冻结为 0：其余 6 处分布在评论搜索、IM 输入框、排行榜、个人主页
-     * 头部与关注列表，都不在首页滚动路径上，收益低且改动面广。留给后续任务逐条收口，
-     * 但**不允许新增**。
+     * 收法不是"每处各写一个 remember"，而是走 `TextStyleVariants.kt` 的三个具名出口
+     * （`asBold()` / `withFontSize()` / `withTextColor()`），因为它们内部就是
+     * `remember(this, …)`：主题或字阶档变了才重新算。
+     *
+     * 刻意**不提供**通用的 `copy { … }` 透传：那等于让内联 copy 换个写法继续存在，
+     * 这条棘轮就白设了。要新的排版变体，先在 TextStyleVariants 里加一个**有语义名字**的出口。
      */
     @Test
     fun typographyInlineCopy_isFrozen() {
         val actual = mainSources.sumOf { countMatching(it.readLines(), """typography\.[A-Za-z]+\.copy\(""") }
-        val limit = 6
+        val limit = 0
+        val probe = listOf(
+            "    Text(style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))"
+        )
         assertTrue(
-            "全仓内联 `typography.x.copy(` 当前 $actual 处，超过冻结上限 $limit 处。" +
-                "在组合路径上这样做每次重组都会新建一份重对象 TextStyle。" +
-                "确实必要请连同上限一起改并写明理由；若只是注释触发了计数，" +
-                "说明 countMatching 没跳过注释行。",
+            "自检失败：内联 copy 的正则连示例都抓不到，那 limit=0 就是永真",
+            countMatching(probe, """typography\.[A-Za-z]+\.copy\(""") == 1
+        )
+        assertTrue(
+            "全仓内联 `typography.x.copy(` 当前 $actual 处，上限 $limit。" +
+                "在组合路径上这样做每次重组都会新建一份重对象 TextStyle（约 20 字段）；" +
+                "请改用 core/designsystem/theme/TextStyleVariants.kt 的具名出口，" +
+                "需要新变体就在那儿加一个有语义名字的函数。" +
+                "若只是注释触发了计数，说明 countMatching 没跳过注释行。",
             actual <= limit
+        )
+        val helpers = sourceOf("TextStyleVariants.kt")
+        assertTrue(
+            "TextStyleVariants 的三个出口不见了（棘轮降到 0 的前提是有地方可去）：" +
+                "asBold=${countMatching(helpers, """fun TextStyle\.asBold\(""")} " +
+                "withFontSize=${countMatching(helpers, """fun TextStyle\.withFontSize\(""")} " +
+                "withTextColor=${countMatching(helpers, """fun TextStyle\.withTextColor\(""")}",
+            countMatching(helpers, """fun TextStyle\.(asBold|withFontSize|withTextColor)\(""") == 3
         )
     }
 
@@ -278,7 +297,7 @@ class ListAllocationStructureTest {
      *
      * 为什么规则写成 0 而不是棘轮计数：这类写法**没有任何一种情况是必要的**
      * （值恒定 → 就该是常量；值随状态变 → 必须 `remember(keys)`，两种都不是"裸内联"）。
-     * 与 [typographyInlineCopy_isFrozen] 不同，那条留着 6 处是有明确理由的。
+     * 与 [typographyInlineCopy_isFrozen] 同理，那条也在 B21 从 6 降到了 0。
      */
     @Test
     fun shapeConstantsAreNeverBuiltInsideComposables() {

@@ -152,8 +152,9 @@ private val IosLightGroupedBackground = Color(0xFFF2F2F7)
 /** 深色页面底色：iOS 纯黑（深色 grouped 语义）。 */
 private val IosDarkGroupedBackground = Color.Black
 
-/** 非纯黑深色的抬升底：与卡片 #1C1C1E 之间保留一档可感知的空气感。 */
-private val IosDarkLiftedBackground = Color(0xFF0A0A0B)
+// 这里曾有 `IosDarkLiftedBackground = 0xFF0A0A0B`（"非纯黑档的抬升底"），
+// 深色改 seed 染色炭色之后它再无任何引用，随 BACKLOG UI-10 删除。
+// 深色分层现在由 iOSColorScheme 的染色阶梯负责，别再回来加一个"平行的一档"。
 
 /** 深色卡片底：iOS secondarySystemGroupedBackground #1C1C1E。 */
 private val IosDarkSurfaceCard = Color(0xFF1C1C1E)

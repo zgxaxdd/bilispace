@@ -1,6 +1,5 @@
 package com.naaammme.bbspace.core.designsystem.theme
 
-import androidx.compose.material3.Typography
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -23,25 +22,9 @@ val AppFontFamily = FontFamily(
     Font(R.font.inter_bold, FontWeight.Bold),
 )
 
-/** Material 风格排版：默认阶梯 + 应用字体 + 标题层级加粗。 */
-fun materialTypography(): Typography = Typography().run {
-    copy(
-        displayLarge = displayLarge.copy(fontFamily = AppFontFamily),
-        displayMedium = displayMedium.copy(fontFamily = AppFontFamily),
-        displaySmall = displaySmall.copy(fontFamily = AppFontFamily),
-        headlineLarge = headlineLarge.copy(fontFamily = AppFontFamily),
-        headlineMedium = headlineMedium.copy(fontFamily = AppFontFamily),
-        headlineSmall = headlineSmall.copy(fontFamily = AppFontFamily),
-        // 标题层级加粗：M3 默认 titleLarge/titleMedium 为 Regular/Medium，
-        // 与正文的区分度不足（用户反馈"重要性高的标题加粗"）
-        titleLarge = titleLarge.copy(fontFamily = AppFontFamily, fontWeight = FontWeight.SemiBold),
-        titleMedium = titleMedium.copy(fontFamily = AppFontFamily, fontWeight = FontWeight.SemiBold),
-        titleSmall = titleSmall.copy(fontFamily = AppFontFamily, fontWeight = FontWeight.SemiBold),
-        bodyLarge = bodyLarge.copy(fontFamily = AppFontFamily),
-        bodyMedium = bodyMedium.copy(fontFamily = AppFontFamily),
-        bodySmall = bodySmall.copy(fontFamily = AppFontFamily),
-        labelLarge = labelLarge.copy(fontFamily = AppFontFamily),
-        labelMedium = labelMedium.copy(fontFamily = AppFontFamily),
-        labelSmall = labelSmall.copy(fontFamily = AppFontFamily)
-    )
-}
+// 这里原先还有一份 `materialTypography()`（"默认阶梯 + 应用字体 + 标题 SemiBold"），
+// 全仓零调用，已随 BACKLOG UI-08 删除。MATERIAL 档的排版本体在 `Typography.kt`
+// 的 `BaseTypography` / `createTypography(fontScale)`，它同样带 AppFontFamily，
+// 但标题字重刻意停在 **Medium**（不是那份草稿的 SemiBold）。
+// 以后要调标题粗细请改 BaseTypography 那一处 —— 再开一份平行排版就会出现
+// "两套字阶各自演化"那种没人能审计的状态。

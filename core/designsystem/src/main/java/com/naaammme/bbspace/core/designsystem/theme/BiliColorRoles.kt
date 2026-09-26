@@ -64,13 +64,14 @@ internal fun iosColorRoles(dark: Boolean): BiliColorRoles = if (dark) {
     )
 } else {
     BiliColorRoles(
-        // 浅色次要文字提到 AA（4.58:1，SecondaryLabelAAVariants.LIGHT）——
-        // 用户反馈"浅色下设置页部分文字看不清"，3.1~3.4:1 的旧值不再使用
+        // 浅色次要文字已提到 AA（4.58:1）—— 用户反馈"浅色下设置页部分文字看不清"，
+        // 3.1~3.4:1 的旧值不再使用。取值只从 SecondaryLabelAAVariants 来（UI-09：
+        // 它一度是"平行的一份预案常量"，与这里的字面量重复，改一处就会漏另一处）。
         primaryLabel = Color.Black,
-        secondaryLabel = Color(0xC83C3C43),
+        secondaryLabel = Color(SecondaryLabelAAVariants.LIGHT),
         tertiaryLabel = Color(0x4D3C3C43),
         separator = Color(0x4A3C3C43),
-        groupHeader = Color(0xC83C3C43),
+        groupHeader = Color(SecondaryLabelAAVariants.LIGHT),
         groupFooter = Color(0x4D3C3C43),
         fill = Color(0x7676801F),
         destructive = Color(0xFFFF3B30)
@@ -97,13 +98,19 @@ private fun materialColorRoles(): BiliColorRoles {
 }
 
 /**
- * 次要文字 AA（4.5:1）预案（方案 §3-B 悬置决策的"两版 token"）。
+ * 次要文字的 AA 档取值（方案 §3-B 的"两版 token"）。
  *
- * 现状 secondaryLabel 刻意对齐 Apple secondaryLabel（浅色实测 3.13–3.44:1，仅达
- * 大字号档 3:1 下限）。若日后设计拍板全站次要文字提到 AA，把 [biliColorRoles]
- * 的 secondaryLabel/groupHeader 换成本组常量即可一次切换——数值已按
- * ColorContrastTest 的合成口径验证过 4.7:1 级别，不在本次默认启用：
- * 没有"改前改后"真机对照，不擅自翻转全站文字深浅。
+ * **现状（UI-09 复核后修正）**：这不是"两份待翻转的平行 token"了 ——
+ * [LIGHT] 已经是浅色 production 值（`materialColorRoles()` 的 secondaryLabel / groupHeader
+ * 直接取它，字面量不再重复一份）；[DARK] 仍是**待拍板预案**，深色 production 还停在
+ * 对齐 Apple secondaryLabel 的 0x99EBEBF5。
+ *
+ * 深色为什么不跟着翻：现状 secondaryLabel 刻意对齐 Apple secondaryLabel
+ * （浅色实测 3.13–3.44:1，仅达大字号档 3:1 下限），浅色那档是因为有真实用户反馈
+ * "设置页文字看不清"才提的（B0 归档时用户拍板）。深色没有对应的用户反馈，
+ * 而没有"改前改后"真机对照就不擅自翻转全站文字深浅。
+ *
+ * 数值本身按 ColorContrastTest 的合成口径验证过（LIGHT 4.58:1 / DARK >7:1）。
  */
 object SecondaryLabelAAVariants {
     // 浅色 0xBC(0.737) 合成到 grouped 背景 F2F2F7 上 ≈ 4.58:1（0xB8 只有 4.47，不达 AA——

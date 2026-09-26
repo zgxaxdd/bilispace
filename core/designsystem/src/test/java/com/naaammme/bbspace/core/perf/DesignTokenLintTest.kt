@@ -189,7 +189,10 @@ class DesignTokenLintTest {
             // 上限 980 → 981（2026-09-26，iOS 深色增强）：+1 为纯黑深色下卡片
             // 发丝描边的 0.5.dp 线宽（BiliCardSurface.biliDarkHairlineBorder）——
             // 描边粗细是规格常量，同 48dp 触控下限的处理逻辑，不做间距 token。
-            limit = 981,
+            // 上限 981 → 980（2026-09-26，B20 形状收口）：`VideoPlayerPane` 里那处
+            // 非全屏播放窗口的 `RoundedCornerShape(16.dp)` 提到了文件级常量，字面量少一处。
+            // 这是"棘轮该有的方向性"——数字变小就把上限一起降下来，否则它拦不住未来的增长。
+            limit = 980,
             what = "theme 包外的 `N.dp` 字面量",
             why = "同一语义的尺寸散在各处就没有单一改动点。要降它就把语义明确的" +
                 "重复值收敛进 BiliRadius/BiliSpacing；一次性尺寸（图标、分隔线粗细、" +

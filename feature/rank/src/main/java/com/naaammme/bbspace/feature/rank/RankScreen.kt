@@ -47,6 +47,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.withFontSize
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
@@ -343,7 +344,7 @@ private fun RankVideoCard(
                 text = item.title,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp),
+                style = MaterialTheme.typography.bodyLarge.withFontSize(14.sp),
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
@@ -456,7 +457,7 @@ private fun RankPgcCard(
                 text = item.title,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp),
+                style = MaterialTheme.typography.bodyLarge.withFontSize(14.sp),
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(

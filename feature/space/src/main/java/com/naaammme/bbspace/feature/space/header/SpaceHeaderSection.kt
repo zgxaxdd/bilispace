@@ -28,12 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImageDialog
+import com.naaammme.bbspace.core.designsystem.theme.asBold
 import com.naaammme.bbspace.core.designsystem.component.SelectableText
 import com.naaammme.bbspace.feature.space.SpaceHeaderUiState
 
@@ -170,7 +170,7 @@ private fun ProfileCard(
                 ) {
                     SelectableText(
                         text = profile.name,
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.titleLarge.asBold()
                     )
                     SelectableText(
                         text = "UID ${profile.mid}",
