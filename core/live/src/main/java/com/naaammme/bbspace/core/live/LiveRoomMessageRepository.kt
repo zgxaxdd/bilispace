@@ -41,6 +41,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -191,20 +192,22 @@ class LiveRoomMessageRepository @Inject constructor(
             },
             profile = BiliRestProfile.APP
         )
-        // 刻意保留裸 runCatching（BACKLOG ST-06b）：弹幕此刻已发送成功，
-        // 传播取消会把成功的发送改判为失败。正解是把这条本地记录写进
-        // `withContext(NonCancellable)`，见 CommentRepository 同款注释。
-        runCatching {
-            publishedRecordRepo.save(
-                buildLiveDanmakuRecord(
-                    roomId = roomId,
-                    senderMid = mid,
-                    content = msg,
-                    sentAtMs = sentAtMs
+        // ST-06b：弹幕此刻已发送成功，收尾只剩本地记账，所以这一处**不能**传播取消
+        // （换成 runCatchingCancellable 会把一次成功的发送改判成失败）。
+        // 与 CommentRepository 同款正解：记账跑在 NonCancellable 上。
+        withContext(NonCancellable) {
+            runCatching {
+                publishedRecordRepo.save(
+                    buildLiveDanmakuRecord(
+                        roomId = roomId,
+                        senderMid = mid,
+                        content = msg,
+                        sentAtMs = sentAtMs
+                    )
                 )
-            )
-        }.onFailure { err ->
-            Logger.e(TAG, err) { "save live danmaku record failed roomId=$roomId" }
+            }.onFailure { err ->
+                Logger.e(TAG, err) { "save live danmaku record failed roomId=$roomId" }
+            }
         }
     }
 

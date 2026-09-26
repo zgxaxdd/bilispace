@@ -46,6 +46,7 @@ import com.naaammme.bbspace.infra.network.BiliRestProfile
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -173,14 +174,17 @@ class CommentRepository @Inject constructor(
         val reply = json.optJSONObject("data")
             ?.optJSONObject("reply")
             ?: error("发评响应缺少评论数据")
-        // 刻意保留裸 runCatching（BACKLOG ST-06b）：走到这里**评论已经发成功了**，
-        // 换成 runCatchingCancellable 会把取消传播回发送路径，把已成功的发送改判成失败
-        // （表现为"发出去了但界面没反应/输入框不清空"）。
-        // 正确修法是把这条本地记录写进 `withContext(NonCancellable)`，见 ST-06b。
-        runCatching {
-            publishedRecordRepo.save(mapPublishedRecord(reply))
-        }.onFailure { err ->
-            Logger.e(TAG, err) { "save published record failed" }
+        // ST-06b：走到这里**评论已经发成功了**，收尾只剩本地记账。
+        // 这一处不能换成 runCatchingCancellable —— 那会把取消传播回发送路径，
+        // 把一次已成功的发送改判成失败（表现为"发出去了但界面没反应/输入框不清空"），
+        // 比原来的缺陷更伤用户。正解是让记账跑在 NonCancellable 上：
+        // 用户取消（切页/关窗）不该顺手抹掉这条本地记录。
+        withContext(NonCancellable) {
+            runCatching {
+                publishedRecordRepo.save(mapPublishedRecord(reply))
+            }.onFailure { err ->
+                Logger.e(TAG, err) { "save published record failed" }
+            }
         }
         return mapPublishedReply(reply)
     }
