@@ -272,7 +272,34 @@
   （本批不新增测试，只加登记条目），`:app` 与 `:core:designsystem` 的测试任务均为裸 `> Task`（ST-26 口径）
 - commits：`fix(bbspace)` 收口 + 守卫登记 / `docs(ai-loop)` 台账
 
-## 批次 B13 · （下一批）· ST-07 离线播放与流会话共用 PlayerEngine 的单 Owner 仲裁
+## 批次 B13 · 2026-09-26 · PlayerEngine 所有权仲裁（ST-07）
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B13.md`
+
+- 复核修正三处（BACKLOG 低估范围）：① 缺陷**双向** —— 流会话的 `finishVideoPlayback` /
+  `finishLivePlayback` 同样无条件动引擎；② **`stopForReuse` 也是所有权动作**（`stop()` + `clearMediaItems()`
+  一样打断别人的在播会话），只守 release 等于留一半洞；③ 往引擎写媒体的点是 **4 处不是 1 处**
+  （流 3：直播起播 / VOD 起播 / 清晰度与音轨切换 `applyVideoSelection`；缓存 1）
+- 设计：`PlayerEngineArbiter`（`@Singleton`、无 Android 依赖、`AtomicReference` + CAS）——
+  写媒体前 `claim`（**刻意放在 setSource 之前**，否则失败收尾时没人是 owner、半成品媒体清不掉）、
+  `release` 只有占用者能交还、`stopForReuse` 只在 `isHolder` 时允许。
+  **抢占而非引用计数**的理由：只有一台播放器，后写者已物理覆盖前者的媒体，计数会假装并存
+- 接线：两侧都注入仲裁器；缓存 `open`/`release`、流三处 setSource 与两处收尾全部走仲裁
+- 新增 14 条测试：`PlayerEngineArbiterTest`（8，JVM 状态机，含"8 线程并发收尾只真正释放一次"）
+  + `PlayerEngineOwnershipGuardTest`（6，扫接线：注入 / release 有把关 / stopForReuse 有把关 /
+  setSource 前有 claim / 不许绕过引擎直接 release）
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m53s`，**220 单测 / 0 失败 / 0 错误**（206 → +14）；
+  `:app`、`:core:designsystem`、`:feature:video` 均为裸 `> Task`；`:core:playback` FROM-CACHE
+  （纯逻辑不扫源码，与 `:core:common` 同口径，可接受）
+- 破坏性验证：① 缓存页 release 退回无条件 → `everyEngineReleaseIsGatedByOwnership` FAILED（报文件行号）
+  ② 摘掉 VOD 那处 claim → `everyEngineWriteClaimsOwnership` FAILED（如实报"3 处 setSource 里这处没 claim"）
+- 刻意没做：`play/pause/seekTo/setSpeed` 不加归属闸门（只作用于"当前媒体"，加闸门会挡掉正常自持操作，
+  属超出缺陷范围的行为变更）；`Media3PlayerEngine` 内部错误自愈重建播放器不经仲裁器
+- 诚实边界：少中断/没引入新中断只能真机判 → **L4-16**（三组对照 + 反向确认"正常收尾仍要真释放"）
+- 手法沉淀：**S7**（单例共享资源按物理事实建模所有权，别用引用计数粉饰）
+- commits：`fix(playback)` 仲裁器与接线 + 测试 / `docs(ai-loop)` 台账
+
+## 批次 B14 · （下一批）· ST-06b 两处 NonCancellable 记账收口
 
 
 
