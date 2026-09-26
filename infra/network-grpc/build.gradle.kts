@@ -19,4 +19,6 @@ dependencies {
 
     implementation(project(":infra:network-http"))
     implementation(project(":infra:crypto"))
+
+    testImplementation(libs.junit)
 }

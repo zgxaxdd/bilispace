@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.infra.grpc
 
+import com.naaammme.bbspace.infra.network.BiliApiException
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.zip.GZIPInputStream
@@ -18,6 +19,9 @@ import java.util.zip.GZIPOutputStream
 object GrpcFrameCodec {
 
     private const val COMPRESSION_THRESHOLD = 1000
+
+    /** [1 字节压缩标志][4 字节长度][载荷] */
+    private const val FRAME_HEADER_BYTES = 5
 
     data class EncodeResult(
         val frame: ByteArray,
@@ -61,19 +65,39 @@ object GrpcFrameCodec {
     }
 
     /**
-     * 解码：检查压缩标志
-     * - 标志=0 → 原始数据
-     * - 标志!=0 且响应头 grpc-encoding=gzip → gzip 解压
+     * 解码：**按自己写的长度域取载荷**，畸形帧抛 `BiliApiException`。
+     *
+     * 原先 `encode` 认真写了 4 字节长度，`decode` 却直接 `copyOfRange(5, size)` 把它丢掉 ——
+     * 于是"服务端少发一段"这种截断不会被识别成坏帧，而是把剩下的字节全当 payload 交给
+     * protobuf/gzip 去解；抛出来的是 `IllegalStateException` / `ZipException` 这类
+     * 不带协议语义的异常，上层无法区分"网络/协议坏了"与"代码错了"。
+     *
+     * 现在三条都受控：不足一个帧头、长度域超过实际可用字节、声明压缩却没有 `grpc-encoding`，
+     * 一律 `BiliApiException`（与 `TicketGenerator` 里那处"短帧必须抛错"的同类修复一致）。
+     *
+     * 取 `declared` 个字节而不是 `size - 5`：多帧拼接的响应里，尾随的下一帧今天会被并进
+     * 当前 payload 一起解（本来就是错的），现在只取声明的那一帧。本仓的调用方都是
+     * 一元 RPC（一发一收一帧），这个改变只影响"本来就会解析失败"的输入。
      */
     fun decode(responseBytes: ByteArray, grpcEncoding: String? = null): ByteArray {
-        // 不足一个 frame 头（5 字节）说明服务端返回的不是有效 gRPC 数据，
-        // 静默返回空数组会被上层解析成"空的成功响应"掩盖真实错误
-        if (responseBytes.size < 5) {
-            throw IllegalStateException("gRPC 响应体过短 (${responseBytes.size} 字节)，非有效 frame")
+        if (responseBytes.size < FRAME_HEADER_BYTES) {
+            throw BiliApiException(
+                code = -1,
+                message = "gRPC 响应体过短 (${responseBytes.size} 字节)，非有效 frame"
+            )
         }
 
         val compressionFlag = responseBytes[0].toInt()
-        val payload = responseBytes.copyOfRange(5, responseBytes.size)
+        val available = responseBytes.size - FRAME_HEADER_BYTES
+        val declared = unsignedLength(responseBytes)
+        if (declared > available) {
+            throw BiliApiException(
+                code = -1,
+                message = "gRPC 帧长度域与实际不符：声明 $declared，可用 $available"
+            )
+        }
+
+        val payload = responseBytes.copyOfRange(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + declared.toInt())
         return decodePayload(compressionFlag, payload, grpcEncoding)
     }
 
@@ -87,7 +111,10 @@ object GrpcFrameCodec {
         } else if (grpcEncoding == "gzip") {
             GZIPInputStream(ByteArrayInputStream(payload)).use { it.readBytes() }
         } else {
-            error("Resp body compressed without known codec in header")
+            throw BiliApiException(
+                code = -1,
+                message = "响应声明已压缩但没有可用的 grpc-encoding 头"
+            )
         }
     }
 
@@ -104,5 +131,18 @@ object GrpcFrameCodec {
             ((length shr 8) and 0xFF).toByte(),
             (length and 0xFF).toByte()
         )
+    }
+
+    /**
+     * 读 4 字节大端长度域，按**无符号**解释。
+     *
+     * 用 Int 直接拼会在最高位为 1 时变成负数（例如声明 2147483648 字节读成 -2147483648），
+     * 那样"声明 > 可用"的判断就会被负数绕过，坏帧反而通过。
+     */
+    private fun unsignedLength(bytes: ByteArray): Long {
+        return ((bytes[1].toLong() and 0xFF) shl 24) or
+            ((bytes[2].toLong() and 0xFF) shl 16) or
+            ((bytes[3].toLong() and 0xFF) shl 8) or
+            (bytes[4].toLong() and 0xFF)
     }
 }
