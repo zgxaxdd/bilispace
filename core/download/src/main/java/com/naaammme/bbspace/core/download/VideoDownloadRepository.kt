@@ -14,6 +14,7 @@ import com.bapis.bilibili.playershared.DolbyItem
 import com.bapis.bilibili.playershared.PlayCtrl
 import com.bapis.bilibili.playershared.Stream
 import com.bapis.bilibili.playershared.VideoVod
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.UserAgentBuilder
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
@@ -440,7 +441,7 @@ suspend fun loadDanmaku(taskId: Long): DownloadDanmakuCache? {
         val aid = source.aid.takeIf { it > 0L } ?: task.aid.takeIf { it > 0L } ?: return
         val cid = source.cid.takeIf { it > 0L } ?: task.cid.takeIf { it > 0L } ?: return
 
-        runCatching {
+        runCatchingCancellable {
             val reply = grpcClient.call(
                 endpoint = DM_SEG_CACHE_ENDPOINT,
                 requestBytes = buildDmSegCacheReq(aid = aid, cid = cid).toByteArray(),
@@ -580,7 +581,7 @@ suspend fun loadDanmaku(taskId: Long): DownloadDanmakuCache? {
                 if (!response.isSuccessful) {
                     error("下载失败 HTTP ${response.code}")
                 }
-                val body = response.body ?: error("下载响应为空")
+                val body = response.body // OkHttp 5 非空，原来的 `?: error(...)` 是恒假分支
                 val total = contentRangeTotal(response.header("Content-Range"))
                     ?: body.contentLength().takeIf { it >= 0L }?.plus(start)
                     ?: 0L

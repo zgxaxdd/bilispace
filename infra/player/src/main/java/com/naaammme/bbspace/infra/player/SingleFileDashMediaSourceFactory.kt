@@ -217,8 +217,8 @@ internal class SingleFileDashMediaSourceFactory(
     }
 
     private fun readResponsePrefix(response: okhttp3.Response): ByteArray? {
-        val body = response.body ?: return null
-        return body.byteStream().use { stream ->
+        // OkHttp 5 里 Response.body 是非空类型，原来的 `?: return null` 是恒假分支（编译器告警）
+        return response.body.byteStream().use { stream ->
             val data = ByteArray(DASH_PREFETCH_MAX_BYTES)
             var total = 0
             while (total < data.size) {

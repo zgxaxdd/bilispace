@@ -224,3 +224,9 @@
 
 
 
+
+## 批次 B10 · 2026-09-26 · ST-06 收尾两处 + ST-16 恒假分支清零
+- `runCatchingCancellable`：`VideoDownloadRepository.cacheDanmaku`、`AppInitializer` 转场默认值迁移；守卫表补两条（AppInitializer 裸 runCatching 上限 4→3，棘轮如期下降）
+- ST-16：两处 OkHttp 5 下 `response.body ?:` 恒假分支删除（`SingleFileDashMediaSourceFactory:220`、`VideoDownloadRepository:584`，后者是本批构建新暴露的同类）→ **全量构建 Elvis 告警数 2 → 0**
+- 未做：`BbSpaceScreen:131`（仍在 ST-06 清单）；Room/ST-01、ST-06b、C 类全部仍未动
+- 验证：删 test-results 强制守卫真跑 → BUILD SUCCESSFUL in 4m25s，0 失败

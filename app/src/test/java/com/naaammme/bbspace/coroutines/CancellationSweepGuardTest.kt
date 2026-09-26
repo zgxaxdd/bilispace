@@ -36,10 +36,10 @@ class CancellationSweepGuardTest {
     private val migrated = mapOf(
         "core/sponsorblock/src/main/java/com/naaammme/bbspace/core/sponsorblock/SponsorBlockClient.kt" to (3 to 1),
         "feature/download/src/main/java/com/naaammme/bbspace/feature/download/player/OfflineDanmakuSession.kt" to (1 to 0),
-        // AppInitializer 的裸 runCatching 上限登记为 4 而不是 0：其中 3 处包的是
-        // 非挂起代码（execute().close() 预热、startService 兜底），语义上就该吞异常；
-        // 剩 :89 的 migrateTransitionStyleDefaultIfNeeded() 是挂起的，留给 ST-06 收尾。
-        "app/src/main/java/com/naaammme/bbspace/AppInitializer.kt" to (1 to 4)
+        // AppInitializer 裸 runCatching 上限 3（B10 从 4 降下来）：这 3 处包的都是非挂起代码
+        // （execute().close() 连接预热 ×2、startService 兜底），语义上就该吞异常。
+        "app/src/main/java/com/naaammme/bbspace/AppInitializer.kt" to (2 to 3),
+        "core/download/src/main/java/com/naaammme/bbspace/core/download/VideoDownloadRepository.kt" to (1 to 0)
     )
 
     /**
