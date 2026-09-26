@@ -1,7 +1,8 @@
-﻿package com.naaammme.bbspace.feature.home
+package com.naaammme.bbspace.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.feed.FeedDislikeRepository
@@ -11,6 +12,7 @@ import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.ThreePointReason
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,6 +52,17 @@ class HomeViewModel @Inject constructor(
 
         /** 连续多少次取页「没有新增条目」后停止自动补拉。 */
         private const val MAX_STAGNANT_LOADS = 2
+
+        /**
+         * 列表条数上限（只在 [refresh] 的合并处截断）。
+         *
+         * `refresh()` 是「新内容插到前面、旧内容全保留」的合并语义，反复下拉刷新会让
+         * items 无限增长（每条 FeedItem 含若干字符串与图片 URL），既占内存也让每次
+         * 合并的 distinctBy 越来越贵。500 条约十几屏，远超一次会话的回看需求；
+         * 截断按"最新在前"保序丢弃尾部（最旧）。
+         * loadMore 不截断：分页拉到哪算哪，截断会让刚取回的一页立刻被丢掉。
+         */
+        private const val MAX_FEED_ITEMS = 500
     }
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -124,6 +137,11 @@ class HomeViewModel @Inject constructor(
                         _uiState.update { it.copy(interestChoose = feed.interestChoose) }
                     }
                 }
+            } catch (e: CancellationException) {
+                // 取消不是失败：协程被取消（VM 清理等）时必须原样上抛。
+                // `catch (e: Exception)` 会把 CancellationException 一起吞掉，
+                // 于是在已取消的协程里继续写错误状态 —— 与 runCatching 吞取消是同一类缺陷。
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载首页失败"))
@@ -170,6 +188,11 @@ class HomeViewModel @Inject constructor(
                 )
                 _uiState.update { it.copy(items = feed.items) }
                 flush++
+            } catch (e: CancellationException) {
+                // 取消不是失败：协程被取消（VM 清理等）时必须原样上抛。
+                // `catch (e: Exception)` 会把 CancellationException 一起吞掉，
+                // 于是在已取消的协程里继续写错误状态 —— 与 runCatching 吞取消是同一类缺陷。
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "提交兴趣失败"))
@@ -197,12 +220,19 @@ class HomeViewModel @Inject constructor(
                 if (feed.items.isNotEmpty()) {
                     val merged = withContext(Dispatchers.Default) {
                         // 按 (goto|param|idx) 去重：服务端偶发重复下发卡片，
-                        // 重复 key 会让 LazyStaggeredGrid 直接抛异常崩溃
+                        // 重复 key 会让 LazyStaggeredGrid 直接抛异常崩溃。
+                        // 最后按 MAX_FEED_ITEMS 截断（见常量注释：刷新是"只增不减"的合并）。
                         (feed.items + _uiState.value.items).distinctBy { it.actionKey }
+                            .take(MAX_FEED_ITEMS)
                     }
                     _uiState.update { it.copy(items = merged) }
                     flush++
                 }
+            } catch (e: CancellationException) {
+                // 取消不是失败：协程被取消（VM 清理等）时必须原样上抛。
+                // `catch (e: Exception)` 会把 CancellationException 一起吞掉，
+                // 于是在已取消的协程里继续写错误状态 —— 与 runCatching 吞取消是同一类缺陷。
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "刷新失败"))
@@ -240,6 +270,11 @@ class HomeViewModel @Inject constructor(
                 } else {
                     stagnantLoads++
                 }
+            } catch (e: CancellationException) {
+                // 取消不是失败：协程被取消（VM 清理等）时必须原样上抛。
+                // `catch (e: Exception)` 会把 CancellationException 一起吞掉，
+                // 于是在已取消的协程里继续写错误状态 —— 与 runCatching 吞取消是同一类缺陷。
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载更多失败"))
@@ -258,7 +293,7 @@ class HomeViewModel @Inject constructor(
         }
         val itemKey = item.actionKey
         viewModelScope.launch {
-            runCatching { feedDislikeRepo.dislike(context, reason) }
+            runCatchingCancellable { feedDislikeRepo.dislike(context, reason) }
                 .onSuccess { result ->
                     _uiState.update { state ->
                         state.copy(
@@ -285,7 +320,7 @@ class HomeViewModel @Inject constructor(
         }
         val itemKey = item.actionKey
         viewModelScope.launch {
-            runCatching { feedDislikeRepo.cancelDislike(context) }
+            runCatchingCancellable { feedDislikeRepo.cancelDislike(context) }
                 .onSuccess { result ->
                     _uiState.update { state ->
                         state.copy(

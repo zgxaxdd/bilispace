@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.favorite.folderdetail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
@@ -75,7 +76,7 @@ class FavoriteFolderDetailViewModel @Inject constructor(
                     errorOnLoadMore = false
                 )
             }
-            runCatching {
+            runCatchingCancellable {
                 repo.fetchFavoriteFolderContents(fid = fid, page = reqPage)
             }.onSuccess { page ->
                 _uiState.update {
@@ -159,7 +160,7 @@ class FavoriteFolderDetailViewModel @Inject constructor(
         if (resources.isEmpty()) return
         _uiState.update { it.copy(submitting = true) }
         viewModelScope.launch {
-            runCatching { repo.deleteFolderContents(fid, resources) }.fold(
+            runCatchingCancellable { repo.deleteFolderContents(fid, resources) }.fold(
                 onSuccess = {
                     _msg.tryEmit("已移除 ${resources.size} 个内容")
                     _uiState.update {
@@ -169,7 +170,11 @@ class FavoriteFolderDetailViewModel @Inject constructor(
                             selectedKeys = emptySet()
                         )
                     }
-                    loadPage(reset = true, refreshing = false)
+                    // 审查 D6：删除在途时列表仍可滚动触发 loadMore（canLoadMore 不含
+                    // submitting），loadPage 的单飞检查会把这里的重载静默吞掉——服务器
+                    // 已删而列表不动，旧 loadMore 响应还会继续拼接。refresh() 是
+                    // cancel+重启语义，与删除的"列表必须重建"强一致。
+                    refresh()
                 },
                 onFailure = { e ->
                     Logger.e(TAG, e) { "移除收藏内容失败 fid=$fid count=${resources.size}" }

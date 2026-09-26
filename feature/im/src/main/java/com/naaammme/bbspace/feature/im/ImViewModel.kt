@@ -10,6 +10,7 @@ import com.naaammme.bbspace.core.model.ImSessionItem
 import com.naaammme.bbspace.core.model.ImSessionTab
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -151,6 +152,8 @@ class ImViewModel @Inject constructor(
                     isLoggedIn = true
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (callId != reqId) return
             val msg = e.userMessage(

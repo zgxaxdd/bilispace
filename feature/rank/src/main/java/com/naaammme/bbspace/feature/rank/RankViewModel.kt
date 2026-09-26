@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.rank
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.model.rank.RankEntry
 import com.naaammme.bbspace.core.model.rank.RankSeriesEntry
 import com.naaammme.bbspace.core.model.rank.RankType
@@ -10,6 +11,8 @@ import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.rank.RankRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,8 +42,11 @@ class RankViewModel @Inject constructor(
     /** 每类型的缓存：切回已看过的分区不重复请求 */
     private val cache = mutableMapOf<String, CachedRankPage>()
 
+    /** 当前在途加载：新加载开始前取消，防止慢响应晚到覆盖新类型的数据 */
+    private var loadJob: Job? = null
+
     init {
-        load(type = DEFAULT_TYPE, reset = true, refreshing = false)
+        load(type = DEFAULT_TYPE, refreshing = false)
     }
 
     fun select(type: RankType) {
@@ -62,18 +68,18 @@ class RankViewModel @Inject constructor(
             }
             return
         }
-        load(type = type, reset = true, refreshing = false)
+        load(type = type, refreshing = false)
     }
 
     fun selectSeries(number: Int) {
         if (_uiState.value.seriesNumber == number) return
         _uiState.update { it.copy(seriesNumber = number) }
-        load(type = RankType.SERIES, reset = true, refreshing = false)
+        load(type = RankType.SERIES, refreshing = false)
     }
 
     fun refresh() {
         cache.remove(cacheKey(_uiState.value.type))
-        load(type = _uiState.value.type, reset = true, refreshing = true)
+        load(type = _uiState.value.type, refreshing = true)
     }
 
     fun loadMore() {
@@ -88,7 +94,7 @@ class RankViewModel @Inject constructor(
         pageByType[type] = nextPage
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true, errorMessage = null) }
-            runCatching {
+            runCatchingCancellable {
                 when (type.kind) {
                     com.naaammme.bbspace.core.model.rank.RankKind.POPULAR ->
                         repo.fetchPopular(page = nextPage)
@@ -126,7 +132,10 @@ class RankViewModel @Inject constructor(
         }
     }
 
-    private fun load(type: RankType, reset: Boolean, refreshing: Boolean) {
+    private fun load(type: RankType, refreshing: Boolean, retryAllowed: Boolean = true) {
+        // 取消在途加载：快速切换分区时旧响应若晚到，会把新分区的数据整个覆盖掉
+        //（runCatchingCancellable 会把取消原样传播，onFailure 不会收到它）。
+        loadJob?.cancel()
         val seriesNumber = _uiState.value.seriesNumber
             ?: _uiState.value.seriesList.firstOrNull()?.number
         _uiState.update {
@@ -139,8 +148,8 @@ class RankViewModel @Inject constructor(
                 canLoadMore = false
             )
         }
-        viewModelScope.launch {
-            runCatching {
+        loadJob = viewModelScope.launch {
+            runCatchingCancellable {
                 when (type.kind) {
                     com.naaammme.bbspace.core.model.rank.RankKind.POPULAR -> {
                         pageByType[type] = 1
@@ -200,6 +209,16 @@ class RankViewModel @Inject constructor(
                             errorMessage = UserFacingError.messageOf(error)
                         )
                     }
+                    // 初次进入（列表为空）的失败自动重试一次：设备冷启动后的首个
+                    // Web 请求在弱网/风控下偶发被拒，手动刷新却能成功——与其让
+                    // 用户看到错误再手动重试，不如自动补一发；只补一次，再失败
+                    // 就如实展示错误卡片（errorMessage 已接入网格）。
+                    if (!refreshing && retryAllowed && _uiState.value.entries.isEmpty()) {
+                        viewModelScope.launch {
+                            delay(1_500)
+                            load(type = type, refreshing = false, retryAllowed = false)
+                        }
+                    }
                 }
             )
         }
@@ -223,6 +242,10 @@ class RankViewModel @Inject constructor(
     }
 
     private fun cacheCurrentLocked(cur: RankUiState) {
+        // 加载在途（entries 还是空）时的快照不进缓存：否则"切走再切回"会把
+        // 这份空快照当命中直接铺出来，表现为"暂无内容"，必须手动刷新才有数据。
+        // 真正加载完的空分区（isLoading/isRefreshing 都已复位）仍照常缓存。
+        if (cur.entries.isEmpty() && (cur.isLoading || cur.isRefreshing)) return
         cache[cacheKey(cur.type)] = CachedRankPage(
             entries = cur.entries,
             seriesNumber = cur.seriesNumber,

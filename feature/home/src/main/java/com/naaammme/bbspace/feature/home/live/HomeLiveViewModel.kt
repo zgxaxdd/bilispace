@@ -7,6 +7,7 @@ import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.live.LiveRecommendRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -36,6 +37,13 @@ class HomeLiveViewModel @Inject constructor(
     }
 
     fun refresh() {
+        // 并发守卫（对齐 HomeArticleViewModel 的同款写法）：必须带 hasLoaded 前缀！
+        // HomeLiveUiState 的初始态就是 isRefreshing=true（首屏骨架由它渲染），
+        // 裸判 isRefreshing 会让首次 refresh() 永远被自己的守卫拦截——直播列表
+        // 永远停在骨架、连请求都发不出去（真机实测：零 DNS、零异常、零超时）。
+        // hasLoaded=false 的首载阶段放行；hasLoaded=true 后才按刷新互斥拦重入。
+        val state = _uiState.value
+        if (hasLoaded && (state.isRefreshing || state.isLoadingMore)) return
         viewModelScope.launch {
             try {
                 _uiState.update {
@@ -60,6 +68,8 @@ class HomeLiveViewModel @Inject constructor(
                 hasMore = page.hasMore
                 hasLoaded = true
                 loginEvent = 0
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "刷新直播推荐失败"))
@@ -97,6 +107,8 @@ class HomeLiveViewModel @Inject constructor(
                 hasMore = page.hasMore
                 hasLoaded = true
                 loginEvent = 0
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = UserFacingError.logAndMessage(TAG, e, "加载更多直播推荐失败"))

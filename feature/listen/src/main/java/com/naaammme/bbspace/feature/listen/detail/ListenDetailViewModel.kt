@@ -10,6 +10,7 @@ import com.naaammme.bbspace.infra.player.EngineSource
 import com.naaammme.bbspace.infra.player.PlayerEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -111,6 +112,8 @@ class ListenDetailViewModel @Inject constructor(
                         .setArtist(author.takeIf(String::isNotBlank))
                         .build()
                 )
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "获取播放地址失败" }
                 _uiState.update {

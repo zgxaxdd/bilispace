@@ -18,6 +18,8 @@ dependencies {
     implementation(project(":core:history"))
     implementation(project(":core:published"))
     implementation(project(":core:model"))
+    // core:common：runCatchingCancellable（取消语义统一收口，见 RunCatchingCancellable.kt）
+    implementation(project(":core:common"))
     implementation(project(":core:designsystem"))
     implementation(project(":feature:comment"))
 

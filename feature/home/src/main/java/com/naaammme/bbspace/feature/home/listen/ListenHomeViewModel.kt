@@ -7,6 +7,7 @@ import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.listen.ListenRepository
 import com.naaammme.bbspace.core.model.listen.ListenItem
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -46,6 +47,8 @@ class ListenHomeViewModel @Inject constructor(
                         nextPageToken = result.nextPageToken
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -78,6 +81,8 @@ class ListenHomeViewModel @Inject constructor(
                         nextPageToken = result.nextPageToken
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载更多失败" }
                 _uiState.update { it.copy(isLoadingMore = false) }

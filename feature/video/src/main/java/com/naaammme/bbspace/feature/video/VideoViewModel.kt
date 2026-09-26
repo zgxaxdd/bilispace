@@ -91,6 +91,18 @@ data class FavFolderSheetState(
     val dismissRequest: Boolean = false
 )
 
+/**
+ * 互动区（点赞/投币/收藏计数与按钮态）的重置去重键。
+ * 刻意包含 cid / epId：见 [VideoViewModel] 里 map 的注释。
+ */
+private data class InteractionResetKey(
+    val aid: Long,
+    val cid: Long,
+    val epId: Long,
+    val stat: VideoStat?,
+    val userState: VideoUserState?
+)
+
 @HiltViewModel
 class VideoViewModel @Inject constructor(
     private val playbackController: VideoPlaybackController,
@@ -138,13 +150,24 @@ class VideoViewModel @Inject constructor(
     val msg: SharedFlow<String> = _msg.asSharedFlow()
 
     init {
-        // 换视频时以服务器返回的状态重置互动区
+        // 换视频 / 换分P / 换选集时以服务器返回的状态重置互动区
         viewModelScope.launch {
             videoState
-                .map { Triple(it.ids.aid, it.detail?.stat, it.detail?.userState) }
+                .map {
+                    // 去重键必须带上 cid / epId：同一视频切分P、切选集时 detail 往往不变，
+                    // 只用 Triple(aid, stat, userState) 去重会让上一分P的**乐观 delta**
+                    // （点赞/投币后的计数偏移）残留到新分P上，表现为新分P计数凭空多一。
+                    InteractionResetKey(
+                        aid = it.ids.aid,
+                        cid = it.ids.cid,
+                        epId = it.ids.epId,
+                        stat = it.detail?.stat,
+                        userState = it.detail?.userState
+                    )
+                }
                 .distinctUntilChanged()
-                .collect { (_, stat, userState) ->
-                    _interaction.value = VideoInteractionState(stat = stat, userState = userState)
+                .collect { key ->
+                    _interaction.value = VideoInteractionState(stat = key.stat, userState = key.userState)
                 }
         }
     }
@@ -513,7 +536,7 @@ class VideoViewModel @Inject constructor(
     // ===== 互动动作 =====
 
     /** 点赞/取消点赞 */
-    fun toggleLike() = withInteraction { state, aid ->
+    fun toggleLike() = withInteraction { state, aid, interactionTarget ->
         val target = !(state.userState?.liked ?: false)
         // 本文件里包挂起调用的 runCatching 一律用 runCatchingCancellable：
         // 标准库版本会把 CancellationException 也吞成 Result.failure，于是
@@ -523,7 +546,7 @@ class VideoViewModel @Inject constructor(
         // 继续发请求。取消就该向上传播，不能与真实失败混为一谈。
         runCatchingCancellable { actionRepository.setLike(aid, target) }.fold(
             onSuccess = { toast ->
-                _interaction.update {
+                updateInteractionIfCurrent(interactionTarget) {
                     it.copy(
                         userState = (it.userState ?: VideoUserState()).copy(liked = target),
                         likeDelta = it.likeDelta + if (target) 1 else -1
@@ -536,7 +559,7 @@ class VideoViewModel @Inject constructor(
     }
 
     /** 投币，multiply 只能为 1 或 2，withLike 表示同时点赞 */
-    fun submitCoin(multiply: Int, withLike: Boolean) = withInteraction { state, aid ->
+    fun submitCoin(multiply: Int, withLike: Boolean) = withInteraction { state, aid, interactionTarget ->
         val coinCount = state.userState?.coinCount ?: 0
         if (coinCount + multiply > 2) {
             _msg.tryEmit("达到投币上限啦~")
@@ -545,7 +568,7 @@ class VideoViewModel @Inject constructor(
         val likedBefore = state.userState?.liked ?: false
         runCatchingCancellable { actionRepository.addCoin(aid, multiply, withLike) }.fold(
             onSuccess = {
-                _interaction.update {
+                updateInteractionIfCurrent(interactionTarget) {
                     it.copy(
                         userState = (it.userState ?: VideoUserState()).copy(
                             coinCount = coinCount + multiply,
@@ -566,10 +589,10 @@ class VideoViewModel @Inject constructor(
     /**
      * 一键三连：Web 端点一次完成；失败时降级为逐项执行，单项失败不阻断其余项
      */
-    fun triple() = withInteraction { _, aid ->
+    fun triple() = withInteraction { _, aid, interactionTarget ->
         val message = try {
             val result = actionRepository.triple(aid, videoState.value.ids.bvid)
-            markTripleResult(like = result.like, coin = result.coin, fav = result.fav)
+            markTripleResult(like = result.like, coin = result.coin, fav = result.fav, target = interactionTarget)
             "三连成功"
         } catch (error: Exception) {
             // 必须把降级结果赋值给 message：降级方法返回的是给用户看的提示文案
@@ -577,7 +600,7 @@ class VideoViewModel @Inject constructor(
             // catch 分支的类型被推导为 Unit 并装箱成 String("kotlin.Unit")，
             // 于是降级成功也会弹 "kotlin.Unit"，而 tripleFallback 的文案被丢弃。
             if (error is CancellationException) throw error
-            tripleFallback(aid)
+            tripleFallback(aid, interactionTarget)
         }
         _msg.tryEmit(message)
     }
@@ -660,6 +683,7 @@ class VideoViewModel @Inject constructor(
             return
         }
         _favSheet.update { it.copy(submitting = true) }
+        val interactionTarget = interactionTargetOf()
         viewModelScope.launch {
             // 与 openFavSheet 同理：favRidType() 会 throw，必须在 runCatching 里面。
             // 这里虽然上游有 `if (aid <= 0L) return` 挡着、当前不可达，但依赖调用方
@@ -677,7 +701,7 @@ class VideoViewModel @Inject constructor(
                     // 选择当成已生效去更新收藏态与计数 —— 那才是真 bug。
                     val favedNow = sheet.selectedIds.isNotEmpty()
                     val favedBefore = sheet.initialFavedIds.isNotEmpty()
-                    _interaction.update {
+                    updateInteractionIfCurrent(interactionTarget) {
                         it.copy(
                             userState = (it.userState ?: VideoUserState()).copy(faved = favedNow),
                             favDelta = it.favDelta + when {
@@ -730,13 +754,38 @@ class VideoViewModel @Inject constructor(
         refreshCoinBalance()
     }
 
-    private fun withInteraction(action: suspend (VideoInteractionState, Long) -> Unit) {
+    /** 互动写回的目标快照（审查 D3）：切视频/分P/选集后，迟到响应据此丢弃。 */
+    private data class InteractionTarget(val aid: Long, val cid: Long, val epId: Long)
+
+    private fun interactionTargetOf(): InteractionTarget? {
+        val ids = videoState.value.ids
+        if (ids.aid <= 0L) return null
+        return InteractionTarget(aid = ids.aid, cid = ids.cid, epId = ids.epId)
+    }
+
+    /** 目标守卫写回：目标已变化（含分P/选集切换）时静默丢弃本次乐观结果。 */
+    private fun updateInteractionIfCurrent(
+        target: InteractionTarget?,
+        transform: (VideoInteractionState) -> VideoInteractionState
+    ) {
+        if (target == null) {
+            _interaction.update(transform)
+            return
+        }
+        val ids = videoState.value.ids
+        if (ids.aid != target.aid || ids.cid != target.cid || ids.epId != target.epId) return
+        _interaction.update(transform)
+    }
+
+    private fun withInteraction(action: suspend (VideoInteractionState, Long, InteractionTarget) -> Unit) {
         if (!loggedIn()) {
             _msg.tryEmit("请先登录")
             return
         }
-        val aid = videoState.value.ids.aid
-        if (aid <= 0L) return
+        // 目标快照：挂起期间用户可能切视频/分P/选集（ids 变化会触发互动区整体重置），
+        // 迟到的响应必须凭这份快照判断归属，否则 liked/delta 会串写到新目标上
+        val interactionTarget = interactionTargetOf() ?: return
+        val aid = interactionTarget.aid
         if (_interaction.value.busy) {
             _msg.tryEmit("操作处理中，请稍候")
             return
@@ -744,7 +793,7 @@ class VideoViewModel @Inject constructor(
         _interaction.update { it.copy(busy = true) }
         viewModelScope.launch {
             try {
-                action(_interaction.value, aid)
+                action(_interaction.value, aid, interactionTarget)
             } finally {
                 _interaction.update { it.copy(busy = false) }
             }
@@ -770,8 +819,8 @@ class VideoViewModel @Inject constructor(
         _msg.tryEmit(error.message?.takeIf(String::isNotBlank) ?: fallback)
     }
 
-    private fun markTripleResult(like: Boolean, coin: Boolean, fav: Boolean) {
-        _interaction.update {
+    private fun markTripleResult(like: Boolean, coin: Boolean, fav: Boolean, target: InteractionTarget? = null) {
+        updateInteractionIfCurrent(target) {
             val user = it.userState ?: VideoUserState()
             it.copy(
                 userState = user.copy(
@@ -787,7 +836,7 @@ class VideoViewModel @Inject constructor(
     }
 
     /** Web 三连失败后的降级：逐项执行，单项失败不阻断其余项 */
-    private suspend fun tripleFallback(aid: Long): String {
+    private suspend fun tripleFallback(aid: Long, interactionTarget: InteractionTarget): String {
         val state = _interaction.value
         val alreadyAll = (state.userState?.liked ?: false) &&
             (state.userState?.coinCount ?: 0) > 0 &&
@@ -800,7 +849,7 @@ class VideoViewModel @Inject constructor(
             runCatchingCancellable { actionRepository.setLike(aid, true) }
                 .onSuccess {
                     done += "点赞"
-                    markTripleResult(like = true, coin = false, fav = false)
+                    markTripleResult(like = true, coin = false, fav = false, target = interactionTarget)
                 }
                 .onFailure { failed += "点赞" }
         }

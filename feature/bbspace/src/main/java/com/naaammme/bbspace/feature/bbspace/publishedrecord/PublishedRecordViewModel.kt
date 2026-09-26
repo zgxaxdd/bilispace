@@ -1,7 +1,8 @@
-﻿package com.naaammme.bbspace.feature.bbspace.publishedrecord
+package com.naaammme.bbspace.feature.bbspace.publishedrecord
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.published.PublishedRecordRepository
 import com.naaammme.bbspace.core.model.PublishedRecord
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -78,7 +79,7 @@ class PublishedRecordViewModel @Inject constructor(
                     isLoadingMore = true
                 )
             }
-            runCatching {
+            runCatchingCancellable {
                 repo.getRecords(
                     keyword = queryKeyword,
                     sortDesc = sortDesc,
@@ -120,7 +121,7 @@ class PublishedRecordViewModel @Inject constructor(
                 hasMore = false
             )
         }
-        runCatching {
+        runCatchingCancellable {
             val count = if (reloadCount) {
                 repo.getCount()
             } else {

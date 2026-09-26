@@ -8,6 +8,7 @@ import com.naaammme.bbspace.core.feed.InterestRepository
 import com.naaammme.bbspace.core.model.UinterestResponse
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +52,8 @@ class InterestViewModel @Inject constructor(
                     response = response
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Logger.e(TAG, e) { "加载兴趣标签失败" }
             _uiState.update {

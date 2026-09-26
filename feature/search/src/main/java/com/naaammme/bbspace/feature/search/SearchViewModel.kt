@@ -17,6 +17,7 @@ import com.naaammme.bbspace.core.model.SearchVideo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -196,6 +197,8 @@ class SearchViewModel @Inject constructor(
                 if (page.filters.isNotEmpty()) {
                     syncFilters(page.filters)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 errorMessage = UserFacingError.logAndMessage(TAG, e, "搜索翻页失败")
             } finally {
@@ -222,6 +225,8 @@ class SearchViewModel @Inject constructor(
             syncFilters(page.filters)
             _authors.value = page.authors.filter { authorIds.add(it.mid) }
             _videos.value = page.videos.filter { videoIds.add(it.aid to it.cid) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             errorMessage = UserFacingError.logAndMessage(TAG, e, "搜索失败")
         } finally {

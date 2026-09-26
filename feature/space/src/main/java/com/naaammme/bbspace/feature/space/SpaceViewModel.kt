@@ -140,6 +140,8 @@ class SpaceViewModel @Inject constructor(
                     }
                 }
                 loadDynamics()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载个人空间失败" }
                 val message = UserFacingError.messageOf(e)
@@ -197,6 +199,8 @@ class SpaceViewModel @Inject constructor(
                         )
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "切换空间排序失败" }
                 _uiState.update {
@@ -301,6 +305,8 @@ class SpaceViewModel @Inject constructor(
                         )
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载空间视频更多失败" }
                 _uiState.update {
@@ -348,6 +354,8 @@ class SpaceViewModel @Inject constructor(
                         )
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载空间动态更多失败" }
                 _uiState.update {
@@ -387,6 +395,8 @@ class SpaceViewModel @Inject constructor(
                         )
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.e(TAG, e) { "加载空间动态失败" }
                 _uiState.update {

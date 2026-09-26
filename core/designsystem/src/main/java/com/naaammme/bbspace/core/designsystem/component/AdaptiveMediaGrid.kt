@@ -185,16 +185,9 @@ fun <T> AdaptiveMediaGrid(
 
                 items.isEmpty() -> {
                     when {
-                        emptyContent != null -> {
-                            item(
-                                key = "empty",
-                                span = StaggeredGridItemSpan.FullLine,
-                                contentType = "empty"
-                            ) {
-                                emptyContent()
-                            }
-                        }
-
+                        // 错误必须优先于空态：否则传了 emptyContent 的调用方
+                        // （如排行页的"暂无内容"）会把真实失败掩盖成"暂无内容"，
+                        // 用户无从知道要重试、报什么错。
                         !errorMessage.isNullOrBlank() -> {
                             val err = errorMessage.orEmpty()
                             item(
@@ -203,6 +196,16 @@ fun <T> AdaptiveMediaGrid(
                                 contentType = "error"
                             ) {
                                 errorContent(err)
+                            }
+                        }
+
+                        emptyContent != null -> {
+                            item(
+                                key = "empty",
+                                span = StaggeredGridItemSpan.FullLine,
+                                contentType = "empty"
+                            ) {
+                                emptyContent()
                             }
                         }
                     }

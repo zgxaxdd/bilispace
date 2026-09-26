@@ -235,6 +235,54 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 同一约定扩展到 feature 层 ViewModel（本轮补齐）。
+     *
+     * 上一条只钉了 3 个播放文件，而 `runCatching` 吞取消在 feature 层同样成立：
+     * `FavoriteViewModel.refresh()` 会 `contentJob?.cancel()` 后重发 —— 被取消的那次若吞掉
+     * CancellationException 就走进 `onFailure`，把"取消"记成"加载失败"；`CommentViewModel`
+     * 发评论链上取消/超时被记成"发送失败"，而请求可能已在服务端生效，用户重发即重复评论。
+     *
+     * 断言按**显式文件清单**（与本类其余断言一致，不用模糊 glob）：清单里的文件必须
+     * ① 不再有裸 `runCatching {`；② 真的在用 runCatchingCancellable（防"删掉调用点
+     * 也能过"的假绿）；③ try/catch 形态必须先重抛 CancellationException。
+     */
+    @Test
+    fun cancellationSwallowingIsClosedInFeatureViewModels() {
+        val converted = listOf(
+            "CommentViewModel.kt",
+            "DynamicViewModel.kt",
+            "DynamicDetailViewModel.kt",
+            "RankViewModel.kt",
+            "ImConversationViewModel.kt",
+            "PublishedRecordViewModel.kt",
+            "SpaceNoteViewModel.kt",
+            "HistorySearchViewModel.kt",
+            "FavoriteViewModel.kt",
+            "FavoriteFolderDetailViewModel.kt",
+            "HomeViewModel.kt"
+        )
+        for (name in converted) {
+            val lines = codeOf(name)
+            assertTrue(
+                "$name 里不该再有包挂起调用的 runCatching（应使用 runCatchingCancellable）",
+                countMatching(lines, """\brunCatching\s*\{""") == 0
+            )
+            assertTrue(
+                "$name 应真的在用 runCatchingCancellable（否则本断言只是删代码换来的假绿）",
+                countMatching(lines, """\brunCatchingCancellable\s*\{""") > 0
+            )
+        }
+        val home = codeOf("HomeViewModel.kt")
+        assertTrue(
+            "HomeViewModel 每个 catch (e: Exception) 都必须配套一个先重抛的 " +
+                "catch (e: CancellationException)，否则取消会被记成加载失败。",
+            countMatching(home, """catch\s*\(e:\s*CancellationException\)""") ==
+                countMatching(home, """catch\s*\(e:\s*Exception\)""") &&
+                countMatching(home, """catch\s*\(e:\s*Exception\)""") > 0
+        )
+    }
+
     // ── 工具 ─────────────────────────────────────────────────────────────────
 
     private val FS: String get() = File.separator

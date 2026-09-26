@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.history.search
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.history.HistoryRepository
 import com.naaammme.bbspace.core.model.HistoryItem
 import com.naaammme.bbspace.core.model.HistoryTab
@@ -99,7 +100,7 @@ class HistorySearchViewModel @Inject constructor(
         val state = _uiState.value
         val pageNo = if (reset) 1 else nextPage
         viewModelScope.launch {
-            runCatching {
+            runCatchingCancellable {
                 repo.search(
                     keyword = state.query,
                     tab = state.tab,

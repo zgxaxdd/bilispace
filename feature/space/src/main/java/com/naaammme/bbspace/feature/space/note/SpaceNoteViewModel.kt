@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.space.note
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.InputStream
 import java.io.OutputStream
@@ -76,7 +77,7 @@ class SpaceNoteViewModel @Inject constructor(
 
     suspend fun exportNoteJson(outputStream: OutputStream?): Boolean = withContext(Dispatchers.IO) {
         if (outputStream == null) return@withContext false
-        runCatching {
+        runCatchingCancellable {
             val arr = JSONArray()
             dao.getAllNonBlank().forEach { note ->
                 arr.put(
@@ -96,7 +97,7 @@ class SpaceNoteViewModel @Inject constructor(
 
     suspend fun importNoteJson(inputStream: InputStream?): Result<Int> = withContext(Dispatchers.IO) {
         if (inputStream == null) return@withContext Result.failure(Exception("InputStream is null"))
-        runCatching {
+        runCatchingCancellable {
             val json = inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
             val arr = JSONArray(json)
             val items = buildList {

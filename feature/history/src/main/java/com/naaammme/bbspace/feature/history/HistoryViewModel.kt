@@ -10,6 +10,7 @@ import com.naaammme.bbspace.core.model.HistoryItem
 import com.naaammme.bbspace.core.model.HistoryTab
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -144,6 +145,8 @@ class HistoryViewModel @Inject constructor(
                     errorOnLoadMore = false
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Logger.e(TAG, e) { "加载历史记录失败" }
             _uiState.update {

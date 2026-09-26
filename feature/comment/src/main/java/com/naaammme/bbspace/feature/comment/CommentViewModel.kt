@@ -1,8 +1,9 @@
-﻿package com.naaammme.bbspace.feature.comment
+package com.naaammme.bbspace.feature.comment
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.auth.AuthRepository
 import com.naaammme.bbspace.core.comment.CommentRepository
 import com.naaammme.bbspace.core.comment.ImageAttachmentHandler
@@ -46,6 +47,14 @@ class CommentViewModel @Inject constructor(
     val msg = _msg.asSharedFlow()
 
     private var reqId = 0L
+
+    /**
+     * 楼中楼请求代数（审查 D4）：主列表有 reqId 守卫，楼中楼路径原本只有
+     * subject/线程身份匹配——同线程的"排序切换"与"在途翻页"两个请求都能穿过，
+     * 响应乱序时旧代数的 append 会 merge 进新列表并把 sort/nextOffset 回写成旧值。
+     * 发起时递增并捕获，写回前比对，代数不符即丢弃。
+     */
+    private var threadReqId = 0L
 
     init {
         viewModelScope.launch {
@@ -151,7 +160,7 @@ class CommentViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 repo.fetchMainPage(
                     subject = subject,
                     sort = state.sort,
@@ -289,7 +298,7 @@ class CommentViewModel @Inject constructor(
             it.copy(busyReplyIds = it.busyReplyIds + rpid)
         }
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 repo.fetchTranslatedReply(subject, rpid)
             }
             if (_uiState.value.subject != subject) return@launch
@@ -342,7 +351,7 @@ class CommentViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 repo.fetchReplyInfo(rpid)
             }
             if (_uiState.value.subject != subject) return@launch
@@ -376,7 +385,7 @@ class CommentViewModel @Inject constructor(
             it.copy(busyReplyIds = it.busyReplyIds + reply.rpid)
         }
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 repo.deleteReply(subject, reply.rpid)
             }
             if (_uiState.value.subject != subject) return@launch
@@ -455,7 +464,7 @@ class CommentViewModel @Inject constructor(
             it.copy(busyReplyIds = it.busyReplyIds + reply.rpid)
         }
         viewModelScope.launch {
-            val result = runCatching { repoCall(subject) }
+            val result = runCatchingCancellable { repoCall(subject) }
             if (_uiState.value.subject != subject) return@launch
             _uiState.update {
                 it.copy(busyReplyIds = it.busyReplyIds - reply.rpid)
@@ -527,7 +536,11 @@ class CommentViewModel @Inject constructor(
 
     fun dismissEditor() {
         val editor = _editorState.value
-        if (editor.loading || !editor.visible) return
+        if (!editor.visible) return
+        // 不再以 loading 拒绝：ModalBottomSheet 在下拉/返回时已自行隐藏并回调
+        // onDismissRequest（见 CommentEditorSheet 的注释），此刻 visible 必须复位，
+        // 否则隐藏的 popup 壳驻留组合树拦截全屏输入（僵尸弹窗）。提交中的请求
+        // 照常完成并经 toast/列表刷新反馈。
         _editorState.update {
             it.copy(
                 visible = false,
@@ -589,7 +602,7 @@ class CommentViewModel @Inject constructor(
         viewModelScope.launch {
             val picturesJson = if (editor.selectedImageUris.isNotEmpty()) {
                 _editorState.update { it.copy(uploading = true) }
-                val result = runCatching {
+                val result = runCatchingCancellable {
                     val pics = mutableListOf<JSONObject>()
                     editor.selectedImageUris.forEachIndexed { index, uri ->
                         val prepared = imageHandler.prepare(uri)
@@ -618,7 +631,7 @@ class CommentViewModel @Inject constructor(
             } else {
                 null
             }
-            val publishResult = runCatching {
+            val publishResult = runCatchingCancellable {
                 repo.publishReply(
                     subject = subject,
                     message = text,
@@ -667,7 +680,7 @@ class CommentViewModel @Inject constructor(
             selectedFilter = filter
         )
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 repo.fetchMainPage(
                     subject = subject,
                     sort = sort,
@@ -699,8 +712,10 @@ class CommentViewModel @Inject constructor(
         offset: String,
         append: Boolean
     ) {
+        threadReqId += 1L
+        val callId = threadReqId
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 repo.fetchReplyDetail(
                     subject = subject,
                     rootRpid = rootRpid,
@@ -710,6 +725,7 @@ class CommentViewModel @Inject constructor(
                 )
             }
             if (_uiState.value.subject != subject) return@launch
+            if (callId != threadReqId) return@launch
             result.fold(
                 onSuccess = { page ->
                     _uiState.update { cur ->
@@ -739,6 +755,7 @@ class CommentViewModel @Inject constructor(
                     }
                 },
                 onFailure = { err ->
+                    if (callId != threadReqId) return@fold
                     val msg = err.message ?: if (append) {
                         "加载更多回复失败"
                     } else {

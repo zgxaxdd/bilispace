@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.favorite
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
@@ -91,7 +92,7 @@ class FavoriteViewModel @Inject constructor(
                     )
                 )
             }
-            runCatching {
+            runCatchingCancellable {
                 repo.fetchMyFavorites()
             }.onSuccess { page ->
                 _uiState.update {
@@ -138,7 +139,7 @@ class FavoriteViewModel @Inject constructor(
                     )
                 )
             }
-            runCatching {
+            runCatchingCancellable {
                 repo.fetchFavoriteContents(reqCursor)
             }.onSuccess { page ->
                 _uiState.update {
@@ -177,7 +178,7 @@ class FavoriteViewModel @Inject constructor(
     /** 新建收藏夹（privacy：0=公开，1=私有） */
     fun createFolder(title: String, privacy: Int) {
         viewModelScope.launch {
-            runCatching { repo.createFolder(title, privacy) }.fold(
+            runCatchingCancellable { repo.createFolder(title, privacy) }.fold(
                 onSuccess = {
                     _msg.tryEmit("收藏夹已创建")
                     loadFolders(refreshing = true)
@@ -190,7 +191,7 @@ class FavoriteViewModel @Inject constructor(
     /** 重命名收藏夹 */
     fun renameFolder(fid: Long, title: String, privacy: Int) {
         viewModelScope.launch {
-            runCatching { repo.editFolder(fid, title, privacy) }.fold(
+            runCatchingCancellable { repo.editFolder(fid, title, privacy) }.fold(
                 onSuccess = {
                     _msg.tryEmit("收藏夹已更新")
                     loadFolders(refreshing = true)
@@ -203,7 +204,7 @@ class FavoriteViewModel @Inject constructor(
     /** 删除收藏夹 */
     fun deleteFolder(fid: Long) {
         viewModelScope.launch {
-            runCatching { repo.deleteFolder(fid) }.fold(
+            runCatchingCancellable { repo.deleteFolder(fid) }.fold(
                 onSuccess = {
                     _msg.tryEmit("收藏夹已删除")
                     loadFolders(refreshing = true)
@@ -217,7 +218,7 @@ class FavoriteViewModel @Inject constructor(
     fun openFolderSort() {
         _sortState.value = FolderSortUiState(visible = true, loading = true)
         viewModelScope.launch {
-            runCatching { repo.fetchCreatedFoldersWithState(rid = 0L, type = 0) }.fold(
+            runCatchingCancellable { repo.fetchCreatedFoldersWithState(rid = 0L, type = 0) }.fold(
                 onSuccess = { folders ->
                     _sortState.value = FolderSortUiState(visible = true, entries = folders)
                 },
@@ -251,7 +252,7 @@ class FavoriteViewModel @Inject constructor(
         if (orderedIds.isEmpty()) return
         _sortState.update { it.copy(submitting = true) }
         viewModelScope.launch {
-            runCatching { repo.sortFolders(orderedIds) }.fold(
+            runCatchingCancellable { repo.sortFolders(orderedIds) }.fold(
                 onSuccess = {
                     _sortState.value = FolderSortUiState()
                     _msg.tryEmit("排序完成")

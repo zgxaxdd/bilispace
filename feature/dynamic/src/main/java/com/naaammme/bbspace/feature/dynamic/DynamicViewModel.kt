@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.dynamic
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.comment.CommentRepository
 import com.naaammme.bbspace.core.comment.ImageAttachmentHandler
 import com.naaammme.bbspace.core.common.AuthProvider
@@ -18,6 +19,7 @@ import com.naaammme.bbspace.core.model.VideoTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -125,6 +127,8 @@ class DynamicViewModel @Inject constructor(
                     loadMoreError = null
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (version != authVersion) return
             Logger.e(TAG, e) { "加载动态失败" }
@@ -179,7 +183,7 @@ class DynamicViewModel @Inject constructor(
         val target = !stats.liked
         likeBusyIds += item.id
         viewModelScope.launch {
-            val result = runCatching { repo.thumbDyn(item.id, target) }
+            val result = runCatchingCancellable { repo.thumbDyn(item.id, target) }
             likeBusyIds -= item.id
             result.fold(
                 onSuccess = {
@@ -206,7 +210,7 @@ class DynamicViewModel @Inject constructor(
         // 仅普通视频动态走 revs_id 转发（DYN_TYPE_AV=8），其余一律按 dyn_id 转发
         val aid = (item.videoTarget as? VideoTarget.Ugc)?.aid ?: 0L
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 if (aid > 0L) {
                     repo.createDyn(
                         mid = authProvider.mid,
@@ -246,7 +250,7 @@ class DynamicViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 val pics = imageUris.mapIndexed { index, uri ->
                     val prepared = imageHandler.prepare(uri)
                     val json = commentRepo.uploadImage(prepared.bytes, index, prepared.mimeType)

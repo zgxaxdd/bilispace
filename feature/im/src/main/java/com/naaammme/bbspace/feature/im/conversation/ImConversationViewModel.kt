@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.im.conversation
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.im.ImRepository
 import com.naaammme.bbspace.core.model.ImConversationPage
@@ -119,7 +120,7 @@ class ImConversationViewModel @Inject constructor(
         }
         _uiState.update { it.copy(isSending = true, sendErrorMessage = null) }
         viewModelScope.launch {
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 imRepo.sendConversationMessage(
                     talkerId = talkerId,
                     sessionType = sessionType,

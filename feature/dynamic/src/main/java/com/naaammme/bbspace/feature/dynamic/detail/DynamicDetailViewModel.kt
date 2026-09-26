@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.dynamic.detail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.AuthProvider
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
@@ -11,6 +12,7 @@ import com.naaammme.bbspace.feature.dynamic.navigation.DYNAMIC_DETAIL_OPUS_ID_AR
 import com.naaammme.bbspace.feature.dynamic.navigation.DYNAMIC_DETAIL_OPUS_TYPE_ARG
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,7 +65,7 @@ class DynamicDetailViewModel @Inject constructor(
         val target = !stats.liked
         likeBusy = true
         viewModelScope.launch {
-            runCatching { repo.thumbDyn(opusId, target) }.fold(
+            runCatchingCancellable { repo.thumbDyn(opusId, target) }.fold(
                 onSuccess = {
                     likeBusy = false
                     _uiState.update {
@@ -97,6 +99,8 @@ class DynamicDetailViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(detail = detail, isLoading = false, errorMessage = null)
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
