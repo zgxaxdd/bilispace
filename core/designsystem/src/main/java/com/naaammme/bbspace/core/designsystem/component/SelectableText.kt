@@ -88,6 +88,32 @@ fun SelectableText(
         popupPositionProvider(popupOffsetPx, selectionLineTopPx)
     }
 
+    /**
+     * 选区背景路径（BACKLOG PF-05）。
+     *
+     * `TextLayoutResult.getPathForRange` 只有"返回一个新 Path"的重载 —— 用 javap 查了
+     * ui-text 1.11.2 与 1.12.1，都只有 `getPathForRange(int, int): Path`，
+     * 没有可以复用的 `dest: Path` 版本，所以"选区变了就分配一次"省不掉。
+     *
+     * 能省的是**重绘但选区没变**的那些分配：原先这段在 `drawBehind` 里，
+     * 于是任何一次重绘（列表滚动、父级动画、别处状态失效）都会新分配一个 Path，
+     * 而拖动选区只是其中少数时刻。提到带 key 的 `remember` 之后，
+     * 只有 layout / 选区 / 文本真的变了才重新算 —— 也顺手把这条分配从
+     * "DrawScope 里"挪到"组合期"，让它能被本仓的分配守卫看见（DrawScope 里的分配
+     * 结构上扫不到，因为它不是组合体）。
+     */
+    val selectionPath = remember(textLayoutResult, selection, text.length) {
+        val layout = textLayoutResult
+        val sel = selection
+        if (layout == null || sel == null) {
+            null
+        } else {
+            val from = min(sel.start, sel.end).coerceIn(0, text.length)
+            val to = max(sel.start, sel.end).coerceIn(0, text.length)
+            if (from < to) layout.getPathForRange(from, to) else null
+        }
+    }
+
     Box(modifier = modifier) {
         Text(
             text = text,
@@ -98,16 +124,9 @@ fun SelectableText(
             onTextLayout = { textLayoutResult = it },
             modifier = Modifier
                 .drawBehind {
-                    val layout = textLayoutResult ?: return@drawBehind
-                    val sel = selection ?: return@drawBehind
-                    val start = min(sel.start, sel.end).coerceIn(0, text.length)
-                    val end = max(sel.start, sel.end).coerceIn(0, text.length)
-
-                    if (start < end) {
-                        // 获取指定文字范围的物理路径，直接绘制背景
-                        val path = layout.getPathForRange(start, end)
-                        drawPath(path, color = selectionColor)
-                    }
+                    // 路径已在组合期按 key 算好；这里只画，不再分配
+                    val path = selectionPath ?: return@drawBehind
+                    drawPath(path, color = selectionColor)
                 }
                 .pointerInput(text) {
                     detectDragGesturesAfterLongPress(

@@ -113,6 +113,19 @@ internal val speedOps = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
  */
 private const val MASK_FIRST_FRAME_GRACE_MS = 120L
 
+/**
+ * 播放器区域的两种形状常量（PF-06）。
+ *
+ * 取值只依赖 `BiliRadius`（对象上的普通 dp `val`，不读主题状态），进程内恒定；
+ * 写在 composable 体内就是**每次重组新建一份 Shape**，而它同时被 `clip` 与
+ * 无缝 morph 的动画两端读取 —— 两端各自新一份还可能算出不同实例。
+ */
+private val ExpandedPlayerShape = RoundedCornerShape(BiliRadius.player)
+private val CompactPlayerShape = RoundedCornerShape(
+    bottomStart = BiliRadius.playerCompact,
+    bottomEnd = BiliRadius.playerCompact
+)
+
 @Suppress("UnsafeOptInUsageError")
 @UnstableApi
 @Composable
@@ -291,7 +304,7 @@ fun VideoScreen(
             }
 
             isExpandedWidth -> {
-                val expandedPlayerShape = RoundedCornerShape(BiliRadius.player)
+                val expandedPlayerShape = ExpandedPlayerShape
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -341,10 +354,7 @@ fun VideoScreen(
             }
 
             else -> {
-                val compactPlayerShape = RoundedCornerShape(
-                    bottomStart = BiliRadius.playerCompact,
-                    bottomEnd = BiliRadius.playerCompact
-                )
+                val compactPlayerShape = CompactPlayerShape
                 Column(
                     modifier = Modifier
                         .fillMaxSize()

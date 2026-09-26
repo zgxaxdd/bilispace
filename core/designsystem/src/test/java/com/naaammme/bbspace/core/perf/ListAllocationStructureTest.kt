@@ -265,4 +265,167 @@ class ListAllocationStructureTest {
         }
         return body
     }
+
+    // ── 断言：形状与路径的分配点（PF-05 / PF-06，W7 的覆盖面扩展）──────────────
+
+    /**
+     * 全仓 composable 体内**不许**就地 `val xxxShape = RoundedCornerShape(...)`。
+     *
+     * 制定本批的直接原因：PF-06 的原描述（"勋章拼图五个 Shape 内联构造"）经复核**已经过时**
+     * —— 那五个早已收进 `UserCollageShapes` 文件级对象。真正还内联的是**播放器**那 5 处
+     * （`VideoScreen` 展开/竖排、`VideoPlayerPane` 轨道/控制条/统计胶囊）+
+     * 两处 `RoundedCornerShape(20.dp)` 裸字面量，本批一并提到文件级。
+     *
+     * 为什么规则写成 0 而不是棘轮计数：这类写法**没有任何一种情况是必要的**
+     * （值恒定 → 就该是常量；值随状态变 → 必须 `remember(keys)`，两种都不是"裸内联"）。
+     * 与 [typographyInlineCopy_isFrozen] 不同，那条留着 6 处是有明确理由的。
+     */
+    @Test
+    fun shapeConstantsAreNeverBuiltInsideComposables() {
+        val offenders = mainSources.flatMap { file ->
+            val rel = file.relativeTo(repoRoot).path.replace('\\', '/')
+            inlineShapeSites(file.readLines()).map { "$rel:${it.first}" }
+        }
+        val probe = listOf(
+            "@Composable",
+            "fun Thing() {",
+            "    val pill = RoundedCornerShape(percent = 50)",
+            "}",
+            "",
+            "private object Shapes {",
+            "    val octagon = PolygonShape(sides = 8)",
+            "}"
+        )
+        val probeHits = inlineShapeSites(probe)
+        assertTrue(
+            "自检失败：合成的\"组合体内联 vs 文件级对象\"两个样例应恰好抓到 1 处，实际 $probeHits。" +
+                "规则一旦失效，下面那条全仓断言就成了永真。",
+            probeHits.size == 1 && probeHits[0].first == 3
+        )
+        assertTrue(
+            "这些形状是在 composable / 函数体内就地构造的：${offenders.joinToString()}。" +
+                "每次重组都新建一份 Shape；它们还常被 clip/背景/玻璃链当 remember 的键，" +
+                "键每帧变新会让\"remember 整条链\"的优化静默失效。" +
+                "值恒定就提到文件级（顶层 object 里的常量本规则不计），值随状态变就要 remember(keys)。",
+            offenders.isEmpty()
+        )
+    }
+
+    /**
+     * 找"在函数/composable 体内就地构造形状"的行。
+     *
+     * 判定依据不是变量名（`val octagon = PolygonShape(...)` 也得算），而是**当前缩进块
+     * 的最外层 opener**：`private object X {` 里的是文件级常量（正确写法），
+     * `fun` 里的是每次调用的分配。按花括号配平跟踪 opener，够用于本仓的代码风格。
+     */
+    private fun inlineShapeSites(lines: List<String>): List<Pair<Int, String>> {
+        val ctor = Regex(
+            """^\s+(val|var)\s+\w+\s*=\s*(RoundedCornerShape|AbsoluteRoundedCornerShape|CircleShape|""" +
+                """PolygonShape|StarShape|CutoutRoundedRectShape)\("""
+        )
+        val containerOfFileLevel = Regex("""^\S.*\b(object|enum class)\b""")
+        // 栈里第 1 个元素就是"包住这一行的最外层顶层声明"；它以 object / enum class 开头
+        // 就是文件级常量容器（正确写法），以 fun/class 开头就是调用期分配。
+        val stack = ArrayDeque<String>()
+        val hits = mutableListOf<Pair<Int, String>>()
+        for ((index, raw) in lines.withIndex()) {
+            val trimmed = raw.trimStart()
+            if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue
+            if (ctor.containsMatchIn(raw)) {
+                val owner = stack.firstOrNull().orEmpty()
+                if (!containerOfFileLevel.containsMatchIn(owner)) hits += (index + 1) to trimmed
+            }
+            val opens = raw.count { it == '{' }
+            val closes = raw.count { it == '}' }
+            repeat(opens) { stack.addLast(raw) }
+            repeat(closes) { if (stack.isNotEmpty()) stack.removeLast() }
+        }
+        return hits
+    }
+
+    /** 勋章拼图的五个形状必须继续待在文件级对象里（PF-06 的真实结论，防回潮）。 */
+    @Test
+    fun collageShapesStayInFileLevelObject() {
+        val lines = sourceOf("UserCollageSection.kt")
+        assertTrue(
+            "UserCollageShapes 这个文件级对象不见了（五个多边形/星形被搬回组合体内的话，" +
+                "每个拼图 item 每次重组分配 5 份 Shape）。",
+            countMatching(lines, """^\s*private object UserCollageShapes""") == 1
+        )
+        assertTrue(
+            "UserCollageShapes 里应能数出 5 个形状常量",
+            countMatching(lines, """^\s+val \w+ = (PolygonShape|StarShape)\(""") == 5
+        )
+    }
+
+    private fun drawBehindBlock(lines: List<String>): List<String> {
+        // 只认**代码形态**的 `.drawBehind {`：本仓的性能注释密度很高，
+        // 一句"原先这段在 drawBehind 里"就能把 indexOfFirst 带偏到 KDoc 上，
+        // 于是扫到的是无关区块、断言变成永真（B20 实测踩过）。
+        val start = lines.indexOfFirst { it.contains(Regex("""^\s*\.drawBehind\s*\{""")) }
+        assertTrue(
+            "SelectableText 里找不到 `.drawBehind {` —— 写法变了就要连同本断言一起改，" +
+                "否则这条等于没跑。",
+            start >= 0
+        )
+        var depth = 0
+        val block = mutableListOf<String>()
+        for (i in start until lines.size) {
+            block += lines[i]
+            depth += lines[i].count { it == '{' } - lines[i].count { it == '}' }
+            if (depth <= 0) break
+        }
+        return block
+    }
+
+    /**
+     * `Path()` / `Outline.Generic` 只许出现在形状自己的 `createOutline` / `build*Path` 里。
+     *
+     * W7 的教训：**棘轮的覆盖面 = 它真正会红的写法集合**，不是它的名字。
+     * 本类原先只盖 `RoundedCornerShape` / `composed` / `animate*AsState`，
+     * 所以 `UserCollageCanvas` 里每次 `createOutline` 分配 `Path` + `Outline.Generic`
+     * 完全不在视野内。这里把这两类纳入计数并按**实测基线**冻结（只许减不许升）。
+     */
+    @Test
+    fun pathAndOutlineAllocations_areFrozenAtMeasuredBaseline() {
+        val pattern = """\bPath\(\s*\)|Outline\.(Generic|ConvexPolygon|RoundedRect)\("""
+        val probe = listOf("    val path = Path()", "    return Outline.Generic(path)")
+        assertTrue("自检失败：Path/Outline 的正则连示例都抓不到", countMatching(probe, pattern) == 2)
+
+        val sites = mainSources.flatMap { file ->
+            file.readLines().mapIndexedNotNull { index, line ->
+                if (countMatching(listOf(line), pattern) == 0) return@mapIndexedNotNull null
+                "${file.relativeTo(repoRoot).path.replace('\\', '/')}:${index + 1}"
+            }
+        }
+        val baseline = 4
+        assertTrue(
+            "全仓 Path()/Outline.* 分配点当前 ${sites.size} 处，冻结上限 $baseline 处" +
+                "（制定日实测 4 处，全在 UserCollageCanvas 的 createOutline/build*Path 里 —— " +
+                "那两处是形状 API 要求的分配，能省的是别在这里加新的）。实际：${sites.joinToString()}",
+            sites.size <= baseline
+        )
+    }
+
+    /**
+     * 选区背景路径不许在 `drawBehind` 里现算（PF-05）。
+     *
+     * `TextLayoutResult.getPathForRange` 只有"返回新 Path"的重载（javap 查过 ui-text
+     * 1.11.2 / 1.12.1 都只有 `getPathForRange(int, int): Path`），所以分配省不掉，
+     * 能省的是**重绘但选区没变**的那些：写在 drawBehind 里 = 每次重绘一份 Path。
+     */
+    @Test
+    fun selectionPathIsRememberedNotBuiltPerRedraw() {
+        val lines = sourceOf("SelectableText.kt")
+        val drawBehind = drawBehindBlock(lines)
+        assertTrue(
+            "drawBehind 里又出现 getPathForRange —— 每次重绘分配一个 Path（PF-05 的病灶）。" +
+                "应改回带 key 的 remember。",
+            countMatching(drawBehind, """getPathForRange\(""") == 0
+        )
+        assertTrue(
+            "选区路径必须由带 key 的 remember 产出，否则本文件等于没修",
+            countMatching(lines, """remember\(textLayoutResult, selection, text\.length\)""") == 1
+        )
+    }
 }

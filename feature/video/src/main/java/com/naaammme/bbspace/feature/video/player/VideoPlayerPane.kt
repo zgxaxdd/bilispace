@@ -181,6 +181,26 @@ private val PlayerPlayButtonBorder = Color.White.copy(alpha = 0.18f)
 /** 手势气泡 / 提示胶囊的底盘（深底保证白字在任意画面上可读）。 */
 private val PlayerToastScrim = Color.Black.copy(alpha = 0.72f)
 
+/**
+ * 播放器区形状常量（PF-06）。
+ *
+ * 全部取值只依赖 `BiliRadius` 里的固定 dp（对象上的普通 `val`，不读主题状态），
+ * 所以进程内恒定。写在 composable 体内 = **每次重组新建一份 Shape 对象**，
+ * 而它同时是 `clip` / `background` / `border` / 玻璃链 `remember` 的 key ——
+ * 键一旦每帧变新，那条"必须 remember 住整条链"的优化会被静默抵消。
+ */
+private val PlayerTrackPillShape = RoundedCornerShape(percent = 50)
+private val PlayerControlShape = RoundedCornerShape(BiliRadius.playerControl)
+
+/** 统计胶囊的圆端（与轨道同为 50%，但**角色不同**：以后轨道改半径时不该连带改它）。 */
+private val PlayerPillShape = RoundedCornerShape(percent = 50)
+
+/** 非全屏播放窗口的圆角（全屏时用 RectangleShape，见调用处）。 */
+private val PlayerWindowShape = RoundedCornerShape(16.dp)
+
+/** 气泡胶囊的 20dp 圆角：既不是卡片角色也不是控件角色，所以独立命名。 */
+private val PlayerToastShape = RoundedCornerShape(20.dp)
+
 /** 进度条**已播**轨道：实心白。此前与未播同为 `White 0.24`，进度条等于看不出进度。 */
 private val PlayerSliderActiveTrack = Color.White
 
@@ -462,7 +482,7 @@ internal fun VideoPlayerPane(
         val playerCornerShape = if (isFull) {
             RectangleShape
         } else {
-            RoundedCornerShape(16.dp)
+            PlayerWindowShape
         }
         // 播放页专用背板：视频节点录进它，控制条玻璃采样它做真模糊。
         // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick 强制重录。
@@ -1344,7 +1364,7 @@ private fun PlayerProgressBar(
                 filledRight = { trackLeft + trackWidth * smoothFraction.value }
             )
         }
-        val trackShape = RoundedCornerShape(percent = 50)
+        val trackShape = PlayerTrackPillShape
 
         // 1) 整条轨道玻璃
         Box(
@@ -1458,7 +1478,7 @@ private fun PlayerProgressBar(
                             y = 0
                         )
                     }
-                    .clip(RoundedCornerShape(BiliRadius.playerControl))
+                    .clip(PlayerControlShape)
                     .background(PlayerSliderPreviewScrim)
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
@@ -1489,7 +1509,7 @@ private fun CtrlBtn(
     }
     // 全圆端：高度 34dp 配 17dp 圆角。此前是 15dp 裸字面量，与高度差 2dp，
     // 两端留下一小段直边，读作"圆角矩形"而非现代胶囊。
-    val shape = RoundedCornerShape(BiliRadius.playerControl)
+    val shape = PlayerControlShape
 
     Box(
         modifier = modifier
@@ -1523,7 +1543,7 @@ private fun PlayerPillChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val pillShape = RoundedCornerShape(percent = 50)
+    val pillShape = PlayerPillShape
     Box(
         modifier = modifier
             .clip(pillShape)
@@ -1605,7 +1625,7 @@ private fun SponsorBlockOverlay(
                 modifier = Modifier
                     .background(
                         color = PlayerToastScrim,
-                        shape = RoundedCornerShape(20.dp)
+                        shape = PlayerToastShape
                     ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1636,7 +1656,7 @@ private fun SponsorBlockOverlay(
                 modifier = Modifier
                     .background(
                         color = PlayerToastScrim,
-                        shape = RoundedCornerShape(20.dp)
+                        shape = PlayerToastShape
                     )
                     .clickable(onClick = onJumpPoi)
                     .padding(horizontal = 14.dp, vertical = 9.dp)
