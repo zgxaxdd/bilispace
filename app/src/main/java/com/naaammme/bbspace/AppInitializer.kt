@@ -9,6 +9,7 @@ import com.naaammme.bbspace.core.playback.StreamPlaybackSession
 import com.naaammme.bbspace.infra.coldstart.ColdStartClient
 import com.naaammme.bbspace.infra.grpc.GaiaReporter
 import com.naaammme.bbspace.infra.crypto.BuvidFetcher
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.infra.crypto.GuestIdGenerator
 import com.naaammme.bbspace.infra.crypto.TicketGenerator
 import com.naaammme.bbspace.infra.network.dns.BiliDns
@@ -102,7 +103,10 @@ class AppInitializer @Inject constructor(
             warmupImageConnections()
             warmupApiConnection()
             launch {
-                runCatching {
+                // runCatchingCancellable：这是 initScope（@Singleton 作用域）里的预热，
+                // 今天没人取消它，但一旦有人把 warmup 改挂到可取消的作用域上，
+                // 裸 runCatching 会让"播放器预热被取消"静默变成一条 "Player warmup failed" 日志
+                runCatchingCancellable {
                     playbackSession.prepare()
                 }.onSuccess {
                     Logger.d(TAG) { "Player warmup done" }

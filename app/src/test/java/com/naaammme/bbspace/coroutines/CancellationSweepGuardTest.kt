@@ -35,7 +35,21 @@ class CancellationSweepGuardTest {
     /** 已收口文件 →（cancellable 出现次数下限，裸 runCatching 残留上限）。 */
     private val migrated = mapOf(
         "core/sponsorblock/src/main/java/com/naaammme/bbspace/core/sponsorblock/SponsorBlockClient.kt" to (3 to 1),
-        "feature/download/src/main/java/com/naaammme/bbspace/feature/download/player/OfflineDanmakuSession.kt" to (1 to 0)
+        "feature/download/src/main/java/com/naaammme/bbspace/feature/download/player/OfflineDanmakuSession.kt" to (1 to 0),
+        // AppInitializer 的裸 runCatching 上限登记为 4 而不是 0：其中 3 处包的是
+        // 非挂起代码（execute().close() 预热、startService 兜底），语义上就该吞异常；
+        // 剩 :89 的 migrateTransitionStyleDefaultIfNeeded() 是挂起的，留给 ST-06 收尾。
+        "app/src/main/java/com/naaammme/bbspace/AppInitializer.kt" to (1 to 4)
+    )
+
+    /**
+     * 用 `try { … } catch (e: Exception)` 写法的那些文件 → 必须出现的 CE 重抛次数。
+     * （B9：infra 三个客户端是这种形态，改不动成 runCatchingCancellable。）
+     */
+    private val migratedViaRethrow = mapOf(
+        "infra/coldstart/src/main/java/com/naaammme/bbspace/infra/coldstart/ColdStartClient.kt" to 1,
+        "infra/network-grpc/src/main/java/com/naaammme/bbspace/infra/grpc/GaiaReporter.kt" to 1,
+        "infra/crypto/src/main/java/com/naaammme/bbspace/infra/crypto/TicketGenerator.kt" to 2
     )
 
     /** 刻意不收口的文件（必须留注释说明为什么，见类注释）。 */
@@ -46,7 +60,7 @@ class CancellationSweepGuardTest {
 
     @Test
     fun scannerActuallyReadsSources() {
-        for (rel in migrated.keys + deferred) {
+        for (rel in migrated.keys + migratedViaRethrow.keys + deferred) {
             assertTrue("找不到 $rel（路径变了要同步本测试，否则断言会永久空转）", file(rel).isFile)
         }
     }
@@ -69,6 +83,21 @@ class CancellationSweepGuardTest {
                     "要新增包裹挂起调用的 runCatching 请改 runCatchingCancellable；" +
                     "确实是非挂起代码才放宽，并在提交说明里写清楚。",
                 bare <= maxBare
+            )
+        }
+    }
+
+    /** try/catch 形态的文件必须把 CE 显式重抛出足够多处。 */
+    @Test
+    fun rethrowFormStaysRethrowing() {
+        for ((rel, minRethrow) in migratedViaRethrow) {
+            val code = codeOf(file(rel))
+            val rethrows = Regex("""catch\s*\(\s*e:\s*CancellationException\s*\)""").findAll(code).count()
+            val broadCatches = Regex("""catch\s*\(\s*e:\s*Exception\s*\)""").findAll(code).count()
+            assertTrue(
+                "$rel 现在有 $rethrows 处 `catch (e: CancellationException)`（登记下限 $minRethrow），" +
+                    "而宽 catch 有 $broadCatches 处 —— 少一处重抛就意味着某一处把取消当失败处理了。",
+                rethrows >= minRethrow && rethrows <= broadCatches
             )
         }
     }

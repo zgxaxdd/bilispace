@@ -7,6 +7,7 @@ import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.model.ColdStartData
 import com.naaammme.bbspace.core.model.IpInfo
 import com.naaammme.bbspace.infra.grpc.BiliGrpcClient
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -79,6 +80,10 @@ class ColdStartClient @Inject constructor(
             }
 
             return ColdStartData(ipInfo, null)
+        } catch (e: CancellationException) {
+            // 取消不是"获取冷启动数据失败"：DNS 回调晚到后再被取消时，
+            // 原来这条会把取消打成错误日志并返回空数据，掩盖真实故障也污染统计
+            throw e
         } catch (e: Exception) {
             Logger.e(TAG, e) { "获取冷启动数据失败" }
             return ColdStartData(null, null)

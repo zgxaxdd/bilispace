@@ -15,6 +15,7 @@ import com.google.protobuf.Empty
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.infra.crypto.GaiaEncryptor
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -118,6 +119,11 @@ class GaiaReporter @Inject constructor(
 
             Logger.i(TAG) { "上报成功 trace_id: ${reply.traceId}" }
             markUploaded()
+        } catch (e: CancellationException) {
+            // 取消不是"上报失败"（原来会把一次被取消的遥测打成错误日志）。
+            // 与 ST-06b 的区别：这里没有任何"已成功就要落账"的副作用需要保住，
+            // markUploaded 没执行 → 下次冷启动重新上报，是遥测可接受的行为。
+            throw e
         } catch (e: Exception) {
             Logger.e(TAG, e) { "上报失败" }
         }

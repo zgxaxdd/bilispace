@@ -194,7 +194,24 @@
   而非 `UP-TO-DATE`（`:core:common` FROM-CACHE，它是纯逻辑测试、不扫源码，可接受）
 - commit：`fix(core): 空降/离线弹幕的取消不再被当成失败`
 
-## 批次 B9 · （下一批）· ST-06 infra 半边
+## 批次 B9 · 2026-09-26 · ST-06 infra 半边（取消语义第二批）
+
+**分区**：A-稳定 P1｜**级别**：A 级｜**详情**：`report-2026-09-26-B9.md`
+
+- 收口 5 处 / 4 文件：`TicketGenerator`（后台刷新外层 + 重试循环内层，后者原本取消后还会继续
+  `delay()` 重试）、`ColdStartClient.getColdStartData`、`GaiaReporter.reportIfNeeded`、
+  `AppInitializer` 播放器预热。前三处是 `catch (e: Exception)` 形态 → 加 CE 重抛出口；
+  后一处换 `runCatchingCancellable`
+- 动手前实测 infra 各模块**已**依赖 `:core:common`，无需动依赖方向；
+  并按 B8 教训逐个确认这 5 处都**不是** ST-06b 那种"操作已成功、只剩记账"的反向案例
+- 守卫扩展 `rethrowFormStaysRethrowing`（按文件登记 CE 重抛次数下限 + "重抛数 ≤ 宽 catch 数"）
+- **守卫也咬了我自己一次**：`AppInitializer` 裸 runCatching 上限我拍了 0，实测 4 处 →
+  逐个读语义（3 处包非挂起代码，1 处挂起留给 ST-06 收尾）后才登记事实值 4
+- 破坏性验证：把 TicketGenerator 的 CE 出口换成别的异常类型 → `rethrowFormStaysRethrowing FAILED`；恢复后绿
+- commit：`fix(infra): ticket/冷启动/遥测/预热的取消不再被当成失败`
+
+## 批次 B10 · （下一批）· ST-01/ST-02 Room schema 可差分（或 ST-06 收尾）
+
 
 
 

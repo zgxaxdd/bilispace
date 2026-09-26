@@ -13,6 +13,7 @@ import com.naaammme.bbspace.core.common.BiliConstants
 import com.naaammme.bbspace.core.common.UserAgentBuilder
 import com.naaammme.bbspace.core.common.log.Logger
 import datacenter.hakase.protobuf.AndroidDeviceInfoOuterClass
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -101,6 +102,8 @@ class TicketGenerator(
             try {
                 refresh(mid, accessKey)
                 Logger.d(TAG) { "后台刷新 ticket 完成" }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logger.w(TAG) { "后台刷新 ticket 失败: ${e.message}" }
             } finally {
@@ -125,6 +128,10 @@ class TicketGenerator(
                     saveTicket(ticket.ticket, ticket.createdAt, ticket.ttl)
                     Logger.d(TAG) { "Ticket refreshed, ttl=${ticket.ttl}s" }
                     return@withLock ticket.ticket
+                } catch (e: CancellationException) {
+                    // 取消要从重试循环里直接出去：原来它会走 lastError 分支，
+                    // 取消被记成"Attempt N failed"并继续下一轮（下面还会 delay）
+                    throw e
                 } catch (e: Exception) {
                     lastError = e
                     if (attempt == MAX_RETRY) break
