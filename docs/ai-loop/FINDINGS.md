@@ -145,6 +145,9 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 本仓包名是 `com.naaammme.bbspace`（三个 m 三个 a 的拼法），我把测试建到了 `com/naammmee/` 下 ——
 **Kotlin 不强制目录等于包名**，于是它照样编译、9 条测试照样跑绿，躲过全部编译与测试门禁，
 只有 IDE 与"按包名定位源码"的工具会撞上了 `git mv` 归位。判据：新文件写完后 `find` 一次路径。
+**B19 补充**：第三次又犯（`ColdStartTiming.kt` 建到 `com/naammme/`），这次是
+`PackageDirectoryConsistencyTest` 在全量跑时红并报出两个路径 —— 这就是那条守卫的价值：
+**编译与测试对它都无感，只有专门写的守卫会拦**。所以"写完自己 find 一遍"和"有守卫兜着"两件事都要做。
 
 **W9 防假绿阈值要按实测基线定，不要拍脑袋。**
 `scannerActuallyReadsSources` 我凭"app 模块应该有不少文件"写了 `> 20`，实测 `app/src/main`

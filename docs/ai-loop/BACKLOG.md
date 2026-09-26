@@ -75,9 +75,9 @@
 
 | 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|
-| PF-01 | OkHttp 全局无 `connectTimeout`/`readTimeout`/`callTimeout` | `infra/network-http` | `NetworkModule.kt:60` 是仓库唯一 `OkHttpClient.Builder()`；`BiliDns.lookup(:186)` 在 `Dns.lookup` 里同步串三次 DoH，`Call.cancel()` 打不断 | **B**（超时值属手感/成功率权衡）| `connectTimeout` 可 A 级收紧（TCP 建连，不含传输）；**`callTimeout` 会砍断大文件下载与流式读，绝对不许盲加**。产出参数表 + L4 | 部分可做 |
+| PF-01 | OkHttp 全局无 `connectTimeout`/`readTimeout`/`callTimeout` | `infra/network-http` | `NetworkModule.kt:60` 是仓库唯一 `OkHttpClient.Builder()`；`BiliDns.lookup(:186)` 在 `Dns.lookup` 里同步串三次 DoH，`Call.cancel()` 打不断 | **B**（超时值属手感/成功率权衡）| **复核修正**：原写"全局无超时"字面成立但结论不对 —— OkHttp 有默认值（connect/read/write 各 10s，call 无上限），真实风险是"没写"带来的两件事：下一个人顺手补 `callTimeout`（会砍断下载与流式读）+ 升级时默认值漂移无人 review。本批把三个超时**显式写成与默认值相同的数字**（行为零变化）并加 `NetworkTimeoutGuardTest`（4 条：全仓只 1 个 Builder / 三个超时必须显式 / **出现 callTimeout 即红** / 不许设 0 且值在 1..60_000ms）。取值收紧属手感 → L4-21 | **部分完成(B19，数值待 L4-21)** |
 | PF-02 | 单文件 DASH 预取窗口固定 91536 字节，索引超出即起播失败 | `infra/player` | `SingleFileDashMediaSourceFactory.kt:198` TODO（"100 小时视频"）；B1 已让解析器不因盒头形态误判，窗口截断仍判 null | **B**（网络行为，需真实索引分布） | 先做探针日志量测真实索引大小分布，再谈扩窗口；不许猜 | 待办（需真机/抓包） |
-| PF-03 | 冷启动链路不可测量 | `infra/coldstart` | T3 遗留；`ColdStartClient.kt:82` 的 catch 还吞取消（并入 ST-06） | A（可测性，非新功能） | 输出可解析的阶段耗时日志 + 一个 JVM 侧的耗时口径单测 | 待办 |
+| PF-03 | 冷启动链路不可测量 | `infra/coldstart` | T3 遗留；`ColdStartClient.kt:82` 的 catch 还吞取消（并入 ST-06） | A（可测性，非新功能） | 新增 `ColdStartTiming`：一行 key=value 的阶段耗时（build/grpc/parse/cache + total，超阈值标 `slow=1`），时钟注入所以能确定性测；取消/异常/空数据三条出口都出日志。`ColdStartTimingTest` 7 条（含接线检查） | **已关闭(B19)** |
 | PF-04 | 首屏预热路径 jank（稳态已达标，剩冷缓存 r1~r3 1.0~1.8%） | `feature/home` | 见记忆第二轮结论与 `docs/performance-baseline.md` | B | 需真机 A-B-A ≥5 轮中位，无设备不下结论 | 挂起 |
 | PF-05 | 文字选区 `getPathForRange` 在 `drawBehind` 里每次重绘都分配 `Path` | `core/designsystem` | `SelectableText.kt:106-110` | A（每帧分配，属 `ListAllocationStructureTest` 范畴） | 长文本拖动选择的 Path 分配计数守卫 | 待复核 |
 | PF-06 | 勋章拼图五个 `PolygonShape/StarShape` 在组合体内联构造 | `feature/user` | `UserCollageSection.kt:38-42` + `UserCollageCanvas.kt:147,195` 每次 `createOutline` 分配 `Path`/`Outline.Generic`；现有棘轮正则盖不到 `Path()` | A | `ListAllocationStructureTest` 扩计数字段（含 `Path(`/`Outline.Generic`），棘轮只降不升 | 待复核 |

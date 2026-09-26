@@ -418,7 +418,33 @@
   剩 ST-17/18/19/20/21（挂起或冻结）、ST-22（挂起）、ST-24/26/27 已关
 - commits：`fix(app)` 权限意图入单例 / `chore(hygiene)` BOM 清零 + 断言 / `docs(ai-loop)`
 
-## 批次 B19 · （下一批）· PF-01 connectTimeout + PF-03 冷启动可测
+## 批次 B19 · 2026-09-26 · PF-01 超时下纪律 + PF-03 冷启动阶段耗时口径
+
+**分区**：B-流畅｜**级别**：A 级·可机器判定（取值待真机）｜**详情**：`report-2026-09-26-B19.md`
+
+- **PF-01 复核修正**：BACKLOG 那句"全局无超时"字面对、结论不对 —— OkHttp 有默认值
+  （connect/read/write 各 10s，call 无上限）。真实风险是"没写"本身：
+  下一个人顺手补 `callTimeout` 会砍断下载与流式读；升级时默认值漂移没人 review。
+  做法是**显式写下与默认值相同的数字**（行为零变化）+ `NetworkTimeoutGuardTest` 4 条
+  （全仓只 1 个 Builder / 三个超时必须显式 / **出现 callTimeout 即红** / 不许 0 且值在 1..60_000ms）。
+  取值收紧 → L4-21，本批不动数字
+- **PF-03**：新增 `ColdStartTiming`（纯 JDK）—— 一行 `key=value` 阶段耗时
+  `coldstart outcome=ok build=… grpc=… parse=… cache=… total=…ms [slow=1]`，
+  时钟**注入**所以耗时算术能被确定性测（不是 sleep 一下看大于几毫秒），
+  取消/异常/空数据三条出口都出数据，`parse()` 就是"可解析"的定义、用往返测试钉住
+- 新增 11 条测：`ColdStartTimingTest`（7，含接线检查）+ `NetworkTimeoutGuardTest`（4）
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m7s`，**264 单测 / 0 失败 / 0 错误**（253 → +11）
+- 破坏性验证：加 `.callTimeout(30s)` + 删两个显式超时 → 两条断言红；
+  摘掉异常出口的 render → 接线检查红（"render 只有 2 处"）
+- **三条自我失误（如实留档）**：
+  ① **W8 第三次**：`ColdStartTiming.kt` 建到了 `com/naammme/`，这次是**自己的 ST-24 守卫**
+  在全量跑时红并报出两个路径 —— 正是那条守卫存在的理由（Kotlin 不校验目录=包名）；
+  ② **W10 第三次**：给 coldstart 的 build 文件加 `testImplementation` 时用了脚本改内容；
+  ③ 第一次改坏手法不对（整块删了 `ipInfo?.let{…}` 而不是摘那一次 render）——
+  **改坏要最小化，否则测的是另一件事**
+- commits：`fix(network)` 超时显式化 + 禁令守卫 / `feat(coldstart)` 耗时口径（属可测性非新功能）/ `docs(ai-loop)`
+
+## 批次 B20 · （下一批）· PF-05 SelectableText 每帧分配 Path + PF-06 勋章拼图 Shape 内联
 
 
 
