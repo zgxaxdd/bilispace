@@ -371,7 +371,32 @@
 - 真机确认：**L4-19**（清理不误删在用的缓存）、**L4-20**（删账号后 prefs 消失）
 - commits：`fix(download)` 孤儿 GC / `fix(im,auth,common)` 账号数据清理契约 / `docs(ai-loop)` 台账
 
-## 批次 B17 · （下一批）· ST-13 DownloadDao 事务 + ST-14 gRPC 帧长度域
+## 批次 B17 · 2026-09-26 · ST-13 入队竞态 + ST-14 gRPC 帧长度域
+
+**分区**：A-稳定 P1/P2｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B17.md`
+
+- **ST-13 危害经复核升级**：调用点 `DownloadViewModel.enqueue` 在 `viewModelScope.launch` 里
+  **没有 try/catch**，所以那句 `error(...)` 不是"文案不好看"，是一次崩溃
+- 修法：`@Transaction insertAndFind` 把插入与冲突回读装进同一个写事务，返回结构化
+  `DownloadEnqueueOutcome(taskId, created)`；仍不一致时重试插入 → 回读 → 才返回新增的
+  `VideoDownloadEnqueueResult.Conflict`，界面文案与"任务已存在"分开（后者一条都没进队列）
+- **ST-14 复核成立**：`encode` 写了 4 字节长度、`decode` 却 `copyOfRange(5,size)` 丢掉它，
+  截断帧被当完整 payload 交给 protobuf/gzip，抛的是不带协议语义的 ISE/ZipException。
+  现在按声明长度取载荷，三类坏帧一律 `BiliApiException`；长度域**按无符号解释**
+  （用 Int 拼时最高位为 1 会读成负数，"声明 > 可用"被负数绕过 → 坏帧反而通过）
+- 新增 12 条测：`GrpcFrameCodecTest`（9，含阈值两侧 0/1/999/1000/1001/4096/70000 的往返）
+  + `DownloadEnqueueRaceGuardTest`（3，结构守卫）
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m31s`，**252 单测 / 0 失败 / 0 错误**（240 → +12）
+- 破坏性验证三组都咬：decode 退回旧的 copyOfRange → 3 条红；摘 `@Transaction` → 红；
+  Conflict 改回 `error(...)` → 红。**W17 第三次兑现**：第一轮构建在 grpc 模块就中断，
+  download 的测试根本没跑 —— 因为跑前删了 test-results，目录不存在直接暴露了这件事
+- 自我失误如实记：改 DAO 时误删 `observeAll()` 的 `@Query`，KSP 当场拒绝
+  （注解丢失由编译期兜住，不需要额外守卫；但说明"整块替换 DAO 文件"是高风险动作）
+- 未做：不加"全仓禁止 error()"通配禁令（W18）；gzip 解压失败仍抛 ZipException（上层按网络
+  失败处理是对的），不扩大改动面
+- commits：`fix(download)` 入队事务化 / `fix(grpc)` 帧长度域 / `test` 12 条 / `docs(ai-loop)`
+
+## 批次 B18 · （下一批）· ST-25 BOM 清理 + ST-15/22/23 重新定级
 
 
 

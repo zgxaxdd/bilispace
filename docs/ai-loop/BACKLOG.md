@@ -58,8 +58,8 @@
 
 | 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|
-| ST-13 | `DownloadDao` 是唯一无 `@Transaction` 的 DAO，读-改-写竞态会抛裸 ISE | `core/download` | `VideoDownloadDao.kt` 整文件；`VideoDownloadRepository.kt:86-103` 有字面 `error("下载任务已存在但未找到记录")` | A | 守卫：`core/download` 多语句写路径必须落到 `@Transaction` | 待复核 |
-| ST-14 | gRPC 编解码丢掉自己写的长度域，畸形帧报 ISE 而非 `BiliApiException` | `infra/network-grpc` | `GrpcFrameCodec.kt:71-91`（`encode` 写 4 字节长度、`decode` 直接 `copyOfRange(5,size)`）；截断帧被当 protobuf 解 | A | JVM 属性测：`decode(encode(x))==x`；长度不符必须抛 `BiliApiException` | 待复核 |
+| ST-13 | ~~`DownloadDao` 是唯一无 `@Transaction` 的 DAO，读-改-写竞态会抛裸 ISE~~ | `core/download` | 已修（B17），**危害经复核升级**：`DownloadViewModel.enqueue` 的调用点在 `viewModelScope.launch` 里**没有 try/catch**，所以那句 `error(...)` 不是文案问题，是一次崩溃。现在插入+冲突回读进同一个 `@Transaction`（SQLite 串行化写事务，中间插不进并发 delete），返回 `DownloadEnqueueOutcome(taskId, created)`；仍不一致时先重试插入、再回读，最后才返回新增的 `Conflict` 变体，界面文案与"已存在"区分 | A | `DownloadEnqueueRaceGuardTest`（3 条：`@Transaction` 在 / 那句 `error` 没回来 / 界面处理了 Conflict）。刻意不写"全仓禁止 error()"——它在不可达分支与前置校验里是正当写法（W18） | **已关闭(B17)** |
+| ST-14 | ~~gRPC 编解码丢掉自己写的长度域，畸形帧报 ISE 而非 `BiliApiException`~~ | `infra/network-grpc` | 已修（B17）：按声明长度取载荷，帧过短 / 声明>可用 / 声明压缩却无 `grpc-encoding` 一律 `BiliApiException`。长度域按**无符号**解释 —— 用 Int 拼时最高位为 1 会读成负数，"声明 > 可用"就被负数绕过，坏帧反而通过 | A | `GrpcFrameCodecTest`（9 条纯 JVM：往返、阈值两侧 0..70000、帧头声明值、截断、过短、最高位长度、尾随字节、无头压缩帧、空载荷） | **已关闭(B17)** |
 | ST-15 | 单例里的 `CoroutineScope(SupervisorJob())` 无取消路径 | `app/playback` | `CapsuleIndicatorState.kt:43,52`、`PlaybackHostState.kt:44,72`（今日因 `@Singleton` 而安全，改作用域即变泄漏） | A | 记录为设计约束；若 ST-03 改动牵涉则一并补 `close()` | 待复核 |
 | ST-16 | `AppSettings.readResponsePrefix` 里 `response.body ?:` 恒假分支 | `infra/player` | `SingleFileDashMediaSourceFactory.kt:220` 编译警告（OkHttp 5 body 非空） | A | 死分支删除 + 编译警告数不上升 | 待办 |
 | ST-17 | 免流/元数据 `BiliMetadataBuilder` 的 type/oid 仍按静态值 | `infra/network-http` | `BiliMetadataBuilder.kt:117` TODO | — | **需网络行为验证，无设备不做**：转 L4/决策产物 | 挂起 |
