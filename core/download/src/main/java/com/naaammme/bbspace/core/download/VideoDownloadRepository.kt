@@ -104,12 +104,33 @@ class VideoDownloadRepository @Inject constructor(
     suspend fun enqueue(request: VideoDownloadRequest): VideoDownloadEnqueueResult {
         val now = System.currentTimeMillis()
         val entity = request.toEntity(createdAtMs = now)
-        val insertedId = dao.insertIgnore(entity)
-        if (insertedId > 0L) {
-            ensureDrain()
-            return VideoDownloadEnqueueResult.Enqueued(insertedId)
-        }
         val key = request.key()
+        val outcome = dao.insertAndFind(
+            task = entity,
+            biz = key.biz,
+            aid = key.aid,
+            cid = key.cid,
+            epId = key.epId,
+            seasonId = key.seasonId,
+            kind = request.kind.name
+        )
+        when {
+            outcome.created -> {
+                ensureDrain()
+                return VideoDownloadEnqueueResult.Enqueued(outcome.taskId)
+            }
+
+            outcome.taskId > 0L -> return VideoDownloadEnqueueResult.AlreadyExists(outcome.taskId)
+        }
+        // taskId = -1：事务里冲突却又查不到行，只可能是极窄的并发删除窗口。
+        // 此时行已删干净，重试一次插入应当成功；再失败就回读，仍没有才认"状态冲突"。
+        // 这里绝不 error(...)：调用点在 viewModelScope.launch 里没有 try/catch，
+        // 一次并发删除会变成崩溃（ST-13 的真实危害）。
+        val retryId = dao.insertIgnore(entity)
+        if (retryId > 0L) {
+            ensureDrain()
+            return VideoDownloadEnqueueResult.Enqueued(retryId)
+        }
         val existingId = dao.findExistingId(
             biz = key.biz,
             aid = key.aid,
@@ -117,8 +138,12 @@ class VideoDownloadRepository @Inject constructor(
             epId = key.epId,
             seasonId = key.seasonId,
             kind = request.kind.name
-        ) ?: error("下载任务已存在但未找到记录")
-        return VideoDownloadEnqueueResult.AlreadyExists(existingId)
+        )
+        return if (existingId != null) {
+            VideoDownloadEnqueueResult.AlreadyExists(existingId)
+        } else {
+            VideoDownloadEnqueueResult.Conflict
+        }
     }
 
 suspend fun pause(taskId: Long) {

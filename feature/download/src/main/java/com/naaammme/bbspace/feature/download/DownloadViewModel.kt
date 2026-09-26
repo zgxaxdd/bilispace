@@ -329,6 +329,11 @@ class DownloadViewModel @Inject constructor(
                 is VideoDownloadEnqueueResult.AlreadyExists -> {
                     setError("任务已存在")
                 }
+
+                VideoDownloadEnqueueResult.Conflict -> {
+                    // 不抛、也不说"已存在"：这条任务其实没进队列，让用户重试才是对的
+                    setError("下载状态刚发生变化，请再试一次")
+                }
             }
         }
     }

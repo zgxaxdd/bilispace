@@ -130,6 +130,14 @@ sealed interface VideoDownloadEnqueueResult {
     data class AlreadyExists(
         val taskId: Long
     ) : VideoDownloadEnqueueResult
+
+    /**
+     * 唯一约束冲突却查不到对应行（并发删除的窄窗口），重试后仍不一致。
+     * 单列一个变体而不是抛异常，也不是伪装成"任务已存在"——
+     * 那时用户会以为队列里真有一条重复任务，而实际是一条都没有（ST-13）。
+     */
+    @Immutable
+    data object Conflict : VideoDownloadEnqueueResult
 }
 
 sealed interface VideoDownloadProgress {
