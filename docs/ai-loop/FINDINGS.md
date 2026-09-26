@@ -239,3 +239,12 @@ B15 给 `ImageSaver` 加协议判定时，我按具体 message 断言 `content:/
 **推论**：凡是依赖 JDK/Android 差异的分支（URL 协议、`MimeTypeMap`、`InetAddress` 解析、
 时区/本地化），测试断言"结果属于哪一类受控失败"（异常类型 + 绝不出现内部类型名字样），
 而不是"命中了哪一行"。否则同一个测试在 JVM 绿、在真机红，或反过来。
+
+**W20 扫源码的"接线断言"要匹配调用本身，不要匹配名字 —— 定义行也是一处匹配。**
+B16 第一版写成 `code.indexOf("sweepOrphanTaskDirsSafely()") > 0`，
+而它**匹配到了 `private suspend fun sweepOrphanTaskDirsSafely() {` 那行函数定义**。
+把 init 里的调用整行删掉这种回归，实测照样 BUILD SUCCESSFUL —— 守卫从头到尾没看过调用点。
+修法：`Regex("""(?m)^\s*名字\(\)\s*$""")`，即"独占一行、前面不挂 `fun`、行尾不带 `{`"，
+并额外断言调用点的**顺序**（必须在 recover 之后、drain 之前）。
+**推论**：任何"某处必须调用 X"的守卫，都要用"把 X 的调用删掉"来验证，而不是"把 X 的实现改坏"；
+后者往往还有类型/编译期兜底，前者只有守卫自己。

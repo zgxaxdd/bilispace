@@ -344,7 +344,34 @@
 - Toast 文案与 TalkBack 行为只能真机看 → **L4-18**
 - commits：`fix(listen,common)` 两处收口 + 8 条测试 / `docs(ai-loop)` 台账
 
-## 批次 B16 · （下一批）· ST-11 下载孤儿目录 GC + ST-12 IM prefs 随账号回收
+## 批次 B16 · 2026-09-26 · ST-11 孤儿下载目录 GC + ST-12 账号缓存回收
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B16.md`
+
+- **ST-11 复核成立**，产生路径就写在 `delete()` 的 D1 注释里（drain 抢占窗口内 runTask 带着已删实体
+  继续 mkdirs 写完整个下载，终态 update 是静默 0 行 → 几百 MB 无主目录，启动恢复只按 DB 驱动）
+- 修法：纯函数 `sweepOrphanTaskDirs(root, liveTaskIds)`（只删"名字=规范 id + 是目录 + DB 无行"的
+  直接子项，认不出的一律不碰）+ DAO `allIds()` + 启动路径 **fail closed** 调用
+  （`runCatchingCancellable` 拿不到 id 就 return，绝不把查询失败当成"没有任务"）
+- **ST-12 复核成立**：`AuthStore.removeAccount` 只删 auth 那两个 key，`IMFieldsCache$mid` 的
+  prefs xml 永久留在磁盘。依赖方向不许 auth→im（会成环），所以接口放 `core:common`
+  （`PerAccountDataCleaner`），实现由 core:im `@IntoSet` 多绑定；用 `deleteSharedPreferences`
+  而不是 `edit{clear()}`（后者文件还在）
+- **验收方式按实测改了**（不假装做到）：BACKLOG 原写"fake Context 的 JVM 测"，实际要 fake 的是
+  整套 `android.content.Context` 抽象类，本仓无 Robolectric 也无网可装 —— 巨型桩测的是桩不是 Android。
+  改成钉三件真会坏的事：缓存名字面量单一来源 / removeAccount 确实遍历且 @IntoSet 已绑定 / 依赖方向不许反
+- 新增 12 条测：`DownloadOrphanSweepTest`（6，真文件系统）+ `ImAccountCacheCleanupTest`（6）
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m30s`，**240 单测 / 0 失败 / 0 错误**（228 → +12）
+- 破坏性验证四处，**其中一次抓到守卫自己是假绿**：接线断言第一版用
+  `indexOf(函数名)`，匹配到了 `private suspend fun …() {` 的定义行，把 init 里的调用删掉照样绿；
+  改成"独占一行的调用"正则后才红 → 教训 **W20**。
+  另有一处"单一来源"规则查带闭引号的字面量，抓不住 `"IMFieldsCache$mid"` 这种插值变体 → 改成查前缀
+- 未做：GC 只在启动跑一次（定时触发只是延后几小时回收）；不改 `delete()` 的删行/删文件顺序
+  （D1/D11 已论证过，动它是高风险）
+- 真机确认：**L4-19**（清理不误删在用的缓存）、**L4-20**（删账号后 prefs 消失）
+- commits：`fix(download)` 孤儿 GC / `fix(im,auth,common)` 账号数据清理契约 / `docs(ai-loop)` 台账
+
+## 批次 B17 · （下一批）· ST-13 DownloadDao 事务 + ST-14 gRPC 帧长度域
 
 
 
