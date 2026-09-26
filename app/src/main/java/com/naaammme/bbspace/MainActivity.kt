@@ -95,6 +95,12 @@ class MainActivity : ComponentActivity() {
 
     private var pendingNotificationPermission = false
 
+    /**
+     * 挂到进程级单例 [hostState] 上的回调。存成字段是为了能在 onDestroy 里
+     * **按身份比对**清理：无条件置 null 会在重建时序下把新实例刚装好的回调清掉。
+     */
+    private val playbackUiStartedCallback: () -> Unit = { pendingNotificationPermission = true }
+
     private fun maybeRequestNotificationPermission() {
         val granted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.POST_NOTIFICATIONS
@@ -128,6 +134,18 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         tryRestoreVideoPage("onResume")
         maybeShowPendingNotificationPermission()
+    }
+
+    override fun onDestroy() {
+        // [hostState] 是 @Singleton，回调又是它上面的普通 var：不在这里清理，
+        // 已销毁的 MainActivity 就会被进程级单例连带 lambda 捕获的 this 一直持有 ——
+        // 后台播放时这个 Activity 可以销毁而不重建（进程靠播放活着），
+        // 泄漏的就是整棵 Compose 树 + ViewRootImpl。
+        // 按身份比对：重建时序下新实例可能已经装好它自己的回调，无条件置 null 会把它清掉。
+        if (hostState.onPlaybackUiStarted === playbackUiStartedCallback) {
+            hostState.onPlaybackUiStarted = null
+        }
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -178,7 +196,7 @@ class MainActivity : ComponentActivity() {
         // 播放开始（覆盖层展开 / 无缝详情 Activity 创建）只记标记；权限弹窗在
         // onResume/onWindowFocusChanged 且返回 morph 结束后才弹（见
         // maybeShowPendingNotificationPermission 的时序注释）
-        hostState.onPlaybackUiStarted = { pendingNotificationPermission = true }
+        hostState.onPlaybackUiStarted = playbackUiStartedCallback
         if (savedInstanceState == null) {
             autoCheckUpdate()
         }
