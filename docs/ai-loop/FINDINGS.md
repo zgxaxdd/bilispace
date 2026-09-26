@@ -118,6 +118,17 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 `SelectableText` 在 `drawBehind` 里 `getPathForRange` 都不报警。**棘轮的覆盖面 = 它真正会红的写法集合**，
 不是它的名字。
 
+**W8 新建源码文件后必须核对「目录 == 包名」，全绿不代表没错。**
+本仓包名是 `com.naaammme.bbspace`（三个 m 三个 a 的拼法），我把测试建到了 `com/naammmee/` 下 ——
+**Kotlin 不强制目录等于包名**，于是它照样编译、9 条测试照样跑绿，躲过全部编译与测试门禁，
+只有 IDE 与"按包名定位源码"的工具会撞上了 `git mv` 归位。判据：新文件写完后 `find` 一次路径。
+
+**W9 防假绿阈值要按实测基线定，不要拍脑袋。**
+`scannerActuallyReadsSources` 我凭"app 模块应该有不少文件"写了 `> 20`，实测 `app/src/main`
+只有 **19** 个 .kt（本仓是薄 app 模块，业务在 core/feature）→ 第一次跑就红。
+比阈值更容易空转的是"文件没读到"：所以除了数量，还要断言**目标文件名确实在扫描结果里**
+（`MainActivity.kt` / `PlaybackHostState.kt` 两个都必须在），否则后面的断言全是对空集合成立。
+
 ## 4.1 待修的"设计约束"类结论
 
 **D1 `@Singleton` 上的 `var callback` 必须有清理路径。**

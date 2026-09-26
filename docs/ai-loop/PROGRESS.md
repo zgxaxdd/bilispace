@@ -77,5 +77,21 @@
 - 顺带发现 4 处死代码/未消费真值源（UI-08 `materialTypography` 零调用、UI-09 `SecondaryLabelAAVariants`
   仅测试引用、UI-10 `IosDarkLiftedBackground` 零引用、ST-16 恒假 `?:` 分支）
 
-## 批次 B2 · 2026-09-26 · （进行中）ST-03 单例回调泄漏 Activity
+## 批次 B2 · 2026-09-26 · ST-03 单例回调泄漏已销毁的 MainActivity
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B2.md`
+
+- 复核：`MainActivity` 原本**没有 `onDestroy` 重写**，`@Singleton PlaybackHostState.onPlaybackUiStarted`
+  在 `onCreate` 赋值后永不清理 → 后台播放场景（Activity 销毁不重建）长期持有已死 Activity + Compose 树
+- 改动：回调提为 `private val playbackUiStartedCallback`；新增 `onDestroy` **按身份比对**清理；
+  新增 `SingletonCallbackLeakGuardTest`（4 条，通用那条从 `PlaybackHostState` 的声明反推，
+  以后再加这种回调忘记清理会直接红）
+- 验证：`BUILD SUCCESSFUL in 6m1s`，**178 单测 / 0 失败**（+4）
+- 破坏性验证：摘掉 `= null` → 两条断言转红；恢复后全绿
+- 自身失误并已修：B1 新测试的目录拼错（`com/naammmee`），因 Kotlin 不强制目录=包名而**躲过了全部门禁**，
+  `git mv` 归位（`bb0edd3a`）→ 教训入 FINDINGS W8
+- commit：`fix(app): 单例回调在 onDestroy 按身份比对清理`
+
+## 批次 B3 · 2026-09-26 · （待开始）ST-04 + ST-05 一次性资源未关闭
+
 

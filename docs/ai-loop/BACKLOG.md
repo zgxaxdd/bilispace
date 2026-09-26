@@ -29,7 +29,8 @@
 
 | 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|
-| ST-03 | `PlaybackHostState.onPlaybackUiStarted` 挂在 `@Singleton` 上从不清理 → 泄漏 Activity | `app` | `MainActivity.kt:181` 在 `onCreate` 里赋 `{ pendingNotificationPermission = true }`；后台播放时 MainActivity 可销毁不重建，单例长期持有其实例 | A | `onDestroy` 按身份比对清理（只清自己那条）；`PlaybackHostDismissGuardTest` 同款结构守卫 | 待办（B2） |
+| ST-03 | ~~`PlaybackHostState.onPlaybackUiStarted` 挂在 `@Singleton` 上从不清理 → 泄漏 Activity~~ | `app` | 已修：回调提为 `val` 字段 + `onDestroy` 按身份比对清理 | A | `SingletonCallbackLeakGuardTest`（4 条，通用条从真值源反推声明名） | **已关闭(B2, `fix(app)`)** |
+| ST-23 | 通知权限"待弹意图"存在 Activity 字段里，Activity 死了意图即丢 | `app` | B2 的取舍：`pendingNotificationPermission` 留在 MainActivity，清理回调后 `expand()` 不再记账 | A | 需先定语义（跨进程生存在本仓是否必要）；不急，B2 已保证不泄漏 | 待办（低优先） |
 | ST-04 | Geetest 验证码 `WebView` 无 `destroy()` | `feature/auth` | `GeetestDialog.kt:38` `AndroidView(factory={WebView(ctx)})` 无 `onDispose`；对照正确写法 `WebViewScreen.kt:187` | A | 结构守卫：`src/main` 内每个 `WebView(` 所在文件必须含 `onDispose` + `destroy()` | 待复核 |
 | ST-05 | `BuvidFetcher` 的 OkHttp Response 未关闭，早退路径漏连接 | `infra/crypto` | `BuvidFetcher.kt:77` `newCall().execute()` 未 `use`；三条早退 return + JSON 抛错都丢 body；冷启动必走，池仅 10 连接 | A | 守卫：`newCall(...).execute()` 必须在 `.use{}` 内 | 待复核 |
 | ST-06 | core/infra 仍有 10 处裸 `runCatching`/`catch(Exception)` 吞取消 | `core/sponsorblock` `core/comment` `core/live` `core/download` `infra/crypto` `infra/network-grpc` `infra/coldstart` `feature/bbspace` `app/AppInitializer` | `SponsorBlockClient.kt:53,107,123`、`OfflineDanmakuSession.kt:66`、`CommentRepository.kt:176`、`LiveRoomMessageRepository.kt:194`、`TicketGenerator.kt:104,128`、`ColdStartClient.kt:82`、`GaiaReporter.kt:121`、`BbSpaceScreen.kt:131`、`VideoDownloadRepository.kt:443`、`AppInitializer.kt:105` | A | 把 B4 的守卫从 `feature/*` ViewModel 扩到 core/infra 清单；逐条 `runCatchingCancellable` 或 `catch (CE) { throw CE }` | 待复核 |
