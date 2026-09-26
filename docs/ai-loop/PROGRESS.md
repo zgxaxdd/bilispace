@@ -318,7 +318,33 @@
 - 边界：行为差异只在"取消落在发送成功之后、写库完成之前"这个窗口 → **L4-17**
 - commits：`fix(comment,live): 记账跑在 NonCancellable 上` + 守卫升级 / `docs(ai-loop)` 台账
 
-## 批次 B15 · （下一批）· ST-09 dragFraction!! + ST-10 ImageSaver 的 CCE 逃出契约
+## 批次 B15 · 2026-09-26 · ST-09 听书进度条空值崩溃 + ST-10 图片地址受控失败
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B15.md`
+
+- **ST-09 复核成立且是真崩溃**：`Slider.onValueChangeFinished` 在无障碍 / IME 路径下可以在
+  一次 `onValueChange` 都没有时到达，那时 `dragFraction` 仍是 null；文件里两处 `!!` 只有
+  `displayMs` 那处外面包了判空，finished 那处没有 → 一触发就 KotlinNullPointerException
+- 修法：抽 `internal fun listenSeekTargetMs(fraction, durationMs): Long?`，两处共用；
+  没拖过就**不 seek**（而不是崩或跳到 0），顺带把 fraction 夹回 0..1。抽纯函数的真正收益是能上 JVM 测
+- **ST-10 严重度经复核下调**：唯一调用方 `PreviewImageGrid` 已把 `saveUrl` 整体包在 runCatching 里，
+  所以 CCE 不崩给用户；真正的用户可见伤害是它把 `err.message` **直接弹进 Toast** ——
+  用户看到的是一行 `…cannot be cast to java.net.HttpURLConnection`
+- 修法：新增 `openImageConnection`（非 http/https → "不支持的图片协议"；解析失败 → "无效的图片地址"
+  并保留 cause），连接建立移进 runCatching，`disconnect()` 从 `.also{}` 改成 try/finally
+- 新增 8 条纯 JVM 测：`ListenSeekTargetTest`（4）+ `ImageSaverUrlTest`（4）；
+  `content://` 那条踩到 **JVM 与 Android 的协议处理器差异**（JVM 根本没这个 handler），
+  断言改成"契约"而不是"分支" → 教训 **W19**
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m43s`，**228 单测 / 0 失败 / 0 错误**（220 → +8）
+- 破坏性验证：① 协议判定换回 `as HttpURLConnection` → 报"expected IllegalArgumentException
+  but was ClassCastException"（原缺陷形状复现）② 纯函数改成 `dragFraction ?: 0f` →
+  "expected null, but was:<0>"。**①的第一轮其实没跑到 listen**：构建在 :core:common 就中断,
+  我读了一分钟前的旧 XML —— W17 第二次兑现，之后改成先删 test-results、单模块跑、核对 `> Task`
+- 未做：不给"feature 层禁止 `!!`"加全仓守卫（存量不少，按 W18 第一天就红一片的禁令只会换来豁免）
+- Toast 文案与 TalkBack 行为只能真机看 → **L4-18**
+- commits：`fix(listen,common)` 两处收口 + 8 条测试 / `docs(ai-loop)` 台账
+
+## 批次 B16 · （下一批）· ST-11 下载孤儿目录 GC + ST-12 IM prefs 随账号回收
 
 
 

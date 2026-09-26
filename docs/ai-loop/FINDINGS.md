@@ -230,3 +230,12 @@ B9 上限拍 0 被打回，是同一件事的三个方向）。
 **正解**：把断言锚在缺陷那个调用上（本批 = `publishedRecordRepo.save(...)` 必须落在
 `withContext(NonCancellable) { runCatching { … } }` 里），文件级只用"按实测基线登记上限"的
 棘轮拦新增站点；上限旁边写明每个已存在站点为什么合法，否则下一个人只能靠猜。
+
+**W19 JVM 单测跑的是桌面 JDK 的协议处理器，不是 Android 的 —— 断言要写契约，不要写分支。**
+B15 给 `ImageSaver` 加协议判定时，我按具体 message 断言 `content://` 走"不支持的图片协议"，
+第一次跑就红：JVM 上根本没有 `content` 协议处理器，`URL(...)` 直接抛 `MalformedURLException`，
+走的是"无效的图片地址"那条；而 Android 有 handler，会返回一个非 Http 的 connection，
+才真的走"不支持的图片协议"。
+**推论**：凡是依赖 JDK/Android 差异的分支（URL 协议、`MimeTypeMap`、`InetAddress` 解析、
+时区/本地化），测试断言"结果属于哪一类受控失败"（异常类型 + 绝不出现内部类型名字样），
+而不是"命中了哪一行"。否则同一个测试在 JVM 绿、在真机红，或反过来。
