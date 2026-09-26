@@ -176,8 +176,21 @@ class VideoDetailActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // 本 Activity 是 singleTop：详情页里再点开一个视频（相关推荐 / UP 主投稿 / 评论区跳转）
+        // 走的是这条，而不是新的 onCreate —— 所以 onCreate 里那几件"打开新视频"必做的事
+        // 必须跟着一起重做，否则只有冷启动路径是对的。
+        //
+        // 顺序：先 consumeIntent 再 setIntent。consumeIntent 解析失败时**不会**登记任何字段，
+        // 但 setIntent 已经把 intent 换成一个带不了目标的 Intent，
+        // 之后任何再读 intent 的路径都会失真（表现为"新视频没换、旧视频也丢了"）。
+        if (!consumeIntent(intent)) return
         setIntent(intent)
-        consumeIntent(intent)
+        // onCreate 的同一件事：上一次返回动画遗留的延迟关停必须取消。
+        // PlaybackHostState.closeAfterReturnAnimation 的契约写明"期间重新打开视频由
+        // cancelPendingClose 取消，避免误杀新会话"，而那时等待收尾的 job 一旦落地，
+        // close 掉的就是**刚接管的这个会话**（无设备条件下的静态推导；真机复现路径见
+        // docs/ai-loop/L4-待真机清单.md L4-13）。
+        hostState.cancelPendingClose()
     }
 
     /**
