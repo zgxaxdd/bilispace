@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -33,11 +34,46 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** 设置镜像（SharedPreferences）文件名：首帧同步读用，见 [AppSettings.peekThemeConfigBlocking]。 */
+private const val SETTINGS_MIRROR_PREFS = "app_settings_mirror"
+
+/** 镜像是否写过完整快照的门闩键（不与任何 DataStore 键名冲突）。 */
+private const val MIRROR_READY_KEY = "__mirror_ready__"
+
 @Singleton
 class AppSettings @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
     private val defaultThemeConfig = ThemeConfig()
+
+    /**
+     * 镜像解析结果的进程内缓存（后台线程加载，首帧只读这个 volatile 字段）。
+     *
+     * 为什么不直接在首帧读 SharedPreferences：SP **首次**访问会在调用线程读盘 + 解析 XML，
+     * 而 `peekThemeConfigBlocking()` 恰好跑在首帧组合（主线程）。真机冷启动对照实测里，
+     * 那一步就是"优化后反而比基线慢 ~5%"的嫌疑来源 —— 预热线程不一定赢下与首帧的竞态。
+     * 改成后台线程整体加载、主线程读引用后，首帧成本是一个 volatile 读。
+     */
+    @Volatile
+    private var mirrorThemeConfig: ThemeConfig? = null
+
+    init {
+        // 预热：AppSettings 是 @Singleton，构造发生在 Application.onCreate 的 Hilt 注入链路上，
+        // 距离首帧组合有充足时间（实测百毫秒级），几乎不会输给竞态。
+        // 真输了也只是回退到带超时的 runBlocking 慢路径，不会更差。
+        Thread {
+            runCatching {
+                val sp = context.getSharedPreferences(SETTINGS_MIRROR_PREFS, Context.MODE_PRIVATE)
+                if (sp.getBoolean(MIRROR_READY_KEY, false)) {
+                    mirrorThemeConfig = buildThemeConfig(MirrorReader(sp))
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "settings-mirror-warmup"
+            start()
+        }
+    }
     private val defaultPlayerSettings = PlayerSettingsState()
     private val defaultBufferSettings = defaultPlayerSettings.buffer
     private val defaultPlaybackPrefs = defaultPlayerSettings.playback
@@ -77,37 +113,156 @@ class AppSettings @Inject constructor(
     private val playerControlsBlurKey = booleanPreferencesKey("player_controls_blur")
     private val playerControlsMaterialKey = stringPreferencesKey("player_controls_material")
 
-    val themeConfig: Flow<ThemeConfig> = context.appSettingsDataStore.data.map { prefs ->
-        ThemeConfig(
-            themeMode = prefs[themeModeKey]?.let { ThemeMode.valueOf(it) }
-                ?: defaultThemeConfig.themeMode,
-            seedColor = Color(prefs[seedColorKey] ?: defaultThemeConfig.seedColor.toArgb()),
-            useDynamicColor = prefs[useDynamicColorKey] ?: defaultThemeConfig.useDynamicColor,
-            paletteStyle = prefs[paletteStyleKey]?.let { PaletteStyle.valueOf(it) }
-                ?: defaultThemeConfig.paletteStyle,
-            swapBaseColors = prefs[swapBaseColorsKey] ?: defaultThemeConfig.swapBaseColors,
-            fontScale = prefs[fontScaleKey] ?: defaultThemeConfig.fontScale,
-            uiScale = prefs[uiScaleKey] ?: defaultThemeConfig.uiScale,
-            roundScreenSafePaddingScale = prefs[roundScreenSafePaddingScaleKey]
-                ?: defaultThemeConfig.roundScreenSafePaddingScale,
-            pullRefreshDistanceDp = prefs[pullRefreshDistanceKey]
-                ?: defaultThemeConfig.pullRefreshDistanceDp,
-            animationSpeed = prefs[animationSpeedKey]?.let { AnimationSpeed.valueOf(it) }
-                ?: defaultThemeConfig.animationSpeed,
-            transitionStyle = prefs[transitionStyleKey]?.let { TransitionStyle.valueOf(it) }
-                ?: defaultThemeConfig.transitionStyle,            isPureBlack = prefs[isPureBlackKey] ?: defaultThemeConfig.isPureBlack,
-            preferredFrameRate = prefs[frameRateModeKey]?.let { FrameRateMode.valueOf(it) }
-                ?: defaultThemeConfig.preferredFrameRate,
-            cornerStyle = prefs[cornerStyleKey]?.let { CornerStyle.valueOf(it) }
-                ?: defaultThemeConfig.cornerStyle,
-            // 兜底统一走 defaultThemeConfig：默认值只在 ThemeConfig 数据类定义一处，
-            // 将来翻转默认风格（MATERIAL → IOS）时本文件零改动。
-            uiStyle = prefs[uiStyleKey]?.let { UiStyle.valueOf(it) }
-                ?: defaultThemeConfig.uiStyle,
-            glassMaterial = resolveGlassMaterial(prefs),
-            glassStrength = prefs[glassStrengthKey] ?: defaultThemeConfig.glassStrength
-        )
-    }.distinctUntilChanged()
+    val themeConfig: Flow<ThemeConfig> = context.appSettingsDataStore.data
+        .map { prefs ->
+            // **首读即回填镜像**：镜像若只在写设置时创建，那么"从不改设置"的用户永远没有镜像，
+            // 每次冷启动都会走 `runBlocking` 兜底 —— 快路径形同虚设（真机冷启动对照实测发现）。
+            // DataStore 的每次读（首读 + 每次变更）都顺手刷一份快照，apply() 是异步落盘，
+            // 且与现有镜像一致时直接跳过写盘；map 之后的 distinctUntilChanged 保证下游不多发值。
+            persistSettingsMirror(prefs)
+            val config = buildThemeConfig(DataStoreReader(prefs))
+            // 同步刷新进程内缓存：详情页是独立 Activity、首帧会再次 peek，
+            // 缓存不跟着设置更新会让它在设置变更后短暂用旧主题。
+            mirrorThemeConfig = config
+            config
+        }
+        .distinctUntilChanged()
+
+    // ── 设置镜像：让「首帧主题 = 真实配置」不再需要在主线程 runBlocking ──────────
+    //
+    // 背景：主题首帧必须就是真实配置，否则第一帧按默认（MATERIAL/FROSTED）渲染、
+    // 第二帧才翻成用户配置 —— 界面风格、玻璃材质、配色整体闪一次。旧修法是在
+    // MainActivity / VideoDetailActivity 的**首次组合（主线程）**里
+    // `runBlocking { withTimeoutOrNull(300) { themeConfig.first() } }`，代价是主线程
+    // 阻塞至 DataStore IO 返回（上限 300ms），恰好压在冷启动与无缝打开的首帧上。
+    //
+    // 现在：所有写入经 [editSettingsMirrored] 同步写一份 SharedPreferences 快照，
+    // 首帧改读镜像（一次 mmap 小文件读，微秒级）。只有镜像缺失（升级后首启、
+    // 或数据被清）才回退那条带超时的慢路径 —— 那种情况下也必须回退，否则会闪主题。
+    //
+    // **所有写入必须过 editSettingsMirrored**：漏一处镜像就漂移，表现为下次启动主题不对。
+
+    /** 只读访问抽象：让「构造 ThemeConfig」这段逻辑同时服务 DataStore 与镜像，避免两处漂移。 */
+    private interface PrefReader {
+        fun str(name: String): String?
+        fun int(name: String): Int?
+        fun bool(name: String): Boolean?
+        fun float(name: String): Float?
+    }
+
+    private class DataStoreReader(
+        private val prefs: androidx.datastore.preferences.core.Preferences
+    ) : PrefReader {
+        override fun str(name: String): String? = prefs[stringPreferencesKey(name)]
+        override fun int(name: String): Int? = prefs[intPreferencesKey(name)]
+        override fun bool(name: String): Boolean? = prefs[booleanPreferencesKey(name)]
+        override fun float(name: String): Float? = prefs[floatPreferencesKey(name)]
+    }
+
+    private class MirrorReader(
+        private val sp: android.content.SharedPreferences
+    ) : PrefReader {
+        override fun str(name: String): String? = if (sp.contains(name)) sp.getString(name, null) else null
+        override fun int(name: String): Int? = if (sp.contains(name)) sp.getInt(name, 0) else null
+        override fun bool(name: String): Boolean? = if (sp.contains(name)) sp.getBoolean(name, false) else null
+        override fun float(name: String): Float? = if (sp.contains(name)) sp.getFloat(name, 0f) else null
+    }
+
+    /**
+     * ThemeConfig 的**唯一构造点**（DataStore 与镜像共用）。
+     *
+     * 枚举值解析加了 runCatching：坏值（手改/跨版本残留）不该让整个 flow 抛异常 ——
+     * 原实现在 `valueOf` 处是直接抛的，DataStore 里有一个脏字符串就会让主题流整体失效。
+     */
+    private fun buildThemeConfig(r: PrefReader): ThemeConfig = ThemeConfig(
+        themeMode = r.str(themeModeKey.name)?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.themeMode,
+        seedColor = Color(r.int(seedColorKey.name) ?: defaultThemeConfig.seedColor.toArgb()),
+        useDynamicColor = r.bool(useDynamicColorKey.name) ?: defaultThemeConfig.useDynamicColor,
+        paletteStyle = r.str(paletteStyleKey.name)?.let { runCatching { PaletteStyle.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.paletteStyle,
+        swapBaseColors = r.bool(swapBaseColorsKey.name) ?: defaultThemeConfig.swapBaseColors,
+        fontScale = r.float(fontScaleKey.name) ?: defaultThemeConfig.fontScale,
+        uiScale = r.float(uiScaleKey.name) ?: defaultThemeConfig.uiScale,
+        roundScreenSafePaddingScale = r.float(roundScreenSafePaddingScaleKey.name)
+            ?: defaultThemeConfig.roundScreenSafePaddingScale,
+        pullRefreshDistanceDp = r.float(pullRefreshDistanceKey.name)
+            ?: defaultThemeConfig.pullRefreshDistanceDp,
+        animationSpeed = r.str(animationSpeedKey.name)?.let { runCatching { AnimationSpeed.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.animationSpeed,
+        transitionStyle = r.str(transitionStyleKey.name)?.let { runCatching { TransitionStyle.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.transitionStyle,
+        isPureBlack = r.bool(isPureBlackKey.name) ?: defaultThemeConfig.isPureBlack,
+        preferredFrameRate = r.str(frameRateModeKey.name)?.let { runCatching { FrameRateMode.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.preferredFrameRate,
+        cornerStyle = r.str(cornerStyleKey.name)?.let { runCatching { CornerStyle.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.cornerStyle,
+        // 兜底统一走 defaultThemeConfig：默认值只在 ThemeConfig 数据类定义一处，
+        // 将来翻转默认风格（MATERIAL → IOS）时本文件零改动。
+        uiStyle = r.str(uiStyleKey.name)?.let { runCatching { UiStyle.valueOf(it) }.getOrNull() }
+            ?: defaultThemeConfig.uiStyle,
+        glassMaterial = resolveGlassMaterial(r),
+        glassStrength = r.float(glassStrengthKey.name) ?: defaultThemeConfig.glassStrength
+    )
+
+    /**
+     * 首帧同步读主题：**纯内存读**（[mirrorThemeConfig]，后台线程已加载），
+     * 不碰 DataStore、也不碰 SharedPreferences 文件。
+     *
+     * 返回 null 表示镜像还没加载好或不存在（升级后首启、清数据、竞态输掉），调用方应回退
+     * 带超时的慢路径 —— 这种情况下宁可阻塞一次，也不能让首帧主题闪一下。
+     */
+    fun peekThemeConfigBlocking(): ThemeConfig? = mirrorThemeConfig
+
+    /** 设置写入的**唯一收口**：写 DataStore 之后把快照同步写进镜像。 */
+    private suspend fun editSettingsMirrored(transform: suspend (MutablePreferences) -> Unit) {
+        val next = context.appSettingsDataStore.edit(transform)
+        persistSettingsMirror(next)
+    }
+
+    /**
+     * 把 DataStore 的**完整快照**写进镜像。
+     *
+     * 用 `clear()` + 回填而不是逐键覆盖：DataStore 里被 `remove` 的键必须从镜像里
+     * 消失（`resetAllSettings` 会 `clear()`），否则镜像会残留旧值。
+     * SharedPreferences 的 `clear()` 语义是"先清空再应用本次 put"，正好是快照语义。
+     *
+     * **与镜像一致时直接返回**：这条路径挂在 `themeConfig` 的读取上（每次冷启动首帧都会
+     * 走），不做判等就等于每次启动都白写一次盘。`sp.all` 是内存快照，判等是纯内存比较。
+     */
+    private fun persistSettingsMirror(prefs: androidx.datastore.preferences.core.Preferences) {
+        val sp = context.getSharedPreferences(SETTINGS_MIRROR_PREFS, Context.MODE_PRIVATE)
+        val next = LinkedHashMap<String, Any>(prefs.asMap().size)
+        for ((key, value) in prefs.asMap()) {
+            when (value) {
+                is String -> next[key.name] = value
+                is Int -> next[key.name] = value
+                is Boolean -> next[key.name] = value
+                is Float -> next[key.name] = value
+                is Long -> next[key.name] = value
+            }
+        }
+        val current = sp.all
+        val same = sp.getBoolean(MIRROR_READY_KEY, false) &&
+            current.size - 1 == next.size &&
+            next.all { (k, v) -> current[k] == v }
+        if (same) return
+        val editor = sp.edit()
+        editor.clear()
+        for ((k, v) in next) {
+            when (v) {
+                is String -> editor.putString(k, v)
+                is Int -> editor.putInt(k, v)
+                is Boolean -> editor.putBoolean(k, v)
+                is Float -> editor.putFloat(k, v)
+                is Long -> editor.putLong(k, v)
+            }
+        }
+        editor.putBoolean(MIRROR_READY_KEY, true)
+        // apply() 而非 commit()：写盘异步化，不占调用线程；崩溃丢一次快照的代价
+        // 只是下次启动多走一次慢路径（有超时兜底），可接受。
+        editor.apply()
+    }
 
     /**
      * 一次性迁移：把**旧默认值** `SHARED_AXIS_Z`（缩放）改写为新默认 `SHARED_AXIS_X`（左右滑动）。
@@ -126,8 +281,8 @@ class AppSettings @Inject constructor(
      *   用户在迁移之后手动改回 `SHARED_AXIS_Z` 不会被再次改写。
      */
     suspend fun migrateTransitionStyleDefaultIfNeeded() {
-        context.appSettingsDataStore.edit { prefs ->
-            if (prefs[transitionDefaultMigratedKey] == true) return@edit
+        editSettingsMirrored { prefs ->
+            if (prefs[transitionDefaultMigratedKey] == true) return@editSettingsMirrored
             if (prefs[transitionStyleKey] == TransitionStyle.SHARED_AXIS_Z.name) {
                 prefs[transitionStyleKey] = TransitionStyle.SHARED_AXIS_X.name
             }
@@ -136,90 +291,93 @@ class AppSettings @Inject constructor(
     }
 
     suspend fun updateThemeMode(mode: ThemeMode) {
-        context.appSettingsDataStore.edit { it[themeModeKey] = mode.name }
+        editSettingsMirrored { it[themeModeKey] = mode.name }
     }
 
     suspend fun updateSeedColor(color: Color) {
-        context.appSettingsDataStore.edit { it[seedColorKey] = color.toArgb() }
+        editSettingsMirrored { it[seedColorKey] = color.toArgb() }
     }
 
     suspend fun updateUseDynamicColor(use: Boolean) {
-        context.appSettingsDataStore.edit { it[useDynamicColorKey] = use }
+        editSettingsMirrored { it[useDynamicColorKey] = use }
     }
 
     suspend fun updatePaletteStyle(style: PaletteStyle) {
-        context.appSettingsDataStore.edit { it[paletteStyleKey] = style.name }
+        editSettingsMirrored { it[paletteStyleKey] = style.name }
     }
 
     suspend fun updateSwapBaseColors(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[swapBaseColorsKey] = enabled }
+        editSettingsMirrored { it[swapBaseColorsKey] = enabled }
     }
 
     suspend fun updateFontScale(scale: Float) {
-        context.appSettingsDataStore.edit { it[fontScaleKey] = scale }
+        editSettingsMirrored { it[fontScaleKey] = scale }
     }
 
     suspend fun updateUiScale(scale: Float) {
-        context.appSettingsDataStore.edit { it[uiScaleKey] = scale }
+        editSettingsMirrored { it[uiScaleKey] = scale }
     }
 
     suspend fun updateRoundScreenSafePaddingScale(scale: Float) {
-        context.appSettingsDataStore.edit { it[roundScreenSafePaddingScaleKey] = scale }
+        editSettingsMirrored { it[roundScreenSafePaddingScaleKey] = scale }
     }
 
     suspend fun updatePullRefreshDistance(distanceDp: Float) {
-        context.appSettingsDataStore.edit { it[pullRefreshDistanceKey] = distanceDp }
+        editSettingsMirrored { it[pullRefreshDistanceKey] = distanceDp }
     }
 
     suspend fun updateAnimationSpeed(speed: AnimationSpeed) {
-        context.appSettingsDataStore.edit { it[animationSpeedKey] = speed.name }
+        editSettingsMirrored { it[animationSpeedKey] = speed.name }
     }
 
     suspend fun updateTransitionStyle(style: TransitionStyle) {
-        context.appSettingsDataStore.edit { it[transitionStyleKey] = style.name }
+        editSettingsMirrored { it[transitionStyleKey] = style.name }
     }
 
     suspend fun updateIsPureBlack(isPure: Boolean) {
-        context.appSettingsDataStore.edit { it[isPureBlackKey] = isPure }
+        editSettingsMirrored { it[isPureBlackKey] = isPure }
     }
 
     suspend fun updateFrameRateMode(mode: FrameRateMode) {
-        context.appSettingsDataStore.edit { it[frameRateModeKey] = mode.name }
+        editSettingsMirrored { it[frameRateModeKey] = mode.name }
     }
 
     suspend fun updateCornerStyle(style: CornerStyle) {
-        context.appSettingsDataStore.edit { it[cornerStyleKey] = style.name }
+        editSettingsMirrored { it[cornerStyleKey] = style.name }
     }
 
     suspend fun updateUiStyle(style: UiStyle) {
-        context.appSettingsDataStore.edit { it[uiStyleKey] = style.name }
+        editSettingsMirrored { it[uiStyleKey] = style.name }
     }
 
     suspend fun updateGlassMaterial(material: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial) {
-        context.appSettingsDataStore.edit { it[glassMaterialKey] = material.name }
+        editSettingsMirrored { it[glassMaterialKey] = material.name }
     }
 
     suspend fun updateGlassStrength(strength: Float) {
-        context.appSettingsDataStore.edit { it[glassStrengthKey] = strength.coerceIn(0.5f, 2f) }
+        editSettingsMirrored { it[glassStrengthKey] = strength.coerceIn(0.5f, 2f) }
     }
 
     /**
      * 三档材质读取与旧值迁移（终版方案 3.1）：新 key 缺失时由旧两键推导——
      * 开+STABLE→FROSTED、开+RICH→LIQUID、关→OFF；全新安装默认 FROSTED。
+     *
+     * 入参是 [PrefReader] 而不是 DataStore 的 Preferences：镜像与 DataStore
+     * 必须走**同一套**取值与迁移逻辑，否则两条路径会算出不同的材质。
      */
     private fun resolveGlassMaterial(
-        prefs: androidx.datastore.preferences.core.Preferences
+        r: PrefReader
     ): com.naaammme.bbspace.core.designsystem.glass.GlassMaterial {
-        prefs[glassMaterialKey]?.let { raw ->
+        r.str(glassMaterialKey.name)?.let { raw ->
             return com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.entries
                 .firstOrNull { it.name == raw }
                 ?: defaultThemeConfig.glassMaterial
         }
         // 旧 key 缺失 = 从未设置过（新装 / 未开过玻璃）→ 采用新默认 FROSTED，
         // 不能把"从未设置"当"用户主动关闭"（AI 复核发现，属实）
-        val legacyEnabled = prefs[glassEnabledLegacyKey]
+        val legacyEnabled = r.bool(glassEnabledLegacyKey.name)
             ?: return defaultThemeConfig.glassMaterial
-        val legacyStyle = prefs[glassStyleLegacyKey]
+        val legacyStyle = r.str(glassStyleLegacyKey.name)
         return when {
             !legacyEnabled ->
                 com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.OFF
@@ -276,58 +434,58 @@ class AppSettings @Inject constructor(
     val interestDone: Flow<Boolean> = context.appSettingsDataStore.data.map { it[interestDoneKey] ?: false }
 
     suspend fun updateHdFeed(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[hdFeedKey] = enabled }
+        editSettingsMirrored { it[hdFeedKey] = enabled }
     }
 
     suspend fun updatePersonalizedRcmd(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[personalizedRcmdKey] = enabled }
+        editSettingsMirrored { it[personalizedRcmdKey] = enabled }
     }
 
     suspend fun updateLessonsMode(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[lessonsModeKey] = enabled }
+        editSettingsMirrored { it[lessonsModeKey] = enabled }
     }
 
     suspend fun updateTeenagersMode(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[teenagersModeKey] = enabled }
+        editSettingsMirrored { it[teenagersModeKey] = enabled }
     }
 
     suspend fun updateTeenagersAge(age: Int) {
-        context.appSettingsDataStore.edit { it[teenagersAgeKey] = age.coerceIn(MIN_TEENAGERS_AGE, MAX_TEENAGERS_AGE) }
+        editSettingsMirrored { it[teenagersAgeKey] = age.coerceIn(MIN_TEENAGERS_AGE, MAX_TEENAGERS_AGE) }
     }
 
     suspend fun updateAutoCheckEnabled(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[autoCheckUpdateKey] = enabled }
+        editSettingsMirrored { it[autoCheckUpdateKey] = enabled }
     }
 
     suspend fun updateUseSystemDns(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[useSystemDnsKey] = enabled }
+        editSettingsMirrored { it[useSystemDnsKey] = enabled }
     }
 
     suspend fun updateFixBottomBar(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[fixBottomBarKey] = enabled }
+        editSettingsMirrored { it[fixBottomBarKey] = enabled }
     }
 
     suspend fun updateTopProgressiveFade(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[topProgressiveFadeKey] = enabled }
+        editSettingsMirrored { it[topProgressiveFadeKey] = enabled }
     }
 
     suspend fun updatePlayerControlsBlur(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[playerControlsBlurKey] = enabled }
+        editSettingsMirrored { it[playerControlsBlurKey] = enabled }
     }
 
     suspend fun updatePlayerControlsMaterial(material: GlassMaterial) {
-        context.appSettingsDataStore.edit { it[playerControlsMaterialKey] = material.name }
+        editSettingsMirrored { it[playerControlsMaterialKey] = material.name }
     }
 
     suspend fun markInterestDone() {
-        context.appSettingsDataStore.edit { it[interestDoneKey] = true }
+        editSettingsMirrored { it[interestDoneKey] = true }
     }
 
     private val blockGaiaKey = booleanPreferencesKey("block_gaia")
     val blockGaia: Flow<Boolean> = context.appSettingsDataStore.data.map { it[blockGaiaKey] ?: false }
 
     suspend fun updateBlockGaia(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[blockGaiaKey] = enabled }
+        editSettingsMirrored { it[blockGaiaKey] = enabled }
     }
 
     // ===== 首页布局 =====
@@ -338,7 +496,7 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.data.map { it[homeFeedSingleColumnKey] ?: true }
 
     suspend fun setHomeFeedSingleColumn(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[homeFeedSingleColumnKey] = enabled }
+        editSettingsMirrored { it[homeFeedSingleColumnKey] = enabled }
     }
 
     // ===== 空降助手（SponsorBlock） =====
@@ -349,7 +507,7 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.data.map { it[sponsorBlockEnabledKey] ?: false }
 
     suspend fun updateSponsorBlockEnabled(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[sponsorBlockEnabledKey] = enabled }
+        editSettingsMirrored { it[sponsorBlockEnabledKey] = enabled }
     }
 
     private val sponsorBlockServerUrlKey = stringPreferencesKey("sponsor_block_server_url")
@@ -359,7 +517,7 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.data.map { it[sponsorBlockServerUrlKey] ?: "" }
 
     suspend fun updateSponsorBlockServerUrl(url: String) {
-        context.appSettingsDataStore.edit { it[sponsorBlockServerUrlKey] = url.trim() }
+        editSettingsMirrored { it[sponsorBlockServerUrlKey] = url.trim() }
     }
 
     private val sponsorBlockUserIdKey = stringPreferencesKey("sponsor_block_user_id")
@@ -378,12 +536,12 @@ class AppSettings @Inject constructor(
         val next = buildString {
             repeat(36) { append(charset[random.nextInt(charset.length)]) }
         }
-        context.appSettingsDataStore.edit { it[sponsorBlockUserIdKey] = next }
+        editSettingsMirrored { it[sponsorBlockUserIdKey] = next }
         return next
     }
 
     suspend fun regenerateSponsorBlockUserId(): String {
-        context.appSettingsDataStore.edit { it.remove(sponsorBlockUserIdKey) }
+        editSettingsMirrored { it.remove(sponsorBlockUserIdKey) }
         return ensureSponsorBlockUserId()
     }
 
@@ -411,7 +569,7 @@ class AppSettings @Inject constructor(
         val json = org.json.JSONObject().apply {
             types.forEach { (key, value) -> put(key, value) }
         }.toString()
-        context.appSettingsDataStore.edit { it[sponsorBlockCategoryTypesKey] = json }
+        editSettingsMirrored { it[sponsorBlockCategoryTypesKey] = json }
     }
 
     private val sponsorBlockToastKey = booleanPreferencesKey("sponsor_block_toast")
@@ -421,7 +579,7 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.data.map { it[sponsorBlockToastKey] ?: true }
 
     suspend fun updateSponsorBlockToast(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[sponsorBlockToastKey] = enabled }
+        editSettingsMirrored { it[sponsorBlockToastKey] = enabled }
     }
 
     private val sponsorBlockMarkersKey = booleanPreferencesKey("sponsor_block_markers")
@@ -431,7 +589,7 @@ class AppSettings @Inject constructor(
         context.appSettingsDataStore.data.map { it[sponsorBlockMarkersKey] ?: true }
 
     suspend fun updateSponsorBlockMarkers(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[sponsorBlockMarkersKey] = enabled }
+        editSettingsMirrored { it[sponsorBlockMarkersKey] = enabled }
     }
 
     private val enableHdrAnd8kKey = booleanPreferencesKey("enable_hdr_8k")
@@ -518,80 +676,80 @@ class AppSettings @Inject constructor(
     }.distinctUntilChanged()
 
     suspend fun updateEnableHdrAnd8k(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[enableHdrAnd8kKey] = enabled }
+        editSettingsMirrored { it[enableHdrAnd8kKey] = enabled }
     }
 
     suspend fun updateDefaultVideoQuality(quality: Int) {
-        context.appSettingsDataStore.edit { it[defaultVideoQualityKey] = quality }
+        editSettingsMirrored { it[defaultVideoQualityKey] = quality }
     }
 
     suspend fun updateDefaultAudioQuality(quality: Int) {
-        context.appSettingsDataStore.edit { it[defaultAudioQualityKey] = quality }
+        editSettingsMirrored { it[defaultAudioQualityKey] = quality }
     }
 
     suspend fun updateForceHost(value: Int) {
-        context.appSettingsDataStore.edit { it[forceHostKey] = value }
+        editSettingsMirrored { it[forceHostKey] = value }
     }
 
     suspend fun updateNeedTrial(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[needTrialKey] = enabled }
+        editSettingsMirrored { it[needTrialKey] = enabled }
     }
 
     suspend fun updatePreferredCodec(codec: Int) {
-        context.appSettingsDataStore.edit { it[preferredCodecKey] = codec }
+        editSettingsMirrored { it[preferredCodecKey] = codec }
     }
 
     suspend fun updateEnableWebPlayback(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[enableWebPlaybackKey] = enabled }
+        editSettingsMirrored { it[enableWebPlaybackKey] = enabled }
     }
 
     suspend fun setBufferProfile(profile: PlayerBufferProfile) {
-        context.appSettingsDataStore.edit { it[playerBufferProfileKey] = profile.ordinal }
+        editSettingsMirrored { it[playerBufferProfileKey] = profile.ordinal }
     }
 
     suspend fun setBackgroundPlayback(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[bgPlayKey] = enabled }
+        editSettingsMirrored { it[bgPlayKey] = enabled }
     }
 
     /** ColorOS 无缝过渡动画开关（默认开）；关闭退回覆盖层路径。 */
     suspend fun setSeamlessTransition(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[seamlessTransitionKey] = enabled }
+        editSettingsMirrored { it[seamlessTransitionKey] = enabled }
     }
 
     suspend fun setReportPlayback(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[reportPlaybackKey] = enabled }
+        editSettingsMirrored { it[reportPlaybackKey] = enabled }
     }
 
     suspend fun setPreferSoftwareDecode(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[preferSoftDecKey] = enabled }
+        editSettingsMirrored { it[preferSoftDecKey] = enabled }
     }
 
     suspend fun setDecoderFallback(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[decFallbackKey] = enabled }
+        editSettingsMirrored { it[decFallbackKey] = enabled }
     }
 
     suspend fun setAutoRotateFullscreen(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[autoRotateFullscreenKey] = enabled }
+        editSettingsMirrored { it[autoRotateFullscreenKey] = enabled }
     }
 
     suspend fun setGestureSpeed(speed: Float) {
-        context.appSettingsDataStore.edit { it[gestureSpeedKey] = speed.coerceIn(0.25f, 3f) }
+        editSettingsMirrored { it[gestureSpeedKey] = speed.coerceIn(0.25f, 3f) }
     }
 
     suspend fun setDoubleTapLike(enabled: Boolean) {
-        context.appSettingsDataStore.edit { it[doubleTapLikeKey] = enabled }
+        editSettingsMirrored { it[doubleTapLikeKey] = enabled }
     }
 
     suspend fun setRepeatMode(mode: PlayerRepeatMode) {
-        context.appSettingsDataStore.edit { it[repeatModeKey] = mode.name }
+        editSettingsMirrored { it[repeatModeKey] = mode.name }
     }
 
     suspend fun setVideoCdnMode(mode: VideoCdnMode) {
-        context.appSettingsDataStore.edit { it[videoCdnModeKey] = mode.name }
+        editSettingsMirrored { it[videoCdnModeKey] = mode.name }
     }
 
     suspend fun setDanmaku(config: DanmakuConfig) {
-        context.appSettingsDataStore.edit {
+        editSettingsMirrored {
             it[danmakuEnabledKey] = config.enabled
             it[danmakuAreaPercentKey] = config.areaPercent.coerceIn(25, 100)
             it[danmakuOpacityKey] = config.opacity.coerceIn(0.1f, 1f)
@@ -607,7 +765,7 @@ class AppSettings @Inject constructor(
     }
 
     suspend fun resetAllSettings() {
-        context.appSettingsDataStore.edit {
+        editSettingsMirrored {
             val interestDone = it[interestDoneKey] ?: false
             it.clear()
             if (interestDone) {
