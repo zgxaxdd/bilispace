@@ -299,7 +299,26 @@
 - 手法沉淀：**S7**（单例共享资源按物理事实建模所有权，别用引用计数粉饰）
 - commits：`fix(playback)` 仲裁器与接线 + 测试 / `docs(ai-loop)` 台账
 
-## 批次 B14 · （下一批）· ST-06b 两处 NonCancellable 记账收口
+## 批次 B14 · 2026-09-26 · ST-06b 两处 NonCancellable 记账收口
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B14.md`
+
+- 发评论 / 发直播弹幕之后的本地记账，从"刻意保留的裸 runCatching"升级为
+  `withContext(NonCancellable) { runCatching { save(…) } }`。判据不变（W14）：那时操作**已成功**，
+  传播取消会把成功的发送改判为失败，比原缺陷更伤用户；但留着裸的也不行，取消会顺手抹掉本地记录
+- 守卫 `deferredSitesKeepTheirExplanation` 从"注释还在就行"升级成三条：记账必须落在 NonCancellable 包里 /
+  未包站点按文件登记上限棘轮（comment 0、live 2）/ ST-06b 标记注释不许删
+- **第一版守卫写错并被自己的守卫打回**：我按文件一刀切要求"每个 runCatching 都要包住"，
+  它如实报出 JSON 解析与 `close()` 两处合法非挂起站点 → 规则改成锚在 `publishedRecordRepo.save(...)`
+  这个缺陷调用上，文件级只用棘轮拦新增。教训 **W18**
+- 破坏性验证三处（对应三条断言，改完即还原）：摘掉包装 → 报出未包住的 save 行号；
+  删注释 → 报"标记注释被删了"；加探针 runCatching → 报"3 处 > 登记上限 2"
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m15s`，**220 单测 / 0 失败 / 0 错误**
+  （测试数不变：本批是把既有守卫变强，没加新测试类）
+- 边界：行为差异只在"取消落在发送成功之后、写库完成之前"这个窗口 → **L4-17**
+- commits：`fix(comment,live): 记账跑在 NonCancellable 上` + 守卫升级 / `docs(ai-loop)` 台账
+
+## 批次 B15 · （下一批）· ST-09 dragFraction!! + ST-10 ImageSaver 的 CCE 逃出契约
 
 
 

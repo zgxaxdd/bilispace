@@ -220,3 +220,13 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 处置：`./gradlew --stop` → `tasklist` 确认无 java 进程 → 重跑即过（W12 的同类，都是"并发/残留构建"代价）。
 **顺带教训**：这一轮测试根本没跑，而我读的 `test-results` XML 是**上一轮留下的**，
 差点得出"守卫没咬"的错误结论。破坏性验证先看 `BUILD` 行、再看 XML 的 mtime，最后才读内容。
+
+**W18 守卫的规则要精确到「缺陷本身」，不要按文件一刀切。**
+B14 把 ST-06b 落成正解后，我第一版守卫写成"这两个文件里**每个** `runCatching` 都必须被
+NonCancellable 包住"—— 第一次跑就红，它如实报出 `runCatching { JSONObject(text) }`（JSON 解析）
+和 `runCatching { close() }` 两处**合法**的非挂起站点。
+按文件写禁令的结局一定是"加豁免"，而带豁免的守卫从此就是噪音（B6 改用前缀规则、
+B9 上限拍 0 被打回，是同一件事的三个方向）。
+**正解**：把断言锚在缺陷那个调用上（本批 = `publishedRecordRepo.save(...)` 必须落在
+`withContext(NonCancellable) { runCatching { … } }` 里），文件级只用"按实测基线登记上限"的
+棘轮拦新增站点；上限旁边写明每个已存在站点为什么合法，否则下一个人只能靠猜。
