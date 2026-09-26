@@ -28,7 +28,8 @@ import kotlinx.coroutines.launch
 @Singleton
 class DownloadPlaybackControllerImpl @Inject constructor(
     private val downloadRepository: VideoDownloadRepository,
-    private val playerEngine: PlayerEngine
+    private val playerEngine: PlayerEngine,
+    private val arbiter: PlayerEngineArbiter
 ) : DownloadPlaybackController {
 
     override val player: StateFlow<Player?> = playerEngine.player
@@ -84,6 +85,8 @@ class DownloadPlaybackControllerImpl @Inject constructor(
         }
         session.value = DownloadPlaybackSession(task = task, isPreparing = true)
         try {
+            // 先占再写：媒体一旦写进这台唯一的播放器，收尾责任就归本会话（含失败收尾）。
+            arbiter.claim(EngineHolder.DOWNLOAD)
             playerEngine.setSource(
                 source = task.toEngineSource(),
                 startPositionMs = 0L,
@@ -132,7 +135,11 @@ class DownloadPlaybackControllerImpl @Inject constructor(
 
     override fun release() {
         session.value = DownloadPlaybackSession()
-        playerEngine.release()
+        // 只有仍由本会话占用时才真的释放引擎：缓存页关页时若流会话已经接管这台播放器，
+        // 无条件 release() 会把别人正在播的东西一起拆掉（ST-07）。
+        if (arbiter.release(EngineHolder.DOWNLOAD)) {
+            playerEngine.release()
+        }
     }
 
     private fun VideoDownloadTask.toEngineSource(): EngineSource {

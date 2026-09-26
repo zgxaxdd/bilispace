@@ -78,7 +78,8 @@ class StreamPlaybackSessionImpl @Inject constructor(
     private val authProvider: AuthProvider,
     private val playbackHistoryRepo: PlaybackHistoryRepository,
     private val liveRepository: LiveRepository,
-    private val playerEngine: PlayerEngine
+    private val playerEngine: PlayerEngine,
+    private val arbiter: PlayerEngineArbiter
 ) : StreamPlaybackSession, VideoPlaybackController, LivePlaybackController {
 
     //  engine
@@ -211,6 +212,8 @@ class StreamPlaybackSessionImpl @Inject constructor(
         try {
             prepare()
             val source = liveRepository.fetchPlaybackSource(route.roomId, preferredQuality)
+            // 先占再写（与离线播放控制器共用这台播放器，见 PlayerEngineArbiter）
+            arbiter.claim(EngineHolder.STREAM)
             playerEngine.setSource(
                 source = EngineSource.LiveFlv(
                     url = source.primaryUrl,
@@ -430,6 +433,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
                     error = null
                 )
                 vodSession.value = playbackState.copy(isPreparing = true)
+                arbiter.claim(EngineHolder.STREAM)
                 playerEngine.setSource(
                     source = engineSource,
                     startPositionMs = startMs,
@@ -527,10 +531,12 @@ class StreamPlaybackSessionImpl @Inject constructor(
             danmakuSession.clear()
         }
         syncSessionState()
+        // 引擎所有权仲裁（ST-07）：缓存播放可能已经接管这台播放器，
+        // 非占用者既不能 release 也不能 stopForReuse，否则别人的在播会话被凭空拆掉。
         if (hasEngineMedia) {
             when {
-                releasePlayer -> playerEngine.release()
-                else -> playerEngine.stopForReuse(resetPosition = true)
+                releasePlayer -> if (arbiter.release(EngineHolder.STREAM)) playerEngine.release()
+                arbiter.isHolder(EngineHolder.STREAM) -> playerEngine.stopForReuse(resetPosition = true)
             }
         }
 
@@ -611,6 +617,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
         runtimeScope.launch {
             try {
                 if (openId.get() != token) return@launch
+                arbiter.claim(EngineHolder.STREAM)
                 playerEngine.setSource(
                     source,
                     currentPlaybackPositionMs(),
@@ -873,8 +880,11 @@ class StreamPlaybackSessionImpl @Inject constructor(
         _currentTarget.value = null
         _liveState.value = LivePlaybackViewState()
         if (hadLive) {
-            if (releasePlayer) playerEngine.release()
-            else playerEngine.stopForReuse(resetPosition = true)
+            // 同 finishVideoPlayback：直播收尾只在仍是占用者时才动引擎（ST-07）。
+            when {
+                releasePlayer -> if (arbiter.release(EngineHolder.STREAM)) playerEngine.release()
+                arbiter.isHolder(EngineHolder.STREAM) -> playerEngine.stopForReuse(resetPosition = true)
+            }
         }
         syncSessionState()
     }
