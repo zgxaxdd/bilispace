@@ -2,6 +2,10 @@ package com.naaammme.bbspace.playback.capsule
 
 import androidx.compose.runtime.mutableStateOf
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
 import com.naaammme.bbspace.infra.player.PlayerEngine
 import javax.inject.Inject
@@ -24,13 +28,35 @@ class CapsuleIndicatorState @Inject constructor(
     private val playbackSession: StreamPlaybackSession,
     playerEngine: PlayerEngine
 ) {
+
     /** 会话快照：标题 / UP 名 / 封面 / 播放态（含 PlaybackState.Ended 自然结束）。 */
     val sessionState = playbackSession.sessionState
 
     /** 播放进度（positionMs / durationMs），引擎 StateFlow 直供，零轮询。 */
     val progress = playerEngine.playbackProgress
 
+    // 注意初始化顺序：此字段必须先于下方 init 块——init 内的 StateFlow collect
+    // 会在构造期间（Main.immediate 同步派发）立即发射当前值并写 _active，
+    // 放在 _active 声明之前就是 NPE（ParcelableSnapshotMutableState 未初始化）。
     private val _active = mutableStateOf(false)
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    init {
+        // 审查 D7：active 只被 deactivate()/dismissAndStop() 复位，而会话可被
+        // 三类外部路径关闭——直播打开（openLive 不经过 deactivate）、通知栏划掉
+        // （PlaybackService.onNotificationCancelled → session.close）、上滑清任务
+        // （onTaskRemoved）。此后小横条以空会话僵在 Dock 上（标题空、点开无效）。
+        // 规则收敛为：会话目标不是视频（含空/直播）时 active 必然复位——与
+        // activateForVideoTarget 只对视频激活的语义互为镜像。
+        scope.launch {
+            playbackSession.currentTarget.collect { target ->
+                if (target !is StreamPlaybackTarget.Video) {
+                    _active.value = false
+                }
+            }
+        }
+    }
 
     /** 横条是否激活（Hidden=false）；等价于官方 Dock 的 `hasAudio`。 */
     val active: Boolean

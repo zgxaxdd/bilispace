@@ -117,4 +117,13 @@ class PlaybackHostViewModel @Inject constructor(
         shouldResumeAfterBackgroundPause = false
         hostState.close()
     }
+
+    /**
+     * 收起视频页但保留播放（胶囊承接）。
+     * 与 [close] 的区别见 [PlaybackHostState.collapseToCapsule]：必须显式收起页面，
+     * 不能因为"胶囊接管了播放"就当作已收起。
+     */
+    fun collapseToCapsule() {
+        hostState.collapseToCapsule()
+    }
 }

@@ -79,6 +79,7 @@ class PlaybackHostState @Inject constructor(
     }
 
     fun expand() {
+        onPlaybackUiStarted?.invoke()
         cancelPendingClose()
         isUserClosedVideo = false
         _hostMode.value = PlaybackHostMode.Expanded
@@ -89,6 +90,26 @@ class PlaybackHostState @Inject constructor(
         isUserClosedVideo = true
         _hostMode.value = PlaybackHostMode.Hidden
         playbackSession.close()
+    }
+
+    /**
+     * 收起视频页但**保留播放会话**（胶囊/小横条承接播放）。
+     *
+     * 与 [close] 的唯一区别是不关停播放；与"什么都不做"的区别是它**真的收起页面**。
+     * 这两件事此前被混为一谈：`CapsuleIndicatorState.activateForVideoTarget()` 只回答
+     * "是否由胶囊接管播放"（目标是 Video 即返回 true），调用方却把 true 当成"收起已完成"，
+     * 于是视频目标下返回键整条被吞、hostMode 永远停在 Expanded（真机复现：后台回收详情页后
+     * 由自愈路径展开覆盖层，返回键失效、无法回到推荐页）。
+     *
+     * [isUserClosedVideo] 必须置位：胶囊接管后 `currentTarget` 仍是 Video，而覆盖层路径下
+     * `videoDetailAlive` 恒为 false —— 不标记"用户主动收起"，`MainActivity.tryRestoreVideoPage`
+     * 的自愈逻辑会在下一次 onResume/onWindowFocusChanged 把页面重新拉起，形成
+     * 「返回 → 自愈 → 再拉起」的死循环。
+     */
+    fun collapseToCapsule() {
+        cancelPendingClose()
+        isUserClosedVideo = true
+        _hostMode.value = PlaybackHostMode.Hidden
     }
 
     /**
@@ -125,8 +146,16 @@ class PlaybackHostState @Inject constructor(
 
     /** 详情 Activity 生命周期上报：实例创建（onCreate）。 */
     fun onVideoDetailStarted() {
+        onPlaybackUiStarted?.invoke()
         videoDetailAlive = true
     }
+
+    /**
+     * 播放 UI 开始展示（覆盖层 [expand] / 详情 Activity 创建）时的一次性回调。
+     * 供 MainActivity 挂「首次开始播放」级副作用（如通知权限请求）；
+     * 两条打开路径都会经过，多次触发由调用方自行去重。
+     */
+    var onPlaybackUiStarted: (() -> Unit)? = null
 
     /** 详情 Activity 生命周期上报：实例销毁（onDestroy）。 */
     fun onVideoDetailStopped() {

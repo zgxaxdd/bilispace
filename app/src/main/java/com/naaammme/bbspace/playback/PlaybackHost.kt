@@ -2,9 +2,9 @@ package com.naaammme.bbspace.playback
 
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExitTransition.Companion.None as ExitNone
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +21,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.util.UnstableApi
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandGhost
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
+import com.naaammme.bbspace.core.designsystem.seamless.coverExpandMorphSpec
 import com.naaammme.bbspace.core.designsystem.seamless.sharedContentKey
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -69,8 +70,15 @@ fun PlaybackHost(
     // 动效统一走主题 token（OPPO 动效规范：页面级入场 = 长时长 + 强调曲线）。
     // 详情本体在封面幽灵下方普通淡入；morph 运动由 CoverExpandGhost 承载。
     val anim = LocalAnimations.current
-    val videoEnterSpec =
-        fadeIn(animationSpec = tween(durationMillis = anim.long, easing = anim.emphasized))
+    // 与 CoverExpandGhost 的 morph **共用同一条时间线**（coverExpandMorphSpec）：
+    // 早先幽灵走硬编码 spring、这里走 tween，时长互不相干 —— 幽灵还在半空、页面已显形，
+    // 读作两层画面错位（真机反馈"过渡观感非常奇怪"的来源之一）。
+    val videoEnterSpec = fadeIn(animationSpec = coverExpandMorphSpec(anim))
+    // 收起必须有出场动画：此前 exit = ExitTransition.None，返回时视频页一帧内消失、
+    // 胶囊/底栏突现。OPPO 上这由系统成对返回动画掩盖，其余设备就是生硬闪切。
+    val hostExitSpec = fadeOut(
+        animationSpec = tween(durationMillis = anim.medium, easing = anim.standard)
+    )
     val enterSpec =
         slideInHorizontally(
             animationSpec = tween(durationMillis = anim.long, easing = anim.emphasized)
@@ -80,7 +88,7 @@ fun PlaybackHost(
         AnimatedVisibility(
             visible = videoTarget != null && mode == PlaybackHostMode.Expanded,
             enter = videoEnterSpec,
-            exit = ExitNone
+            exit = hostExitSpec
         ) {
             VideoScreen(
                 onBack = onDismissExpanded,
@@ -96,7 +104,7 @@ fun PlaybackHost(
         AnimatedVisibility(
             visible = target is StreamPlaybackTarget.Live && mode == PlaybackHostMode.Expanded,
             enter = enterSpec,
-            exit = ExitNone
+            exit = hostExitSpec
         ) {
             LiveScreen(
                 onBack = onDismissExpanded,

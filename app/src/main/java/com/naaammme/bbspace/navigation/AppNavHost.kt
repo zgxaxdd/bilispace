@@ -173,18 +173,24 @@ fun AppNavHost(
     val videoViewModel: VideoViewModel = hiltViewModel()
     val liveViewModel: LiveViewModel = hiltViewModel()
     val hostMode = playbackHostViewModel.hostMode
-    var forcedDismissMode by remember { mutableStateOf<PlaybackHostMode?>(null) }
-    val playbackMode = when {
-        hostMode != PlaybackHostMode.Expanded -> hostMode
-        forcedDismissMode != null -> forcedDismissMode!!
-        else -> hostMode
-    }
     val closeVideoHost: () -> Unit = {
         playbackHostViewModel.close()
     }
+    /**
+     * 收起展开的播放页（返回键 / 页内导航共用）。
+     *
+     * 关键区分：`capsuleState.activateForVideoTarget()` 只回答"是否由胶囊接管播放"
+     * （目标是 Video 即返回 true），**不等于页面已收起**。早先把它的返回值当成收起完成，
+     * 于是视频目标下 `closeVideoHost()` 成了不可达分支、返回键被整条吞掉 —— 真机复现：
+     * 切后台几分钟后系统回收 VideoDetailActivity，回前台由自愈路径展开覆盖层，
+     * 此后无论如何按返回都回不到推荐页。现在两条路径都**显式收起**。
+     */
     val dismissPlaybackHost: () -> Unit = {
-        // 胶囊等价替换（方案 2.3）：视频目标 → 激活胶囊；直播/空目标 → 原关停
-        if (!playbackHostViewModel.capsuleState.activateForVideoTarget()) {
+        if (playbackHostViewModel.capsuleState.activateForVideoTarget()) {
+            // 胶囊承接播放：收起页面、保留会话；collapseToCapsule 内部会标记
+            // 「用户主动收起」，阻止 MainActivity 的自愈逻辑把页面再拉起来。
+            playbackHostViewModel.collapseToCapsule()
+        } else {
             when (playbackHostViewModel.currentTarget.value) {
                 is StreamPlaybackTarget.Video -> closeVideoHost()
                 is StreamPlaybackTarget.Live, null -> playbackHostViewModel.close()
@@ -193,11 +199,14 @@ fun AppNavHost(
     }
     val collapseExpandedPlayback = {
         if (hostMode == PlaybackHostMode.Expanded) {
-            // 胶囊承接播放（仅视频）；直播/空目标直接 Hidden
-            if (!playbackHostViewModel.capsuleState.activateForVideoTarget()) {
+            // 胶囊承接播放（仅视频）；直播/空目标直接关停。两种情况都必须真的收起页面
+            // —— 此前用局部 forcedDismissMode 假装收起，而 hostMode 永远停在 Expanded，
+            // 导致该 hack 无法复位：之后点小横条再 expand() 也是空操作，视频页打不开。
+            if (playbackHostViewModel.capsuleState.activateForVideoTarget()) {
+                playbackHostViewModel.collapseToCapsule()
+            } else {
                 playbackHostViewModel.close()
             }
-            forcedDismissMode = PlaybackHostMode.Hidden
         }
     }
     val openSpaceFromVideo: (SpaceRoute) -> Unit = { route ->
@@ -314,11 +323,9 @@ fun AppNavHost(
         )
     }
 
-    LaunchedEffect(hostMode, forcedDismissMode) {
-        if (forcedDismissMode != null && hostMode != PlaybackHostMode.Expanded) {
-            forcedDismissMode = null
-        }
-    }
+    // （原 forcedDismissMode 一次性 hack 已删除：它靠"假装收起"绕过 hostMode，
+    //  但 hostMode 不离开 Expanded 就永不复位，反而把小横条重新展开也挡死了。
+    //  现在收起一律走 PlaybackHostState.collapseToCapsule/close，hostMode 是唯一真值。）
 
     // 进程存活但 MainActivity 被系统重建（后台活动实例回收等）时，覆盖层路径的本地
     // 覆盖层展开时以会话目标校正本地页内导航栈：MainActivity 被系统重建后栈为空、
@@ -549,7 +556,7 @@ fun AppNavHost(
         }
 
         PlaybackHost(
-            mode = playbackMode,
+            mode = hostMode,
             playbackHostViewModel = playbackHostViewModel,
             onDismissExpanded = dismissPlaybackHost,
             onGoHome = goHomeFromVideo,
