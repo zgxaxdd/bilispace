@@ -396,7 +396,29 @@
   失败处理是对的），不扩大改动面
 - commits：`fix(download)` 入队事务化 / `fix(grpc)` 帧长度域 / `test` 12 条 / `docs(ai-loop)`
 
-## 批次 B18 · （下一批）· ST-25 BOM 清理 + ST-15/22/23 重新定级
+## 批次 B18 · 2026-09-26 · ST-25 BOM 清零 + ST-23 权限意图入单例 + ST-15 定为设计约束
+
+**分区**：A-稳定 P1/P2 收尾｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B18.md`
+
+- **ST-25**：4 个 BOM 文件实测仍在。危害不是编译，是**锚定行首的守卫静默失配**
+  （`^package` 读不到 → 前缀规则对该文件永久成立）。剥除方式：**只砍首 3 个字节**，
+  不整文件重写（两个 CRLF 两个 LF，整文件重写容易顺手改坏行尾与中文——正是 §2.3 第一条的动机），
+  前后各算 sha256 确认无损；新断言 `mainSourcesDoNotStartWithABom` 读首 3 字节而不是文本
+- **ST-23**：`notificationPromptPending` 从 Activity 字段挪进 `PlaybackHostState`（@Volatile，
+  **只存布尔量**，绝不存 Activity/回调 —— 那是 B2 刚修掉的泄漏形状）。
+  复核同时**下调了影响**：丢了下次后台播放会重新置位，是"这次不问"不是"再也不问"
+- **ST-15**：判定为**设计约束，刻意不加 close()** —— Android 没有"进程即将销毁"的可靠回调，
+  close() 得不到任何合法调用时机，只会变成死代码并让人误以为已处理；
+  改为在两处 KDoc 写约束（不许改成 Activity/ViewModel 作用域）
+- **ST-22 明确不做并写理由**：没有能判定 IME/无障碍输入态清理时机的回归测，差异只能真机观测，
+  属"以后少一类 bug"的重构，不在可验证改进范围内 → TODO 保留、标挂起
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 3m55s`，**253 单测 / 0 失败 / 0 错误**（252 → +1）
+- 破坏性验证：给 `SpaceViewModel.kt` 临时加回 BOM → 断言 FAILED；还原后 sha256 逐字节一致
+- **A-稳定区至此只剩挂起/冻结项**（需设备或涉线上行为）：ST-07b? 无；
+  剩 ST-17/18/19/20/21（挂起或冻结）、ST-22（挂起）、ST-24/26/27 已关
+- commits：`fix(app)` 权限意图入单例 / `chore(hygiene)` BOM 清零 + 断言 / `docs(ai-loop)`
+
+## 批次 B19 · （下一批）· PF-01 connectTimeout + PF-03 冷启动可测
 
 
 
