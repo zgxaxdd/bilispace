@@ -22,7 +22,6 @@ import androidx.media3.exoplayer.dash.manifest.Period
 import androidx.media3.exoplayer.dash.manifest.Representation
 import androidx.media3.exoplayer.dash.manifest.RangedUri
 import androidx.media3.exoplayer.dash.manifest.SegmentBase
-import java.io.EOFException
 import java.io.IOException
 import java.net.URI
 import java.util.Collections
@@ -205,7 +204,7 @@ internal class SingleFileDashMediaSourceFactory(
             okHttpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
                 val data = readResponsePrefix(resp) ?: return@use null
-                val index = parseIndex(data) ?: return@use null
+                val index = SingleFileDashIndexParser.parse(data) ?: return@use null
                 SingleFileDashIndexResult(
                     index = index,
                     prefetchedRange = PrefetchedRange(
@@ -215,55 +214,6 @@ internal class SingleFileDashMediaSourceFactory(
                 )
             }
         }
-    }
-
-    private fun parseIndex(data: ByteArray): SingleFileDashIndex? {
-        var pos = 0
-        var moovEnd = -1L
-        var sidxStart = -1L
-        var sidxSize = -1L
-        // TODO;支持 MP4 box 的 largesize 和 size == 0，避免扩展大小盒子被误判为非法
-        while (pos + 8 <= data.size) {
-            val size = readUInt32(data, pos).takeIf { it > 0 } ?: return null
-            if (pos + size > data.size) return null
-            when {
-                isBoxType(data, pos + 4, 'm', 'o', 'o', 'v') -> moovEnd = (pos + size).toLong()
-                isBoxType(data, pos + 4, 's', 'i', 'd', 'x') -> {
-                    sidxStart = pos.toLong()
-                    sidxSize = size.toLong()
-                    break
-                }
-            }
-            pos += size
-        }
-        if (moovEnd <= 0L || sidxStart <= 0L || sidxSize <= 0L) return null
-        return SingleFileDashIndex(
-            initLength = moovEnd,
-            indexStart = sidxStart,
-            indexLength = sidxSize
-        )
-    }
-
-    private fun readUInt32(data: ByteArray, offset: Int): Int {
-        if (offset + 4 > data.size) throw EOFException("short mp4 header")
-        return ((data[offset].toInt() and 0xFF) shl 24) or
-            ((data[offset + 1].toInt() and 0xFF) shl 16) or
-            ((data[offset + 2].toInt() and 0xFF) shl 8) or
-            (data[offset + 3].toInt() and 0xFF)
-    }
-
-    private fun isBoxType(
-        data: ByteArray,
-        offset: Int,
-        c0: Char,
-        c1: Char,
-        c2: Char,
-        c3: Char
-    ): Boolean {
-        return data[offset].toInt() == c0.code &&
-            data[offset + 1].toInt() == c1.code &&
-            data[offset + 2].toInt() == c2.code &&
-            data[offset + 3].toInt() == c3.code
     }
 
     private fun readResponsePrefix(response: okhttp3.Response): ByteArray? {
@@ -279,12 +229,6 @@ internal class SingleFileDashMediaSourceFactory(
             if (total == data.size) data else data.copyOf(total)
         }
     }
-
-    private data class SingleFileDashIndex(
-        val initLength: Long,
-        val indexStart: Long,
-        val indexLength: Long
-    )
 
     private data class SingleFileDashIndexResult(
         val index: SingleFileDashIndex,
