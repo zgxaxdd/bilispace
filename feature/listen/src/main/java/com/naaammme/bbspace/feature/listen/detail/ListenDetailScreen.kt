@@ -179,6 +179,25 @@ fun ListenDetailScreen(
     }
 }
 
+/**
+ * 拖动进度条时的目标位置（BACKLOG ST-09）。
+ *
+ * `dragFraction` 是可空的拖动状态，而 `Slider` 的 `onValueChangeFinished` 在无障碍 / IME
+ * 路径下可以在**没有任何 onValueChange** 的情况下到达 —— 那时它还是 null。
+ * 原先两处都写 `dragFraction!!`，其中 finished 那处没有判空，点一下就是崩溃。
+ * 抽成纯函数以后，null 与"时长未知"都走同一条不 seek 的路径，也才能在 JVM 上测。
+ *
+ * 顺带把 fraction 夹回 0f..1f：它来自 `Slider`，理论上不会越界，
+ * 但越界一次就会 seek 到负数或超过总时长，代价只是这一行。
+ */
+internal fun listenSeekTargetMs(
+    dragFraction: Float?,
+    durationMs: Long
+): Long? {
+    if (dragFraction == null || durationMs <= 0L) return null
+    return (dragFraction.coerceIn(0f, 1f) * durationMs).toLong()
+}
+
 @Composable
 private fun ListenProgress(
     durationMs: Long,
@@ -192,11 +211,7 @@ private fun ListenProgress(
     } else {
         0f
     }
-    val displayMs = if (dragFraction != null) {
-        (dragFraction!! * durationMs).toLong()
-    } else {
-        positionMs
-    }
+    val displayMs = listenSeekTargetMs(dragFraction, durationMs) ?: positionMs
     val positionText = remember(displayMs) { formatTime(displayMs) }
     val durationText = remember(durationMs) { formatTime(durationMs) }
 
@@ -205,8 +220,9 @@ private fun ListenProgress(
             value = activeFraction,
             onValueChange = { dragFraction = it },
             onValueChangeFinished = {
-                val ms = (dragFraction!! * durationMs).toLong()
-                onSeek(ms)
+                // 没有 onValueChange 就没有拖动目标（无障碍/IME 路径下 finished 会单独到达），
+                // 原先这里是 dragFraction!! —— 直接 KotlinNullPointerException。
+                listenSeekTargetMs(dragFraction, durationMs)?.let(onSeek)
                 dragFraction = null
             },
             enabled = durationMs > 0L,
