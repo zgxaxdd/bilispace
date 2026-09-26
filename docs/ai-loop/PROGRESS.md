@@ -109,7 +109,23 @@
   已改回 Edit 工具并核对中文注释未坏 → 教训入 FINDINGS W10
 - commit：`fix(crypto): 远程 buvid 的 Response 包进 use，连接不再被漏掉`
 
-## 批次 B4 · 2026-09-26 · （待开始）ST-04 Geetest WebView 未 destroy
+## 批次 B4 · 2026-09-26 · ST-04 Geetest WebView 未销毁
+
+**分区**：A-稳定 P1｜**级别**：A 级·可机器判定｜**详情**：`report-2026-09-26-B4.md`
+
+- 复核为真：`GeetestDialog.kt` 的 `AndroidView(factory = { WebView(ctx) })` 全文件无
+  `onRelease`/`onDispose`/`destroy()`；WebView 带渲染进程与 native 堆，极验在登录重试时反复触发
+- 改动：`onRelease = { stopLoading(); removeJavascriptInterface("GeetestBridge"); destroy() }`
+  （**先摘桥**，因为桥里是 `post { onResult(...) }`，回调可能晚于销毁到达）；
+  新增 `ResourceReleaseGuardTest`（3 条，**不带白名单**）
+- 验证：`:feature:auth:compileDebugKotlin` + 守卫 → BUILD SUCCESSFUL；
+  **破坏性验证**：摘掉 `destroy()` → 两条断言转红（`scannerActuallyReadsSources` 仍绿，符合预期）
+- 全量：`:app:assembleDebug testDebugUnitTest` → **BUILD SUCCESSFUL，184 单测 / 0 失败**
+  （B0 165 → B1 174 → B2/B3 181 → B4 184）
+- commit：`fix(auth): 极验 WebView 在 onRelease 里摘桥并销毁`
+
+## 批次 B5 · 2026-09-26 · （待开始）ST-08 onNewIntent 交接漏三步
+
 
 
 

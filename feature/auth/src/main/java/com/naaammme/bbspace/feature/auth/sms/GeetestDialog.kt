@@ -108,6 +108,15 @@ fun GeetestDialog(
                             null
                         )
                     }
+                },
+                onRelease = { webView ->
+                    // WebView 自带渲染进程与 native 堆，光靠组合体离开时"没人引用"是回收不掉的，
+                    // 必须显式 destroy —— 否则每过一次人机验证就泄漏一个 WebView。
+                    // 先摘 JS 桥：`post { onResult(...) }` 可能在销毁之后才落到主线程，
+                    // 留住桥就留住整个 composable 作用域的捕获。
+                    webView.stopLoading()
+                    webView.removeJavascriptInterface("GeetestBridge")
+                    webView.destroy()
                 }
             )
         }
