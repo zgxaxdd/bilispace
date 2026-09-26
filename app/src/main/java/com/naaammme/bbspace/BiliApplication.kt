@@ -11,11 +11,13 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
 import com.naaammme.bbspace.memory.COVER_COLOR_HISTORY
 import com.naaammme.bbspace.memory.COVER_COLOR_VISIBLE_WINDOW
 import com.naaammme.bbspace.memory.CoverColorAction
 import com.naaammme.bbspace.memory.ImageCacheAction
 import com.naaammme.bbspace.memory.MemoryTrimPlan
+import com.naaammme.bbspace.memory.SeamlessCoverAction
 import com.naaammme.bbspace.memory.TRIM_TO_RATIO
 import com.naaammme.bbspace.memory.planLowMemory
 import com.naaammme.bbspace.memory.planTrimMemory
@@ -137,6 +139,9 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
      *
      * 封面色缓存与图片缓存一起收口：量级很小（每条只是一个 Color），但漏掉它会让
      * "已滑走的历史封面"一直挂在进程里。
+     * 无缝动画的**软件位图 LRU**（`SeamlessCardOpener.coverMemo`，4×960×540 ARGB_8888
+     * ≈ 8MB）同样在此收口 —— 它挂在 AppNavHost 创建的 opener 上，不主动点名就永远
+     * 没人释放（这是本轮补上的缺口）。
      *
      * 整个执行过程包在 try 里：`onTrimMemory` 里抛异常会直接拖垮应用，
      * 而这里的动作全是"尽力优化"性质，失败就该静默降级、只留痕。
@@ -144,7 +149,7 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
     private fun applyTrimPlan(plan: MemoryTrimPlan) {
         try {
             when (plan.imageCache) {
-                ImageCacheAction.Nothing -> return
+                ImageCacheAction.Nothing -> Unit
                 ImageCacheAction.Trim -> trimImageMemoryCache(plan.reason, TRIM_TO_RATIO)
                 ImageCacheAction.Clear -> clearImageMemoryCache(plan.reason)
             }
@@ -155,6 +160,12 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
 
                 CoverColorAction.TrimToHistory ->
                     VideoCardCoverColorStore.trimToSize(COVER_COLOR_HISTORY)
+            }
+            when (plan.seamlessCovers) {
+                SeamlessCoverAction.Keep -> Unit
+                // 只留最近 1 条：下一次无缝打开大概率还是同一张卡
+                SeamlessCoverAction.TrimToRecent -> SeamlessCardOpener.trimCoverMemo(keep = 1)
+                SeamlessCoverAction.Clear -> SeamlessCardOpener.clearCoverMemo()
             }
         } catch (e: Throwable) {
             Logger.w(TAG) { "onTrimMemory(${plan.reason}) 处理失败: ${e.message}" }

@@ -40,6 +40,13 @@ object VideoCardCoverColorStore {
     }
 
     /**
+     * 同键「在飞」去重：同一封面的取色同时只允许一个任务在跑。
+     * 卡片槽位复用、同封面多张卡同帧组合时，旧写法会并发发起多个等价请求
+     * （每个都是一整套下载/解码），这里压成一次，其余调用者等下一次组合再查缓存。
+     */
+    private val inFlight = mutableMapOf<String, kotlinx.coroutines.Job>()
+
+    /**
      * **主动**为某个键取一次色：从 Coil 缓存取位图（不重新下载）→ 提取 → 落缓存 → 回调。
      *
      * ## 为什么需要"主动"这条路（真机实测定位）
@@ -71,22 +78,37 @@ object VideoCardCoverColorStore {
             if (onExtracted != null) scope.launch(Dispatchers.Main) { onExtracted(cached) }
             return
         }
-        scope.launch(Dispatchers.Default) {
-            val color = runCatching {
-                val request = coil3.request.ImageRequest.Builder(appContext)
-                    .data(url)
-                    .size(sizePx.first, sizePx.second)
-                    .memoryCacheKey(cacheKey)
-                    .diskCacheKey(cacheKey)
-                    .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
-                    .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
-                    .build()
-                val result = coil3.SingletonImageLoader.get(appContext).execute(request)
-                val bitmap = (result.image as? coil3.BitmapImage)?.bitmap ?: return@runCatching null
-                extractRepresentativeColor(bitmap)
-            }.getOrNull() ?: return@launch
-            synchronized(colorCache) { colorCache.put(cacheKey, color) }
-            withContext(Dispatchers.Main) { onExtracted?.invoke(color) }
+        synchronized(inFlight) {
+            if (inFlight.containsKey(cacheKey)) return
+            val job = scope.launch(Dispatchers.Default) {
+                val color = runCatching {
+                    val request = coil3.request.ImageRequest.Builder(appContext)
+                        .data(url)
+                        .size(sizePx.first, sizePx.second)
+                        // **不要显式指定 memoryCacheKey / diskCacheKey**：Coil 的缓存键在
+                        // 未显式指定时由 `ImageRequest.data` 派生，而卡片显示请求与首页预加载
+                        // 都是「data = 变体 URL、无显式键」（BiliAsyncImage.rememberBiliImageRequest /
+                        // HomeVideoPage 的预加载）。这里若把键设成**未解析的封面 URL**（取色键），
+                        // 两条请求就永远对不上：本请求对缓存必双 miss → 同一封面被下载两次、
+                        // 解码两次，还各写一份内存/磁盘缓存（实测冷滚动整屏卡片全部命中这条
+                        // 重复路径）。取色结果的键（colorCache）仍用 cacheKey，与请求缓存无关。
+                        .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
+                        .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
+                        .build()
+                    val result = coil3.SingletonImageLoader.get(appContext).execute(request)
+                    val bitmap = (result.image as? coil3.BitmapImage)?.bitmap ?: return@runCatching null
+                    extractRepresentativeColor(bitmap)
+                }.getOrNull() ?: return@launch
+                synchronized(colorCache) { colorCache.put(cacheKey, color) }
+                withContext(Dispatchers.Main) { onExtracted?.invoke(color) }
+            }
+            inFlight[cacheKey] = job
+            job.invokeOnCompletion {
+                synchronized(inFlight) {
+                    // 只删自己登记的那条：极晚的完成回调不能误删后来者
+                    if (inFlight[cacheKey] === job) inFlight.remove(cacheKey)
+                }
+            }
         }
     }
 

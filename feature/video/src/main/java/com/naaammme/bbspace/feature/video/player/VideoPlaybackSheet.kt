@@ -130,7 +130,11 @@ internal fun VideoPlaybackSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
-                    if (shouldLimitHeight && maxContentHeight != Dp.Unspecified) {
+                    // `shouldLimitHeight` 为真时 maxContentHeight 必然不是 Unspecified
+                    // （上面 remember 的两个分支与它严格对应），原来那句
+                    // `&& maxContentHeight != Dp.Unspecified` 是恒真条件，删掉以免误读成
+                    // "还有第三种取不到高度的情况"。
+                    if (shouldLimitHeight) {
                         Modifier.heightIn(max = maxContentHeight)
                     } else {
                         Modifier

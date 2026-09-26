@@ -8,7 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -167,10 +167,13 @@ fun Modifier.glassEffect(
 /**
  * 液态玻璃高光边：沿形状轮廓描一道左上→右下衰减的细边，模拟光线掠射的
  * Fresnel 高光。纯绘制（不采样背景），滚动/静止都无采样正确性问题。
+ *
+ * 用 `drawWithCache` 而不是 `drawWithContent`：brush（含 listOf(3 Color)）、
+ * outline、Stroke 都只该在**尺寸/形状变化**时重建 —— 写在绘制块里等于每帧分配
+ * 一份（与 HomeVideoPage 封面微光同一个坑，那边已改 drawWithCache）。
  */
 private fun Modifier.liquidRimStroke(shape: Shape, isDarkTheme: Boolean): Modifier =
-    drawWithContent {
-        drawContent()
+    drawWithCache {
         val stroke = 1.5.dp.toPx()
         val highlightAlpha = if (isDarkTheme) 0.35f else 0.55f
         val brush = Brush.linearGradient(
@@ -183,14 +186,18 @@ private fun Modifier.liquidRimStroke(shape: Shape, isDarkTheme: Boolean): Modifi
             end = Offset(size.width, size.height)
         )
         val outline = shape.createOutline(size, layoutDirection, this)
-        when (outline) {
-            is Outline.Rounded -> drawRoundRect(
-                brush = brush,
-                cornerRadius = outline.roundRect.topLeftCornerRadius,
-                style = Stroke(width = stroke)
-            )
-            is Outline.Rectangle -> drawRect(brush = brush, style = Stroke(width = stroke))
-            is Outline.Generic -> drawPath(outline.path, brush, style = Stroke(width = stroke))
+        val strokeStyle = Stroke(width = stroke)
+        onDrawWithContent {
+            drawContent()
+            when (outline) {
+                is Outline.Rounded -> drawRoundRect(
+                    brush = brush,
+                    cornerRadius = outline.roundRect.topLeftCornerRadius,
+                    style = strokeStyle
+                )
+                is Outline.Rectangle -> drawRect(brush = brush, style = strokeStyle)
+                is Outline.Generic -> drawPath(outline.path, brush, style = strokeStyle)
+            }
         }
     }
 

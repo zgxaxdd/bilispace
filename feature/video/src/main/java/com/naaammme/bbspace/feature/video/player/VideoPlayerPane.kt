@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -204,13 +205,26 @@ private val PlayerSliderTrackHeight = 6.dp
 private val PlayerSliderThumbSize = 16.dp
 
 /**
+ * 进度平滑外推窗口：与播放进度的轮询周期一致
+ * （`Media3PlayerEngine.updateProgressPolling` 的 `delay(500)`）。
+ * 每收到一次真实进度，就往"真实值 + 一个窗口的预估增量"做一段线性动画。
+ */
+private const val SMOOTH_WINDOW_MS = 500L
+
+/** 真实值与视觉值相差超过该比例时直接吸附（seek / 切分P / 缓冲恢复），不做慢速追帧。 */
+private const val SMOOTH_SNAP_THRESHOLD = 0.05f
+
+/**
  * 进度条轨道几何（px）。轨道两端按滑块半径内缩，滑块中心才能走到 0%/100% 不越界。
  * 抽出来是因为玻璃层与轨道 Canvas 是**两个兄弟节点**，必须共用同一份几何才不错位。
+ *
+ * [filledRight] 是 lambda 而不是值：已播右端必须在**绘制/布局期**求值
+ * （Canvas draw 块 / offset{} 块），这样平滑动画每帧推进只重绘轨道，不触发重组。
  */
 private data class TrackGeometry(
     val left: Float,
     val width: Float,
-    val filledRight: Float,
+    val filledRight: () -> Float,
 )
 
 /** 控制条按钮选中态底盘。 */
@@ -294,39 +308,49 @@ private fun Modifier.playerControlGlass(
         return this.background(scrim, shape)
     }
     val refractionDp = (shapeHeightPx / 3.5f).coerceIn(2f, 10f)
-    return this
-        .drawWithContent {
-            // 绘制期读 tick（见 LocalVideoGlassTick 的注释）：组合期读会让整块
-            // 播放器面板在播放期间每秒重组 60 次。
-            tick()
-            drawContent()
-        }
-        .drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                val r = (PLAYER_CONTROL_BLUR_DP * strength).dp.toPx()
-                blur(r, r)
-                if (isLiquid) {
-                    // 液态：饱和补偿 + 边缘折射（透镜感）
-                    vibrancy(1.5f)
-                    lens(
-                        refractionHeight = refractionDp.dp.toPx(),
-                        refractionAmount = refractionDp.dp.toPx(),
-                        chromaticAberration = 0f
-                    )
-                }
-            },
-            highlight = {
-                // 液态才描 Fresnel 高光边：磨砂档描边会读作"硬边框"，不是雾面该有的样子
-                if (isLiquid) Highlight.GlassStrokeBigLight else null
-            },
-            onDrawSurface = {
-                // 磨砂档染色偏透（雾面要轻）；液态档染色偏实（玻璃要有厚度）
-                drawRect(scrim)
-                if (isLiquid) drawRect(Color.White.copy(alpha = 0.05f))
+    // **必须 remember 住整条链**：miuix 的 `DrawBackdropElement.equals` 对 shape/effects/
+    // highlight/onDraw* 做**引用比较**（已反编译 miuix-blur 0.9.4-rc01 核实），而
+    // `update(node)` 末尾**无条件 `invalidateDrawCache()`** —— 每次重组新建 lambda 就会让
+    // 该玻璃节点的 blur/sharp/crossfade 缓存整体作废重建。播放进度 500ms 轮询让控制条每秒
+    // 重组 2 次 = 每秒重算 2 次玻璃；卡片取色 350ms 渐变期更糟（每帧重算）。
+    // `tick` 是 `{ videoGlassTick }` 形态的 provider（读的是状态委托），被 remember 捕获
+    // 旧实例也永远读到最新值 —— 这正是它被设计成 `() -> Int` 的原因之一，可安全进键。
+    val glassChain = remember(backdrop, shape, scrim, refractionDp, isLiquid, strength, tick) {
+        Modifier
+            .drawWithContent {
+                // 绘制期读 tick（见 LocalVideoGlassTick 的注释）：组合期读会让整块
+                // 播放器面板在播放期间每秒重组 60 次。
+                tick()
+                drawContent()
             }
-        )
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { shape },
+                effects = {
+                    val r = (PLAYER_CONTROL_BLUR_DP * strength).dp.toPx()
+                    blur(r, r)
+                    if (isLiquid) {
+                        // 液态：饱和补偿 + 边缘折射（透镜感）
+                        vibrancy(1.5f)
+                        lens(
+                            refractionHeight = refractionDp.dp.toPx(),
+                            refractionAmount = refractionDp.dp.toPx(),
+                            chromaticAberration = 0f
+                        )
+                    }
+                },
+                highlight = {
+                    // 液态才描 Fresnel 高光边：磨砂档描边会读作"硬边框"，不是雾面该有的样子
+                    if (isLiquid) Highlight.GlassStrokeBigLight else null
+                },
+                onDrawSurface = {
+                    // 磨砂档染色偏透（雾面要轻）；液态档染色偏实（玻璃要有厚度）
+                    drawRect(scrim)
+                    if (isLiquid) drawRect(Color.White.copy(alpha = 0.05f))
+                }
+            )
+    }
+    return this.then(glassChain)
 }
 
 
@@ -444,20 +468,27 @@ internal fun VideoPlayerPane(
         // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick 强制重录。
         val videoBackdrop = rememberLayerBackdrop()
         var videoGlassTick by remember { mutableIntStateOf(0) }
-        LaunchedEffect(state.playWhenReady) {
-            // 条件写在 key 上、不写在循环里：`state` 是 effect 启动时捕获的那一份快照，
-            // 循环体内再读 `state.playWhenReady` 读到的永远是当时的值，
-            // 所以 `while (state.playWhenReady)` 实际就是 `while (true)` ——
-            // 留着它只会让人以为循环能自己停下来。真正的终止手段是 key 翻转取消本协程。
+        // 设置项「播放页控件模糊 / 质感」：叶子控件经 CompositionLocal 读取，
+        // 不把 ViewModel 传进浮层组件（见文件顶部约定）。
+        val controlsBlur by viewModel.playerControlsBlur.collectAsStateWithLifecycle()
+        val controlsMaterial by viewModel.playerControlsMaterial.collectAsStateWithLifecycle()
+        // tick 门控 = 「有消费者」+「画面在动」：
+        // - 消费者只有 playerControlGlass 一族（文件内私有 Local），模糊关闭或材质 OFF
+        //   时它们早退为纯色背景 —— 这时逐帧重录是 0 消费的纯 CPU/GPU/电量的浪费；
+        // - 暂停/缓冲时画面静止，录制链不需要逐帧刷新（glass 采样到的是正确的静态帧），
+        //   恢复播放时 LaunchedEffect 随 key 翻转重新起循环，最多落后一帧。
+        // 播放页专用背板的 layerBackdrop 录制链本身保持常驻：节点只在被 tick 读
+        // 失效时才重绘重录，不 tick 就没有录制成本，注册本身免费。
+        val videoGlassActive = state.playWhenReady &&
+            controlsBlur &&
+            controlsMaterial != GlassMaterial.OFF
+        LaunchedEffect(videoGlassActive) {
+            if (!videoGlassActive) return@LaunchedEffect
             while (true) {
                 withFrameNanos { }
                 videoGlassTick++
             }
         }
-        // 设置项「播放页控件模糊 / 质感」：叶子控件经 CompositionLocal 读取，
-        // 不把 ViewModel 传进浮层组件（见文件顶部约定）。
-        val controlsBlur by viewModel.playerControlsBlur.collectAsStateWithLifecycle()
-        val controlsMaterial by viewModel.playerControlsMaterial.collectAsStateWithLifecycle()
         CompositionLocalProvider(
             LocalVideoBackdrop provides videoBackdrop,
             LocalVideoGlassTick provides { videoGlassTick },
@@ -758,13 +789,17 @@ private fun VideoDanmakuLayer(
     playerView: PlayerView
 ) {
     val danmakuState by viewModel.danmakuState.collectAsStateWithLifecycle()
+    // 必须 collect 而不是直读 `playbackProgress.value`：StateFlow.value 不订阅，
+    // 本组合若因其它原因长期不重组，拿到的就是旧进度；随后任何一次 sync（改弹幕配置、
+    // 播放/暂停）都会拿旧 positionMs 去算弹幕窗口，表现为弹幕跳回旧段。
+    val progress by viewModel.playbackProgress.collectAsStateWithLifecycle()
 
     DanmakuLayer(
         playerView = playerView,
         overlayState = danmakuOverlayState,
         danmakuState = danmakuState,
         danmakuConfig = settingsState.danmaku,
-        positionMs = viewModel.playbackProgress.value.positionMs,
+        positionMs = progress.positionMs,
         isPlaying = state.isPlaying,
         speed = state.speed,
         seekEventId = state.seekEventId,
@@ -1068,6 +1103,7 @@ private fun PlayerCtrlBarHost(
         fullText = if (isFull) "还原" else "全屏",
         sliderVal = sliderVal,
         sliderOn = durationMs > 0L,
+        playing = state.isPlaying,
         durationMs = durationMs,
         marks = sbMarks,
         audioOn = (state.playbackSource?.audios?.size ?: 0) > 1,
@@ -1101,6 +1137,8 @@ private fun PlayerCtrlBar(
     fullText: String,
     sliderVal: Float,
     sliderOn: Boolean,
+    /** 是否正在播放：转发给 [PlayerProgressBar] 做进度平滑外推。 */
+    playing: Boolean,
     /** 视频总时长，供进度条拖动时间气泡换算；<= 0 时不显示气泡。 */
     durationMs: Long,
     marks: List<SbMark> = emptyList(),
@@ -1143,6 +1181,7 @@ private fun PlayerCtrlBar(
             PlayerProgressBar(
                 value = sliderVal,
                 enabled = sliderOn,
+                playing = playing,
                 marks = marks,
                 durationMs = durationMs,
                 onValueChange = onSeekChange,
@@ -1227,6 +1266,8 @@ private fun PlayerCtrlBar(
 private fun PlayerProgressBar(
     value: Float,
     enabled: Boolean,
+    /** 是否正在播放：只用于进度平滑外推（暂停/缓冲吸附真实值）。 */
+    playing: Boolean,
     marks: List<SbMark>,
     durationMs: Long,
     onValueChange: (Float) -> Unit,
@@ -1269,13 +1310,38 @@ private fun PlayerProgressBar(
             },
         contentAlignment = Alignment.Center
     ) {
-        val trackGeometry = remember(safeValue, barWidthPx, thumbPx) {
+        // ── 平滑进度（B7）：播放中每帧推进，而不是跟着 500ms 轮询一跳一跳 ────────
+        // 实现要点（与 FrameBudgetLintTest 的口径一致）：动画值**只在绘制/布局期读**
+        // —— TrackGeometry.filledRight 是 lambda，调用点都在 Canvas draw 块与 offset{}
+        // 块里，所以每帧推进只重绘这一小块轨道，不触发重组、也不违反"组合期读动画值"红线。
+        // 目标值 = 最近一次真实进度 + 一个轮询窗口的预估增量；下一次真实值到达时从
+        // **当前视觉值**重新起一段线性动画，视觉上连续。暂停/缓冲/拖动或跳变过大时
+        // 直接吸附真实值（此时外推没有意义，还会掩盖 seek）。
+        val smoothFraction = remember { Animatable(safeValue) }
+        LaunchedEffect(safeValue, playing, dragging, durationMs) {
+            val snap = dragging || !playing || durationMs <= 0L ||
+                abs(safeValue - smoothFraction.value) > SMOOTH_SNAP_THRESHOLD
+            if (snap) {
+                smoothFraction.snapTo(safeValue)
+            } else {
+                smoothFraction.animateTo(
+                    targetValue = (safeValue + SMOOTH_WINDOW_MS / durationMs.toFloat())
+                        .coerceIn(0f, 1f),
+                    animationSpec = tween(
+                        durationMillis = SMOOTH_WINDOW_MS.toInt(),
+                        easing = LinearEasing
+                    )
+                )
+            }
+        }
+        val trackGeometry = remember(barWidthPx, thumbPx, smoothFraction) {
             val trackLeft = thumbPx / 2f
             val trackWidth = (barWidthPx - thumbPx).coerceAtLeast(1f)
             TrackGeometry(
                 left = trackLeft,
                 width = trackWidth,
-                filledRight = trackLeft + trackWidth * safeValue
+                // 已播右端做成 lambda：调用处在绘制/布局期求值（见上方平滑进度说明）
+                filledRight = { trackLeft + trackWidth * smoothFraction.value }
             )
         }
         val trackShape = RoundedCornerShape(percent = 50)
@@ -1314,7 +1380,7 @@ private fun PlayerProgressBar(
                     color = if (enabled) PlayerSliderActiveTrack else PlayerPillBorder,
                     topLeft = Offset(trackGeometry.left, trackTop),
                     size = Size(
-                        (trackGeometry.filledRight - trackGeometry.left).coerceAtLeast(trackPx),
+                        (trackGeometry.filledRight() - trackGeometry.left).coerceAtLeast(trackPx),
                         trackPx
                     ),
                     cornerRadius = trackRadius
@@ -1340,7 +1406,7 @@ private fun PlayerProgressBar(
                 drawCircle(
                     color = PlayerSliderDisabledThumb,
                     radius = thumbRadius - 1.5.dp.toPx(),
-                    center = Offset(trackGeometry.filledRight, cy)
+                    center = Offset(trackGeometry.filledRight(), cy)
                 )
             }
         }
@@ -1352,7 +1418,7 @@ private fun PlayerProgressBar(
                     .align(Alignment.CenterStart)
                     .offset {
                         IntOffset(
-                            x = (trackGeometry.filledRight - thumbPx / 2f).roundToInt(),
+                            x = (trackGeometry.filledRight() - thumbPx / 2f).roundToInt(),
                             y = 0
                         )
                     }
@@ -1370,7 +1436,7 @@ private fun PlayerProgressBar(
                 drawCircle(
                     color = Color.White,
                     radius = thumbPx / 2f - 1.5.dp.toPx(),
-                    center = Offset(trackGeometry.filledRight, size.height / 2f),
+                    center = Offset(trackGeometry.filledRight(), size.height / 2f),
                     style = Stroke(width = 2.dp.toPx())
                 )
             }

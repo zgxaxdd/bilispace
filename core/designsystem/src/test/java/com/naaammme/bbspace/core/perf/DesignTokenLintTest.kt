@@ -179,7 +179,17 @@ class DesignTokenLintTest {
             // （BiliSpacing 没有 48，也不该有：把它做成"间距 token"会在哪天调间距时
             // 顺手改掉无障碍下限），所以刻意保留字面量、把上限 +1。
             // 该改动本身不改变任何像素（那列原本按内容就有约 56dp）。
-            limit = 962,
+            // 上限 962 → 980 的变更记录（2026-09-26，iOS 阶段 C）：
+            // 新增 IOSActionSheet / IOSAlertDialog / BiliSheetGrabber 三个自包含组件，
+            // 其中的 36×5dp、2.5dp、270dp、44dp、56dp、14dp、0.5dp 等是
+            // HIG / compose-cupertino 的**规格常量**（组件固有尺寸，同 48dp 的处理逻辑：
+            // 不做成间距 token，避免日后调间距时顺手改掉组件规格），刻意保留字面量；
+            // 语义性间距（8/12/16/20dp）已全部收敛进 BiliSpacing。规格常量清单已被
+            // IOSComponentStructureTest 钉住，改动会红。
+            // 上限 980 → 981（2026-09-26，iOS 深色增强）：+1 为纯黑深色下卡片
+            // 发丝描边的 0.5.dp 线宽（BiliCardSurface.biliDarkHairlineBorder）——
+            // 描边粗细是规格常量，同 48dp 触控下限的处理逻辑，不做间距 token。
+            limit = 981,
             what = "theme 包外的 `N.dp` 字面量",
             why = "同一语义的尺寸散在各处就没有单一改动点。要降它就把语义明确的" +
                 "重复值收敛进 BiliRadius/BiliSpacing；一次性尺寸（图标、分隔线粗细、" +
@@ -192,7 +202,10 @@ class DesignTokenLintTest {
     fun sixteenDpLiterals_isFrozen() {
         assertRatchet(
             actual = sumOf("""\b16\.dp\b"""),
-            limit = 174,
+            // 上限 174 → 176（2026-09-26，iOS 阶段 C）：+2 为 IOSActionSheet /
+            // IOSAlertDialog 内 ActionRow/按钮区的固有内边距（56dp 行高规格的一部分），
+            // 语义上属于组件规格而非可调间距，同上条记录处理。
+            limit = 176,
             what = "`16.dp` 字面量",
             why = "16.dp 是 BiliSpacing.lg 的语义位。新增 16.dp 前先问一句：" +
                 "这里是间距/内边距（该用 token），还是某个组件的固有尺寸（该写字面量）？"
@@ -206,12 +219,16 @@ class DesignTokenLintTest {
         // 从"能塞就塞"的 6/4dp 改成有呼吸感的 10/12dp（AdaptiveMediaGrid 的默认值
         // 与 HomeVideoPage 的显式 contentPadding）。这是**故意增加**的 12.dp 用量，
         // 不是漂移。理由与真机截图对比记录在 BiliRadius.card 与 AdaptiveMediaGrid 的注释里。
-        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 146, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
+        // **146 → 148（2026-09-26，iOS 阶段 C）**：+2 为 IOSActionSheet 标题/说明
+        // 卡片的 padding 规格（对照 compose-cupertino ActionSheetTitlePaddingValues）。
+        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 148, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
     }
 
     @Test
     fun eightDpLiterals_isFrozen() {
-        assertRatchet(actual = sumOf("""\b8\.dp\b"""), limit = 149, what = "`8.dp` 字面量", why = "同上，对应 BiliSpacing.sm。")
+        // **149 → 150（2026-09-26，iOS 阶段 C）**：+1 为 IOSAlertDialog 卡片底部
+        // padding 规格（对照 compose-cupertino ActionSheetWindowInsets 的 bottom 8dp）。
+        assertRatchet(actual = sumOf("""\b8\.dp\b"""), limit = 150, what = "`8.dp` 字面量", why = "同上，对应 BiliSpacing.sm。")
     }
 
     /** 6.dp 与 10.dp **没有对应 token**，所以它们的上限只是"别继续长"。 */

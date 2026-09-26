@@ -51,6 +51,28 @@ enum class CoverColorAction {
 }
 
 /**
+ * 无缝动画「软件位图」缓存（`SeamlessCardOpener.coverMemo`，4 张 960×540 ARGB_8888
+ * ≈ 8MB）的收尾动作。
+ *
+ * 这块内存**此前不在任何分级表里**：`applyTrimPlan` 只清 Coil 内存缓存与封面色缓存，
+ * 而 coverMemo 挂在 `AppNavHost` 创建的 opener 上，`onTrimMemory` / `onLowMemory`
+ * 都碰不到它 —— 内存紧张时这 8MB 照留不误。
+ *
+ * 释放是安全的：它是"重建便宜"的一类（下次无缝打开只需重新 `Bitmap.copy`，
+ * 实测 5~20ms 主线程），与"绝不在此处清磁盘缓存/播放器缓冲"的原则不冲突。
+ */
+enum class SeamlessCoverAction {
+    /** 不动（未知 level、界面可见时的 RUNNING_*）。 */
+    Keep,
+
+    /** 只留最近 1 条：下一次无缝打开大概率还是同一张卡。 */
+    TrimToRecent,
+
+    /** 全清：内存紧张时这 8MB 必须还给系统。 */
+    Clear
+}
+
+/**
  * 一次 `onTrimMemory(level)` 应该做的事。
  *
  * @param reason 打日志用的档位名。**刻意由策略给出**而不是调用方现写：
@@ -60,6 +82,7 @@ enum class CoverColorAction {
 data class MemoryTrimPlan(
     val imageCache: ImageCacheAction,
     val coverColors: CoverColorAction,
+    val seamlessCovers: SeamlessCoverAction,
     val reason: String
 )
 
@@ -82,6 +105,9 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
         MemoryTrimPlan(
             imageCache = ImageCacheAction.Trim,
             coverColors = CoverColorAction.TrimToVisibleWindow,
+            // 无缝位图同样走温和档：留最近 1 条（回前台大概率还是那张卡），
+            // 其余还给系统 —— 与 imageCache 的 Trim 同一取向。
+            seamlessCovers = SeamlessCoverAction.TrimToRecent,
             reason = "UI_HIDDEN"
         )
 
@@ -91,6 +117,7 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
         MemoryTrimPlan(
             imageCache = ImageCacheAction.Clear,
             coverColors = CoverColorAction.TrimToHistory,
+            seamlessCovers = SeamlessCoverAction.Clear,
             reason = "BACKGROUND"
         )
 
@@ -98,14 +125,34 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
     ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ->
         if (uiVisible) {
             // 可见时不清：清了下一帧就被重新填满，纯浪费解码。
-            MemoryTrimPlan(ImageCacheAction.Nothing, CoverColorAction.Keep, "RUNNING_VISIBLE")
+            MemoryTrimPlan(
+                imageCache = ImageCacheAction.Nothing,
+                coverColors = CoverColorAction.Keep,
+                seamlessCovers = SeamlessCoverAction.Keep,
+                reason = "RUNNING_VISIBLE"
+            )
         } else {
-            MemoryTrimPlan(ImageCacheAction.Clear, CoverColorAction.TrimToHistory, "RUNNING_LOW")
+            MemoryTrimPlan(
+                imageCache = ImageCacheAction.Clear,
+                coverColors = CoverColorAction.TrimToHistory,
+                seamlessCovers = SeamlessCoverAction.Clear,
+                reason = "RUNNING_LOW"
+            )
         }
 
-    else -> MemoryTrimPlan(ImageCacheAction.Nothing, CoverColorAction.Keep, "IGNORED")
+    else -> MemoryTrimPlan(
+        imageCache = ImageCacheAction.Nothing,
+        coverColors = CoverColorAction.Keep,
+        seamlessCovers = SeamlessCoverAction.Keep,
+        reason = "IGNORED"
+    )
 }
 
 /** [onLowMemory] 的编排：系统级紧张，没有更温和的选项了。 */
 fun planLowMemory(): MemoryTrimPlan =
-    MemoryTrimPlan(ImageCacheAction.Clear, CoverColorAction.TrimToHistory, "onLowMemory")
+    MemoryTrimPlan(
+        imageCache = ImageCacheAction.Clear,
+        coverColors = CoverColorAction.TrimToHistory,
+        seamlessCovers = SeamlessCoverAction.Clear,
+        reason = "onLowMemory"
+    )

@@ -66,21 +66,26 @@ class SeamlessCardOpener(
      * 960×540 约 2MB、实测 5~20ms，而且发生在**点击那一帧**——正是系统要准备 Activity
      * 窗口 + 启动无缝动画的时刻，两者争主线程会让动画起步顿一下。单条缓存时用户在两张
      * 卡片之间来回点，每次切换都要重算；扩到多条即可覆盖"来回看同一批卡/连续开退"的真实场景。
+     *
+     * **存储在伴生对象（进程级）而不是实例上**：`Application.onTrimMemory` 拿不到
+     * `AppNavHost` 创建的 opener 实例，缓存挂在实例上就永远没人释放它
+     * （4×960×540 ARGB_8888 ≈ 8MB）。现在经 [clearCoverMemo] / [trimCoverMemo]
+     * 参与内存分级释放（见 `app/memory/MemoryTrimPolicy.kt`）。
      */
-    private val coverMemo = LinkedHashMap<String, SoftwareCover>()
-
-    private fun memoGet(key: String): SoftwareCover? {
+    private fun memoGet(key: String): SoftwareCover? = synchronized(coverMemo) {
         val hit = coverMemo.remove(key) ?: return null
         coverMemo[key] = hit // 重新插入 = 标记为最近使用
-        return hit
+        hit
     }
 
     private fun memoPut(key: String, cover: SoftwareCover) {
-        coverMemo.remove(key)
-        coverMemo[key] = cover
-        while (coverMemo.size > COVER_MEMO_CAPACITY) {
-            val eldest = coverMemo.keys.firstOrNull() ?: break
-            coverMemo.remove(eldest)
+        synchronized(coverMemo) {
+            coverMemo.remove(key)
+            coverMemo[key] = cover
+            while (coverMemo.size > COVER_MEMO_CAPACITY) {
+                val eldest = coverMemo.keys.firstOrNull() ?: break
+                coverMemo.remove(eldest)
+            }
         }
     }
 
@@ -570,8 +575,8 @@ class SeamlessCardOpener(
         }
     }
 
-    private companion object {
-        const val TAG = "OplusViewSeamless"
+    companion object {
+        private const val TAG = "OplusViewSeamless"
 
         /**
          * 软件封面 LRU 容量。4 条约 8MB ARGB_8888（960×540×4B），
@@ -586,7 +591,30 @@ class SeamlessCardOpener(
          * 一道明显黑带（历史上正是"返回时简介部分是黑的"的观感来源之一）。
          * 正常路径会由卡片传入真实底色（`fallbackColor`），这里只是兜底。
          */
-        const val DEFAULT_INFO_BAND_COLOR = 0xFF2B2B2B.toInt()
+        private const val DEFAULT_INFO_BAND_COLOR = 0xFF2B2B2B.toInt()
+
+        /**
+         * 进程级软件位图 LRU。放伴生对象的理由见 [memoGet] 上方注释：
+         * `Application.onTrimMemory` 没有 opener 引用，只能靠进程级入口释放。
+         */
+        private val coverMemo = LinkedHashMap<String, SoftwareCover>()
+
+        /** 内存分级释放（Clear 档）：全清。下次无缝打开重新 `Bitmap.copy` 即可。 */
+        @JvmStatic
+        fun clearCoverMemo() {
+            synchronized(coverMemo) { coverMemo.clear() }
+        }
+
+        /** 内存分级释放（温和档）：只留最近 [keep] 条（下一次打开大概率还是同一张卡）。 */
+        @JvmStatic
+        fun trimCoverMemo(keep: Int) {
+            synchronized(coverMemo) {
+                while (coverMemo.size > keep.coerceAtLeast(0)) {
+                    val eldest = coverMemo.keys.firstOrNull() ?: break
+                    coverMemo.remove(eldest)
+                }
+            }
+        }
     }
 }
 

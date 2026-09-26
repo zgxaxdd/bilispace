@@ -131,4 +131,52 @@ class MemoryTrimPolicyTest {
         assertEquals(10, ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
         assertEquals(15, ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
     }
+
+    /**
+     * 无缝动画的软件位图 LRU（4×960×540 ARGB_8888 ≈ 8MB）也必须跟着同一张分级表走。
+     *
+     * 它此前**不在任何一档里**：`applyTrimPlan` 只清 Coil 内存缓存与封面色缓存，
+     * 而这块位图挂在 `AppNavHost` 创建的 opener 上，`onTrimMemory` / `onLowMemory`
+     * 都碰不到 —— 内存紧张时 8MB 照留不误。本测试钉住三件事：
+     * UI_HIDDEN 只留最近 1 条（温和档）、后台/系统吃紧档全清、未知档不动。
+     */
+    @Test
+    fun seamlessCoverCacheFollowsTheSameTiering() {
+        assertEquals(
+            "UI_HIDDEN 应温和裁剪（留最近 1 条）",
+            SeamlessCoverAction.TrimToRecent,
+            planTrimMemory(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN, uiVisible = false).seamlessCovers
+        )
+        for (level in listOf(
+            ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
+            ComponentCallbacks2.TRIM_MEMORY_MODERATE,
+            ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        )) {
+            assertEquals(
+                "level=$level 应清空无缝位图缓存",
+                SeamlessCoverAction.Clear,
+                planTrimMemory(level, uiVisible = false).seamlessCovers
+            )
+        }
+        assertEquals(
+            "界面可见的 RUNNING_* 不该动",
+            SeamlessCoverAction.Keep,
+            planTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW, uiVisible = true).seamlessCovers
+        )
+        assertEquals(
+            "界面不可见的 RUNNING_* 应清",
+            SeamlessCoverAction.Clear,
+            planTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW, uiVisible = false).seamlessCovers
+        )
+        assertEquals(
+            "未知 level 不动",
+            SeamlessCoverAction.Keep,
+            planTrimMemory(-1, uiVisible = true).seamlessCovers
+        )
+        assertEquals(
+            "onLowMemory 与后台吃紧同档",
+            SeamlessCoverAction.Clear,
+            planLowMemory().seamlessCovers
+        )
+    }
 }

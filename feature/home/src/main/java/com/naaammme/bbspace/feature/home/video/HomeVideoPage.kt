@@ -68,6 +68,8 @@ import com.naaammme.bbspace.core.designsystem.color.LocalHomeCardDynamicTintEnab
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAdaptiveContentColors
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawSpec
+import com.naaammme.bbspace.core.designsystem.component.IOSActionSheet
+import com.naaammme.bbspace.core.designsystem.component.IOSActionSheetAction
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
 import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
@@ -82,6 +84,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.seamless.coverExpandSourceFade
 import com.naaammme.bbspace.core.designsystem.seamless.coverExpandTrack
 import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.recordCardLayer
@@ -105,6 +108,7 @@ import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.ThreePointItem
 import com.naaammme.bbspace.core.model.ThreePointReason
+import com.naaammme.bbspace.core.model.ThreePointReasonKind
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.home.LOAD_MORE_THRESHOLD
 import com.naaammme.bbspace.feature.home.rememberHomeFlingBehavior
@@ -548,7 +552,17 @@ private fun FeedCard(
     // 2. 用封面位图装饰整卡大小的锚点，会被拉伸铺满（预览图盖住简介区）。
     // 正确做法就是现在这样：锚点铺满整卡 + 不装饰 + 不淡出。
     val seamlessSourceKey = item.target?.sharedContentKey()
-    val sourceCardFadeModifier = Modifier
+    // ── 源卡片在**回退 morph** 期间淡出（非 OPPO 路径专属）────────────────────
+    //
+    // OPPO 系统 morph 路径**绝不能淡出**：系统要捕获卡片像素，淡成透明会截到空卡片
+    // （下方"历史教训 1/2"记录的黑帧就是这么来的）。但非 OPPO 的回退路径没有系统捕获，
+    // 不淡出就会看到「原卡片 + 飞行的封面幽灵」两份封面同屏 —— 真机反馈"过渡观感
+    // 非常奇怪"的直接来源。
+    //
+    // 判据是"本次过渡是否来自这张卡"：CoverExpandOrigin 只在回退路径 record()
+    // （本文件的两个降级分支），系统路径从不 record() → 该修饰符恒为 alpha=1，
+    // OPPO 行为与改动前完全一致。alpha 在绘制期读取，逐帧淡出零重组。
+    val sourceCardFadeModifier = Modifier.coverExpandSourceFade(seamlessSourceKey)
     // 封面区域高度（px）。合成兜底预览时用。
     var coverHeightPx by remember(item) { mutableIntStateOf(0) }
 
@@ -804,12 +818,35 @@ private fun FeedCard(
         }
     }
     if (showMoreMenu && !item.threePointV2.isNullOrEmpty()) {
-        MoreMenuDialog(
-            item = item,
-            items = item.threePointV2.orEmpty(),
-            onDislike = onDislike,
-            onDismiss = { showMoreMenu = false }
-        )
+        if (LocalUiStyle.current == UiStyle.IOS) {
+            // iOS：动作面板（两级层级流）——一级为菜单项，带理由的项进入
+            // 二级理由面板（iOS 惯例的二级动作面板）；无理由项点击即关闭，
+            // 与原对话框语义一致。MATERIAL 档保留原 AlertDialog。
+            IOSActionSheet(
+                title = item.title,
+                actions = item.threePointV2.orEmpty().map { menuItem ->
+                    IOSActionSheetAction(
+                        title = menuItem.title,
+                        children = (menuItem.reasons.orEmpty() + menuItem.feedbacks.orEmpty())
+                            .map { reason ->
+                                IOSActionSheetAction(
+                                    title = reason.name,
+                                    destructive = reason.kind == ThreePointReasonKind.DISLIKE,
+                                    onClick = { onDislike(item, reason) }
+                                )
+                            }
+                    )
+                },
+                onDismiss = { showMoreMenu = false }
+            )
+        } else {
+            MoreMenuDialog(
+                item = item,
+                items = item.threePointV2.orEmpty(),
+                onDislike = onDislike,
+                onDismiss = { showMoreMenu = false }
+            )
+        }
     }
 }
 
@@ -840,23 +877,35 @@ private fun CoverBadge(
 /**
  * 角标玻璃：采样所在卡片封面的背板，blur + 轻折射 + 深色染色（白字可读）。
  * 角标小、封面内容静态，采样成本低。
+ *
+ * **必须 remember 住整条链**：miuix 的 `DrawBackdropElement.equals` 对 shape/effects/
+ * onDrawSurface 做**引用比较**（已反编译 miuix-blur 0.9.4-rc01 核实），`update(node)`
+ * 末尾又**无条件 `invalidateDrawCache()`** —— 每次重组新建 lambda 都会让角标玻璃的
+ * blur/lens 缓存整体作废重建。卡片取色 350ms 渐变期 FeedCard 每帧重组，不 remember
+ * 就等于每帧重算每张卡两个角标的玻璃。`liquidGlassSurface` 早已因此 remember 整条链
+ * （见 LiquidBackdrop.kt），这里补上同一处理。
  */
-private fun Modifier.glassBadgeSurface(backdrop: LayerBackdrop, shape: RoundedCornerShape): Modifier =
-    drawBackdrop(
-        backdrop = backdrop,
-        shape = { shape },
-        effects = {
-            blur(4.dp.toPx(), 4.dp.toPx())
-            lens(
-                refractionHeight = 4.dp.toPx(),
-                refractionAmount = 3.dp.toPx(),
-                chromaticAberration = 0f
-            )
-        },
-        onDrawSurface = {
-            drawRect(Color.Black.copy(alpha = 0.45f))
-        }
-    )
+@Composable
+private fun Modifier.glassBadgeSurface(backdrop: LayerBackdrop, shape: RoundedCornerShape): Modifier {
+    val chain = remember(backdrop, shape) {
+        Modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                blur(4.dp.toPx(), 4.dp.toPx())
+                lens(
+                    refractionHeight = 4.dp.toPx(),
+                    refractionAmount = 3.dp.toPx(),
+                    chromaticAberration = 0f
+                )
+            },
+            onDrawSurface = {
+                drawRect(Color.Black.copy(alpha = 0.45f))
+            }
+        )
+    }
+    return this.then(chain)
+}
 
 @Composable
 private fun FeedCardSkeleton(singleColumn: Boolean = false) {
