@@ -468,7 +468,7 @@ class ImRepository @Inject constructor(
      * - 拉取消息：使用独立的伪造设备 ID，伪装成多端拉取。
      */
     private fun getDeviceId(mid: Long, isFetch: Boolean = false): String {
-        val prefs = context.getSharedPreferences("IMFieldsCache$mid", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(ImFieldsCache.prefsName(mid), Context.MODE_PRIVATE)
         val key = if (isFetch) "key_fetch_device_id_v2" else "key_device_id_v2"
         return prefs.getString(key, null) ?: UUID.randomUUID().toString().also {
             prefs.edit { putString(key, it) }

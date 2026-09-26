@@ -2,6 +2,7 @@ package com.naaammme.bbspace.core.auth
 
 import android.content.Context
 import androidx.core.content.edit
+import com.naaammme.bbspace.core.common.account.PerAccountDataCleaner
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.model.Cookie
 import com.naaammme.bbspace.core.model.LoginCredential
@@ -21,7 +22,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class AuthStore @Inject constructor(
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val perAccountCleaners: Set<@JvmSuppressWildcards PerAccountDataCleaner>
 ) {
     companion object {
         private const val TAG = "AuthStore"
@@ -188,6 +190,17 @@ class AuthStore @Inject constructor(
             remove(userInfoKey(mid))
         }
         clearHdAccessKeyFor(mid)
+        // 其它模块按 mid 存的本地数据（ST-12：IM 的设备 id 缓存就是这么永久留下的）。
+        // 单个清理器失败不许阻止账号被移除 —— 用户看不到"删除失败"比看到一个脏缓存更重要，
+        // 所以逐个吞掉并记日志；契约见 PerAccountDataCleaner。
+        perAccountCleaners.forEach { cleaner ->
+            val name = cleaner.javaClass.simpleName
+            try {
+                cleaner.clean(mid)
+            } catch (e: Exception) {
+                Logger.w(TAG) { "per-account cleanup failed mid=$mid cleaner=$name msg=${e.message}" }
+            }
+        }
         if (this.mid == mid) {
             clearCredential()
         }
