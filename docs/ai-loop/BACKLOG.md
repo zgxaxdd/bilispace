@@ -91,16 +91,16 @@
 
 | 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|
-| UI-01 | `LocalUiStyle.current == UiStyle.IOS` 散点仍未收口到 0 | designsystem + 11 个 feature 文件 | 方案 §7.2 清单；材质门禁（`GlassEffect.kt:101,211`、`HomeVideoPage.kt:338`）应改读 `GlassConfig` | A | `grep` 计数棘轮（只许减），designsystem 内部之外为 0 | 待办 |
-| UI-02 | 6 处内联 `typography.x.copy(...)` 未消 | `core/designsystem` | `DesignTokenLintTest` 棘轮 6 | A | 棘轮 6 → 0 | 待办 |
-| UI-03 | 6/10dp 间距档已补，字面量离群值待继续收敛 | `core/designsystem` | `Spacing.kt` 新增档位后的残留字面量；`DesignTokenLintTest` 上限需按实际下调 | A | 棘轮**下调**（写明基线依据） | 待办 |
-| UI-04 | 三态（加载/空/错误）未全站统一 | 各 feature | `StateMessageCard` 体系；`AdaptiveMediaGrid` 错误优先已修，其余界面待审 | A | 三态组件覆盖清单 + 结构守卫 | 待办 |
-| UI-05 | 三处小触控目标被 `AccessibilityStructureTest` 冻结（D4） | `core/designsystem` | 任务书把"触控 ≥48dp"列为 **A 级可机器判定** | A | 能静态判定就抬到 48dp 并解冻结 | 待办 |
+| UI-01 | `LocalUiStyle.current == UiStyle.IOS` 散点仍未收口到 0 | designsystem + 11 个 feature 文件 | 方案 §7.2 清单；材质门禁（`GlassEffect.kt:101,211`、`HomeVideoPage.kt:338`）应改读 `GlassConfig` | A | `UiStyleDecisionRatchetTest` 逐文件登记（B21 实测 designsystem 外 9 处，含每处理由） | **部分完成(B21，合并留待真机走查)** |
+| UI-02 | 6 处内联 `typography.x.copy(...)` 未消 | `core/designsystem` | `DesignTokenLintTest` 棘轮 6 | A | 棘轮 6 → 0（B21：收进 `TextStyleVariants` 的 `asBold` / `withFontSize` / `withTextColor` 三个具名出口，内部就是 `remember(this, …)`；刻意不提供通用 `copy {}` 透传，那等于换个写法继续内联） | **已关闭(B21)** |
+| UI-03 | 6/10dp 间距档已补，字面量离群值待继续收敛 | `core/designsystem` | `Spacing.kt` 新增档位后的残留字面量；`DesignTokenLintTest` 上限需按实际下调 | A | 棘轮**下调**（写明基线依据）：B21 把 dp 字面量上限 981 → 980，依据是 B20 形状收口少了一处 `16.dp`。**刻意不强降 6/10.dp 两档**：BiliSpacing 补档之后要按语义逐处替换，那是视觉活，无设备不做 | **部分完成(B21)** |
+| UI-04 | 三态（加载/空/错误）未全站统一 | 各 feature | `StateMessageCard` 体系；`AdaptiveMediaGrid` 错误优先已修，其余界面待审 | A | 清单已出：`UI-04-三态覆盖清单.md`（34 个含列表界面，20 已用状态卡）。**刻意不写通配守卫**：14 个不满足者里多数本来就不该满足（网格持有 / 纯本地列表），第一天红 14 处的禁令结局就是 14 条豁免（W18）。C 类 8 个待真机逐屏走查 → L4-22 | **部分完成(B21)** |
+| UI-05 | 三处小触控目标被 `AccessibilityStructureTest` 冻结（D4） | `core/designsystem` | 任务书把"触控 ≥48dp"列为 **A 级可机器判定** | A | **B21 复核后维持冻结**：三处里两处就在悬浮胶囊内，胶囊整体高度就是按 32dp 排的，抬到 48dp 会**真的改掉布局**（不是"反正静态可判定"那种零像素改动）；`AccessibilityStructureTest` 已写明每处理由并钉住上限 3。**任务书把这条归 A 级是过于乐观**——能静态判定"是多少"，不能静态判定"改了好不好看" | 挂起（需真机走查） |
 | UI-06 | 玻璃材质层级（Thin/Regular/Thick）与 vibrancy 参数统一 | `core/designsystem/glass` | 方案 §3-D、`LiquidBackdrop.kt:73` 与 `VideoPlayerPane.playerControlGlass` 两处 vibrancy 无单一来源 | **B**（观感） | 只出参数表 + 待真机清单，默认值冻结 | 挂起 |
 | UI-07 | 动效 tween → spring 族 | `core/designsystem/theme/Animation.kt` | 方案 §3-D | **B** | 同上，默认值冻结 | 挂起 |
-| UI-08 | `materialTypography()` 定义了但无人调用（死代码 or 漏接） | `core/designsystem/theme/Typography.kt` | PROGRESS B0 归档时发现 | A | 查清后删除或接线；不留未消费的真值源 | 待复核 |
-| UI-09 | `SecondaryLabelAAVariants` 只被测试引用 | `core/designsystem/theme/iOSColor.kt` | 阶段 B"两版 token 待翻转"的产物；AA 版已翻成本地默认值 | A | 若已无用则删；否则补用途注释 | 待复核 |
-| UI-10 | `IosDarkLiftedBackground` 未被引用 | `core/designsystem/theme/iOSColor.kt` | 深色改炭色阶梯后残留 | A | 删除（未使用即删，勿留 `_vars`） | 待复核 |
+| UI-08 | `materialTypography()` 定义了但无人调用（死代码 or 漏接） | `core/designsystem/theme/Typography.kt` | PROGRESS B0 归档时发现 | A | 查清后删除或接线；不留未消费的真值源 —— **B21 查实是"被取代的死草稿"**：MATERIAL 档真正走的是 `Typography.kt` 的 `BaseTypography/createTypography`，它同样带 AppFontFamily，但标题字重停在 Medium 而非草稿的 SemiBold。删函数并留注释指明以后改标题粗细改哪一处 | **已关闭(B21)** |
+| UI-09 | `SecondaryLabelAAVariants` 只被测试引用 | `core/designsystem/theme/iOSColor.kt` | 阶段 B"两版 token 待翻转"的产物；AA 版已翻成本地默认值 | A | **复核后既不是删也不是补注释**：LIGHT 其实早已是 production 值，但 production 那边写的是字面量 `0xC83C3C43`，与 `SecondaryLabelAAVariants.LIGHT` **重复了一份真值源**（V1 违例）。B21 让 production 改引用常量、并把对象注释改成实话：LIGHT 已生效、DARK 仍是待拍板预案（深色没有用户反馈，无真机对照不翻） | **已关闭(B21)** |
+| UI-10 | `IosDarkLiftedBackground` 未被引用 | `core/designsystem/theme/iOSColor.kt` | 深色改炭色阶梯后残留 | A | 删除（未使用即删，勿留 `_vars`）—— B21 已删，并留一行注释说明深色分层现在归 iOSColorScheme 的染色阶梯，别再回来加"平行的一档" | **已关闭(B21)** |
 
 ---
 

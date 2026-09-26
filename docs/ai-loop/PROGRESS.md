@@ -470,7 +470,34 @@
   稳态 jank 0.21% 大概率测不出差异）
 - commits：`perf(video,designsystem)` 形状与选区路径 + 守卫 4 条 / `docs(ai-loop)`
 
-## 批次 B21 · （下一批）· C-好看：UI-01~05 棘轮 + UI-08/09/10 死代码
+## 批次 B21 · 2026-09-26 · C-好看区收口（UI-01/02/03/04/05/08/09/10）
+
+**分区**：C-好看｜**性质**："能机器判定的收掉，判定不了的写清理由"｜**详情**：`report-2026-09-26-B21.md`
+
+- **UI-02 关闭**：新增 `TextStyleVariants.kt`（`asBold` / `withFontSize` / `withTextColor`，
+  内部 `remember(this,…)`），6 处内联 `typography.x.copy(` 全部改走它，棘轮 **6 → 0**。
+  刻意不提供通用 `copy {}` 透传（那等于换个写法继续内联，棘轮白设）
+- **UI-08 关闭**：`materialTypography()` 是**被取代的死草稿**（MATERIAL 真走 `BaseTypography`，
+  标题字重停 Medium 而草稿是 SemiBold）→ 删 + 注释指明以后改哪一处
+- **UI-09 关闭（且问题比描述严重一层）**：LIGHT 早已是 production 值，但 production 写的是
+  字面量 `0xC83C3C43`，与 `SecondaryLabelAAVariants.LIGHT` **重复一份真值源**（V1 违例）
+  → production 改引用常量；注释改为实话：LIGHT 已生效、DARK 仍是待拍板预案
+- **UI-10 关闭**：`IosDarkLiftedBackground` 零引用，删 + 注释说明分层现归 iOSColorScheme
+- **UI-01 部分完成**：`UiStyleDecisionRatchetTest` 逐文件登记 designsystem 外 9 处（每处理由）；
+  **不做合并** —— 默认档仍是 MATERIAL、四象限没走完，把散点并成 token 本身就是视觉改动
+- **UI-03 部分完成**：dp 上限 981 → 980（B20 少了一处 16.dp）；不强降 6/10.dp（要逐处按语义换 token，是视觉活）
+- **UI-04 交付清单**：`UI-04-三态覆盖清单.md`（34 个界面 / 20 已用状态卡 / 14 未用分三类，
+  其中 C 类 8 个待走查）；**刻意不写通配守卫**（第一天红 14 处且多数不该红 → 结局是 14 条豁免，W18）
+- **UI-05 维持冻结并反驳任务书**：三处里两处在悬浮胶囊内，胶囊高度就是按 32dp 排的，
+  抬 48dp 会真改布局 —— **能静态判定"是多少"，不能静态判定"改了好不好看"**
+- 全量（先删 test-results）：**270 单测 / 0 失败 / 0 错误**；designsystem 那 106 条另用
+  `--rerun-tasks` / `--rerun` 强制真跑确认（ST-26 口径）
+- 破坏性验证两处都咬（内联 copy 改回去 / 多一行 IOS 判定 —— 后者用"并进既有条件"的方式加行，
+  语义不变，纯粹测登记）
+- **队列结论**：A-稳定可离线判定项已全关；B-流畅只剩需真机的两项；C-好看只剩需真机的几项。
+  **下一批起需要设备接入才能继续推进**（L4 已积到 22 项）
+
+## 批次 B22 · （阻塞）· 需要真机：L4-13~L4-22 走查 + PF-02/PF-04 测量
 
 
 
