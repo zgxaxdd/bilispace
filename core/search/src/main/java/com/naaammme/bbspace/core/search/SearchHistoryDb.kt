@@ -6,7 +6,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [SearchHistoryEntity::class],
     version = 1,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class SearchHistoryDb : RoomDatabase() {
     abstract fun dao(): SearchHistoryDao

@@ -1,0 +1,176 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "c3ee4d2854dad042e78bc94d2c851e8a",
+    "entities": [
+      {
+        "tableName": "video_download_task",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `cover` TEXT, `owner_uid` INTEGER, `owner_name` TEXT, `biz` TEXT NOT NULL, `aid` INTEGER NOT NULL, `cid` INTEGER NOT NULL, `bvid` TEXT, `ep_id` INTEGER NOT NULL, `season_id` INTEGER NOT NULL, `kind` TEXT NOT NULL, `video_quality` INTEGER NOT NULL, `audio_quality` INTEGER NOT NULL, `status` TEXT NOT NULL, `progress_type` TEXT, `progress_label` TEXT, `done_bytes` INTEGER NOT NULL, `total_bytes` INTEGER NOT NULL, `error` TEXT, `video_path` TEXT, `audio_path` TEXT, `duration_ms` INTEGER NOT NULL, `created_at_ms` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cover",
+            "columnName": "cover",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ownerUid",
+            "columnName": "owner_uid",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "ownerName",
+            "columnName": "owner_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "biz",
+            "columnName": "biz",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aid",
+            "columnName": "aid",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cid",
+            "columnName": "cid",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bvid",
+            "columnName": "bvid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "epId",
+            "columnName": "ep_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seasonId",
+            "columnName": "season_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "videoQuality",
+            "columnName": "video_quality",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "audioQuality",
+            "columnName": "audio_quality",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progressType",
+            "columnName": "progress_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "progressLabel",
+            "columnName": "progress_label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "doneBytes",
+            "columnName": "done_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "videoPath",
+            "columnName": "video_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "audioPath",
+            "columnName": "audio_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_video_download_task_biz_aid_cid_ep_id_season_id_kind",
+            "unique": true,
+            "columnNames": [
+              "biz",
+              "aid",
+              "cid",
+              "ep_id",
+              "season_id",
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_video_download_task_biz_aid_cid_ep_id_season_id_kind` ON `${TABLE_NAME}` (`biz`, `aid`, `cid`, `ep_id`, `season_id`, `kind`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c3ee4d2854dad042e78bc94d2c851e8a')"
+    ]
+  }
+}

@@ -6,7 +6,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [VideoDownloadEntity::class],
     version = 2,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class VideoDownloadDb : RoomDatabase() {
     abstract fun dao(): VideoDownloadDao

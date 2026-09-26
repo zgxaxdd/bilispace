@@ -6,7 +6,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [PublishedRecordEntity::class],
     version = 1,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class PublishedRecordDb : RoomDatabase() {
     abstract fun dao(): PublishedRecordDao

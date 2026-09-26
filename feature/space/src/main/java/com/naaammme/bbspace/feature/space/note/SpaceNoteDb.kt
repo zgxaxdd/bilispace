@@ -46,7 +46,7 @@ interface SpaceNoteDao {
 @Database(
     entities = [SpaceNoteEntity::class],
     version = 2,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class SpaceNoteDb : RoomDatabase() {
     abstract fun dao(): SpaceNoteDao
