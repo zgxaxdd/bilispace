@@ -1,0 +1,139 @@
+# FINDINGS —— 调研沉淀（只收性能 / 稳定 / 视觉手法）
+
+> 任务书功能冻结令：**禁止在此记功能点子**。这里的每一条都必须能回答"它让已有功能更稳/更快/更漂亮"。
+
+## 1 · 稳定手法
+
+**S1 裸 `runCatching` 会把「取消」当「失败」。**
+快速切页 / 重试取消时，`runCatching { suspendCall() }` 捕获 `CancellationException`，
+下游渲染成错误态或空态。本仓已收口 32 处（`runCatchingCancellable`），
+守卫是 `VideoLogicGuardTest.cancellationSwallowingIsClosedInFeatureViewModels`
+（文件清单 + "必须真的在调用"，防止改成 import 就完事）。
+**复用方式**：新增 ViewModel 时先看这条守卫的清单；批量清理时同一套防假绿写法。
+
+**S2 陈旧响应回灌用「代际号」而不是时间戳。**
+`CommentViewModel.threadReqId` 的写法：每次发起 +1，回调时不匹配就丢弃。
+比 `Job.cancel()` 更容易被静态断言，也扛得住乱序返回。
+
+**S3 状态机不要留旁路标志位。**
+`PlaybackHostState.forcedDismissMode` 把"该收起小窗"和"该关闭播放"混进一个布尔，
+进程重建后返回键被吞。收成 `collapseToCapsule` + `onPlaybackUiStarted` 单一入口后，
+`PlaybackHostDismissGuardTest` 钉住"不许再引入同类旁路"。
+**泛化结论**：一个标志位承载两种意图 = 后续每个特判都要在该标志上再叠一个特判。
+
+**S4 枚举解析要有脏值兜底。**
+`AppSettings.buildThemeConfig` 原来 `valueOf` 直接抛 —— DataStore 里留一个跨版本脏字符串
+就会让整条主题流失效（表现为全站主题回默认）。`runCatching{…}.getOrNull() ?: default`。
+同理适用于所有"手改/降级残留"可能的存储读取点。
+
+**S5 三态优先级：错误态必须压过空态。**
+`AdaptiveMediaGrid` 原来有错误也显示"暂无内容"。网络失败对用户而言不是"空"，
+把失败说成空 = 用户以为数据没了。审其它界面按同一判据。
+
+## 2 · 流畅手法
+
+**P1 缓存键必须同源。**
+取色回退请求写死 `.memoryCacheKey(原始 URL)`，显示请求用 Coil 从 `data` 派生键
+→ 同一封面下载两次、解码两次、缓存两份。规则：**任何"为同一资源服务的第二条请求"不许自定义键**。
+
+**P2 静止界面必须停掉逐帧驱动。**
+播放页暂停后玻璃 tick 仍以 60fps 空转（15s 渲染 909 帧 → 修后 0 帧，真机 A-B-A 已测）。
+这类浪费**不进 jank 指标**，只烧 GPU/电量，所以"jank 0.00%"不能当作没问题。
+判据：`LaunchedEffect` 里凡是在推 refresh/invalidate，都要有退出条件。
+
+**P3 组合期不读动画值 → 几何参数改 lambda。**
+`TrackGeometry.filledRight` 由值改 `() -> Float`，只在 `Canvas{}` / `offset{}` 块求值，
+每帧推进就不触发重组（`FrameBudgetLintTest` 的红线）。这是"平滑外推"和"不重组"共存的唯一姿势。
+
+**P4 SharedPreferences 首次访问 = 调用线程读盘 + 解析 XML。**
+把它放在首帧组合里（哪怕包在 `runBlocking` 里）会让"优化"比基线慢 ~5%（真机实测）。
+正确做法：构造期后台线程整体加载 → 首帧只读 `@Volatile` 引用（纯内存）→ 读不到才回退慢路径。
+**另一个坑**：镜像若只在"写设置"时生成，从不改设置的用户永远没有镜像，快路径形同虚设
+→ 必须在**首读**时也回填快照。
+
+**P5 自建缓存必须登记进 trim 分级。**
+`coverMemo`（无缝动画软件位图 LRU，约 8MB）原先不参与 `MemoryTrimPolicy`。
+新增 `SeamlessCoverAction`（Keep/TrimToRecent/Clear）并让 `BiliApplication.applyTrimPlan` 收口。
+注意：`ImageCacheAction.Nothing -> return` 这种写法会**短路掉后续新分支**，要改成 `-> Unit`。
+trim 真机效果：TOTAL PSS 132.5 → 91.8MB（整链效果，不能记在单一分支名下）。
+
+## 3 · 视觉手法
+
+**V1 角色色要单一真值源 + 一致性断言。**
+`BiliColorRoles`（一级/二级/三级文字、separator、fill）与 `iOSColorScheme` 必然漂移，
+除非用测试钉死：`iosSecondaryLabelMatchesScheme`、`iosSeparatorMatchesScheme` 两条断言。
+**这是"新增语义层"的标准配套**——没有一致性断言的 token 层等于制造第二个真值源。
+
+**V2 对比度按角色分档，不要一刀切 AA。**
+Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）本来就"存在但退后"。
+本仓策略：次要文字设棘轮地板（现 4.5，浅色已提 AA），三级文字只设"退化到看不见"的地板 1.6，
+并在测试注释里写清"要更可读请换角色，不要抬 alpha（会破坏与 Apple 的取值对齐）"。
+
+**V3 深色分层不取纯黑，取"同色相低饱和阶梯"。**
+通行做法（Telegram #17212B / Discord #313338 / Spotify #121212）：以 tint 色相给
+底→卡→容器→浮层上 4–10% 染色，层间连续可辨。纯黑留给 OLED 档（`isPureBlack`），
+且此时用 7% 白发丝描边替代染色分层（卡片在纯黑上无层次）。
+
+**V4 同心圆角规则。**
+`dockChip = dock − 内边距`（32−8=24）、`playerControl = 高度一半`（34/2=17）。
+已成文并在 `Radius.kt` 注释里 —— 新组件的胶囊/圆角按此推导，不要凭手感取整。
+
+**V5 `card == player` 是无缝 morph 的不变量，不是巧合。**
+`IOSColorSchemeTest` 有断言。改任一圆角会破坏卡片→详情页的形变动画。
+
+**V6 结构守卫是视觉规格唯一的长期防线。**
+270dp 警告框宽、56dp 行高、36×5dp grabber、发丝分隔线 —— JVM 取不到 Compose 语义树，
+只能扫源码。写法三件套：**先断言文件读到了（`mainSources.size > 100`）→ 跳过注释与 import 行 →
+故意改坏验证会咬人**。缺一件就是假绿。
+
+## 4 · 流程手法（本仓踩过的坑）
+
+**W1 A/B 对照一律 `git worktree`，绝不 `git checkout <旧提交>`。**
+用 checkout 回退工作区会把用户正在看的文件从磁盘上抹掉（git 里没丢），造成"你把报告删了"的误判。
+
+**W2 判定"某能力不可用"前，把配置的全部查找路径走一遍。**
+项目级 → `GRADLE_USER_HOME` → 环境变量 → 命令行 `-P`。
+曾在 `GRADLE_USER_HOME/gradle.properties` 里存在签名配置的情况下断言"release 装不上"。
+
+**W3 帧率上限看 `mActiveRenderFrameRate`，不看 `peak_refresh_rate`（那是上限）
+也不看 `supportedModes`（那是硬件列表）。** 本机面板实际 60Hz。
+
+**W4 交接文档里的行号与数字必须自己复核再采信。**
+同类任务书曾给出三处错误断言（"ActionChip 只有 42dp"实测约 56dp；要移植的写法本仓不存在；
+把某日志读成"与逐帧绘制成本无关"是误诊）。复核后若发现错，改注释并写明，不要照做。
+
+**W5 扫源码型单测会被 Gradle 判 UP-TO-DATE 跳过。**
+改完守卫测试必须 `--rerun-tasks` 或强制 clean 该测试任务的输入，否则"全绿"可能来自缓存。
+
+**W6 判断"某个 schema 版本号有没有真把用户坑过"，用 `git log -L` 看那行的历史。**
+`git log -L '/version =/,+1:path'` 能直接给出该值的每次变更与提交。
+审计报"Room 无 migration → 正在硬崩"，实测 `VideoDownloadDb`/`SpaceNoteDb` 的 `version = 2`
+是**出生值**（首次引入即为 2）→ 没有 v1 安装可崩，缺陷要从 P0 降成"下次改实体才炸"的埋雷；
+而同一条查法把 `PlaybackHistoryDb` 的 `2→3` 揪了出来，配上 `fallbackToDestructiveMigration`
+就是**已经发生过**的数据丢失。同一工具，两个方向都要用它校准严重度。
+
+**W7 结构守卫要成文"谁能引用谁"，否则同一缺陷会在没被覆盖的文件里复发。**
+`ListAllocationStructureTest` 的正则盖 `RoundedCornerShape`/`composed`/`animate*AsState`，
+盖不到 `Path()` 与 `Outline.Generic` —— 于是 `UserCollageSection` 里五个 Shape 内联构造、
+`SelectableText` 在 `drawBehind` 里 `getPathForRange` 都不报警。**棘轮的覆盖面 = 它真正会红的写法集合**，
+不是它的名字。
+
+## 4.1 待修的"设计约束"类结论
+
+**D1 `@Singleton` 上的 `var callback` 必须有清理路径。**
+`PlaybackHostState.onPlaybackUiStarted` 由 `MainActivity.onCreate` 赋值、**全仓无处置 null**，
+而 MainActivity 根本没有 `onDestroy` 重写。后台播放时 Activity 可以销毁不重建（进程靠播放活着），
+单例就长期持有 Activity + Compose 树 + ViewRoot。
+判据：凡是"进程级单例持有 UI 层的 lambda/引用"，都要在同一文件里配一个按身份比对的清理
+（无条件置 null 会在重建时序下把新实例刚装的回调清掉）。
+
+**D2 全仓唯一的 `OkHttpClient.Builder()` 意味着所有链路共用一套超时。**
+`NetworkModule.kt:60` 未设任何超时。想加 `callTimeout` 必须先确认它不含下载与流式读
+（`callTimeout` 覆盖整个 call 包括 body 传输，会给几百 MB 的下载判死刑）。
+**只有 `connectTimeout` 是安全的收紧**（只管 TCP 建连，不含传输）。
+
+## 5 · 外部调研（待做，只允许性能/稳定/视觉）
+
+- wiliwili 的低配设备优化思路（内存分级、图片降采样）→ 对照本仓 P5/V3
+- Material 3 Expressive 动效规范（spring 族参数）→ 服务 iOS 升级阶段 D
+- PiliPlus / BiliRoaming 的深色 `darkenTheme` 取值 → 已在 V3 采纳，待补 vibrancy 层级对照

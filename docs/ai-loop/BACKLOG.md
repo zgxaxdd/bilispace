@@ -1,0 +1,99 @@
+# BACKLOG —— ai-loop 队列
+
+> 优先级：**A-稳定 → B-流畅 → C-好看**；同级内 P0 > P1 > P2。
+> 每条含：编号、标题、模块、根因线索、A/B 级标注、验收标准（机器可判）、状态。
+>
+> **状态图例**：`待办` / `待复核`（来自审计报告，本人尚未读源码确认 —— 见 FINDINGS W4：
+> 交接文档的断言必须自己复核后再采信）/ `进行中` / `已关闭(见 PROGRESS)`
+>
+> **已复核确认为真（2026-09-26，直接读源码核过）**：ST-04（Geetest `WebView(ctx)` 全文无
+> `onDispose`/`destroy`）、ST-05（`BuvidFetcher.kt:77` 无 `.use`/`close`）、
+> UI-08（`materialTypography` 全仓仅定义处一个符号，零调用）、
+> UI-10（`IosDarkLiftedBackground` 私有且零引用）。
+>
+> 来源：2026-09-26 三面源码审计（崩溃+协程 / 生命周期+状态 / 资源+内存+网络）
+> + 任务书 §1 的 9 处 TODO 埋点 + `docs/2026-09-22-BBSpace可执行优化方案.md` §9.3 遗留。
+
+---
+
+## A-稳定
+
+### P0（崩溃 / 数据丢失）
+
+| 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| ST-01 | Room 建库既无 migration 也无回退，**下一次实体变更即硬崩** | `core/download` `feature/space` | 已复核修正（原审计判为"正在发生的 P0"，不成立）：`VideoDownloadDb` 与 `SpaceNoteDb` 的 `version = 2` **是出生值**（`git log -L` 查到 `0c316e59 add Offline caching`、`bbe7d220 feat: space note` 首次引入即为 2），所以不存在 v1 老用户当前崩溃。真实缺陷是：`databaseBuilder` 链上零 `addMigrations` 零 `fallback`，且 `exportSchema=false` 没有留下任何 schema 快照 —— 下一个改实体的提交一定会让升级安装 `IllegalStateException` 硬崩，而那时已经写不出 migration | A | 先做**可差分**：`exportSchema=true` + `room.schemaLocation` 落地 JSON；结构守卫断言"每个 `@Database(version=N>1)` 必须给出 N-1 条 migration 或显式回退并写明理由" | 待办 |
+| ST-02 | 历史库靠 `fallbackToDestructiveMigration(true)` 升过版本 → **用户观看历史已被清过一次** | `core/history` | 已复核：`PlaybackHistoryDb` 在 `215575de del local historymeta` 里 version 2→3，而 `PlaybackHistoryRepository.kt:63` 用破坏性回退 —— 那次升级把本地观看历史清空，且没有任何日志/提示。`PublishedRecordRepository.kt:125` 同款写法（该库仍 v1，属埋着的雷） | A | 这两个模块禁用 `fallbackToDestructiveMigration` 的守卫测试 + 用 ST-01 导出的 schema 补真实 Migration | 待办 |
+
+### P1（泄漏 / 竞态 / 状态丢失）
+
+| 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| ST-03 | `PlaybackHostState.onPlaybackUiStarted` 挂在 `@Singleton` 上从不清理 → 泄漏 Activity | `app` | `MainActivity.kt:181` 在 `onCreate` 里赋 `{ pendingNotificationPermission = true }`；后台播放时 MainActivity 可销毁不重建，单例长期持有其实例 | A | `onDestroy` 按身份比对清理（只清自己那条）；`PlaybackHostDismissGuardTest` 同款结构守卫 | 待办（B2） |
+| ST-04 | Geetest 验证码 `WebView` 无 `destroy()` | `feature/auth` | `GeetestDialog.kt:38` `AndroidView(factory={WebView(ctx)})` 无 `onDispose`；对照正确写法 `WebViewScreen.kt:187` | A | 结构守卫：`src/main` 内每个 `WebView(` 所在文件必须含 `onDispose` + `destroy()` | 待复核 |
+| ST-05 | `BuvidFetcher` 的 OkHttp Response 未关闭，早退路径漏连接 | `infra/crypto` | `BuvidFetcher.kt:77` `newCall().execute()` 未 `use`；三条早退 return + JSON 抛错都丢 body；冷启动必走，池仅 10 连接 | A | 守卫：`newCall(...).execute()` 必须在 `.use{}` 内 | 待复核 |
+| ST-06 | core/infra 仍有 10 处裸 `runCatching`/`catch(Exception)` 吞取消 | `core/sponsorblock` `core/comment` `core/live` `core/download` `infra/crypto` `infra/network-grpc` `infra/coldstart` `feature/bbspace` `app/AppInitializer` | `SponsorBlockClient.kt:53,107,123`、`OfflineDanmakuSession.kt:66`、`CommentRepository.kt:176`、`LiveRoomMessageRepository.kt:194`、`TicketGenerator.kt:104,128`、`ColdStartClient.kt:82`、`GaiaReporter.kt:121`、`BbSpaceScreen.kt:131`、`VideoDownloadRepository.kt:443`、`AppInitializer.kt:105` | A | 把 B4 的守卫从 `feature/*` ViewModel 扩到 core/infra 清单；逐条 `runCatchingCancellable` 或 `catch (CE) { throw CE }` | 待复核 |
+| ST-07 | 离线播放器与流会话共用 `@Singleton PlayerEngine`，无所有权仲裁 | `core/playback` | `DownloadPlaybackControllerImpl.kt:71,133`：`release()` 无条件 `playerEngine.release()`，会把小窗/流会话正在用的 ExoPlayer 释放 | A | 用 fake `PlayerEngine` 记 `setSource/release` 的 JVM 状态测试，断言单Owner不变量 | 待复核 |
+| ST-08 | `VideoDetailActivity.onNewIntent` 少做三件 onCreate 做的事 | `app` | `VideoDetailActivity.kt:177-181` 缺 `cancelPendingClose()` / `markVideoOpened()` / `capsuleState.deactivate()`（对照 :93、:110-112）→ 上一个视频的返回动画收尾 job 会去 close 新视频 | A | 结构守卫：`fun onNewIntent` 体内必须引用 `cancelPendingClose` | 待复核 |
+| ST-09 | `onValueChangeFinished` 里 `dragFraction!!` | `feature/listen` | `ListenDetailScreen.kt:208`（声明在 :189 是可空 `remember`）；无障碍/IME 路径下可在没有 `onValueChange` 的情况下触发 finished | A | 把 finished 处理抽成纯函数 `fun seekTarget(d: Float?): Long?`，JVM 测 null 不抛 | 待复核 |
+| ST-10 | `ImageSaver` 的 `as HttpURLConnection` 在 `runCatching` 之外 | `core/common` | `ImageSaver.kt:22`（`runCatching` 从 :29 才开始），服务端可控 scheme 会抛 CCE 逃出"返回非空 Uri"的 API 契约 | A | JVM 测：非法 scheme 走受控失败而非 CCE | 待复核 |
+| ST-11 | 下载：DB 行先删、文件后删且丢弃返回值，无孤儿目录 GC | `core/download` | `VideoDownloadRepository.kt:169`/`:634`：`dao.delete` 提交后 `deleteRecursively()` 的 Boolean 被丢；启动恢复只按 DB 驱动 | A | 注入 fake storage 的 JVM 测：下载根下"无 DB 行的目录"必被扫掉 | 待复核 |
+| ST-12 | `IMFieldsCache$mid` SharedPreferences 文件不随账号删除而回收 | `core/im` `core/auth` | `ImRepository.kt:471` 按 mid 建独立 prefs 文件；`AuthStore.removeAccount`(:185-193) 只删 `account_$mid` 系列键 | A | JVM 测（fake Context）：`removeAccount(mid)` 后该文件必须不存在 | 待复核 |
+
+### P2（边角错误分支）
+
+| 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| ST-13 | `DownloadDao` 是唯一无 `@Transaction` 的 DAO，读-改-写竞态会抛裸 ISE | `core/download` | `VideoDownloadDao.kt` 整文件；`VideoDownloadRepository.kt:86-103` 有字面 `error("下载任务已存在但未找到记录")` | A | 守卫：`core/download` 多语句写路径必须落到 `@Transaction` | 待复核 |
+| ST-14 | gRPC 编解码丢掉自己写的长度域，畸形帧报 ISE 而非 `BiliApiException` | `infra/network-grpc` | `GrpcFrameCodec.kt:71-91`（`encode` 写 4 字节长度、`decode` 直接 `copyOfRange(5,size)`）；截断帧被当 protobuf 解 | A | JVM 属性测：`decode(encode(x))==x`；长度不符必须抛 `BiliApiException` | 待复核 |
+| ST-15 | 单例里的 `CoroutineScope(SupervisorJob())` 无取消路径 | `app/playback` | `CapsuleIndicatorState.kt:43,52`、`PlaybackHostState.kt:44,72`（今日因 `@Singleton` 而安全，改作用域即变泄漏） | A | 记录为设计约束；若 ST-03 改动牵涉则一并补 `close()` | 待复核 |
+| ST-16 | `AppSettings.readResponsePrefix` 里 `response.body ?:` 恒假分支 | `infra/player` | `SingleFileDashMediaSourceFactory.kt:220` 编译警告（OkHttp 5 body 非空） | A | 死分支删除 + 编译警告数不上升 | 待办 |
+| ST-17 | 免流/元数据 `BiliMetadataBuilder` 的 type/oid 仍按静态值 | `infra/network-http` | `BiliMetadataBuilder.kt:117` TODO | — | **需网络行为验证，无设备不做**：转 L4/决策产物 | 挂起 |
+| ST-18 | eac3 软解缺失 | `core/playback` | `StreamPlaybackSessionImpl.kt:684` TODO | — | 真机解码能力相关，无设备不可判 | 挂起 |
+| ST-19 | 翻译 locale 只能英文（`x-bili-locale-bin` 未动态化） | `feature/comment` | `CommentViewModel.kt:312` TODO | — | 属"多了一个能做的事"边界 → **功能冻结令，不做** | 冻结 |
+| ST-20 | `DynamicRepository` 接口迁移遗留（OpusDetailReq → DynDetailReq） | `core/dynamic` | `DynamicRepository.kt:81` TODO | — | 换接口=改线上行为，无设备不可验 | 挂起 |
+| ST-21 | `DeviceIdentity` 远程 fp 未接 | `infra/crypto` | `DeviceIdentity.kt:220` TODO（注释自评"不知道有啥用"） | — | 无收益且涉凭据 | 冻结 |
+| ST-22 | `ImConversationComposer` 输入态未收敛到 `TextFieldState` | `feature/im` | `ImConversationComposer.kt:51` TODO | A | 属状态收敛：需先有可判定的"清理时机"回归测，否则不动 | 待复核 |
+
+---
+
+## B-流畅
+
+| 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| PF-01 | OkHttp 全局无 `connectTimeout`/`readTimeout`/`callTimeout` | `infra/network-http` | `NetworkModule.kt:60` 是仓库唯一 `OkHttpClient.Builder()`；`BiliDns.lookup(:186)` 在 `Dns.lookup` 里同步串三次 DoH，`Call.cancel()` 打不断 | **B**（超时值属手感/成功率权衡）| `connectTimeout` 可 A 级收紧（TCP 建连，不含传输）；**`callTimeout` 会砍断大文件下载与流式读，绝对不许盲加**。产出参数表 + L4 | 部分可做 |
+| PF-02 | 单文件 DASH 预取窗口固定 91536 字节，索引超出即起播失败 | `infra/player` | `SingleFileDashMediaSourceFactory.kt:198` TODO（"100 小时视频"）；B1 已让解析器不因盒头形态误判，窗口截断仍判 null | **B**（网络行为，需真实索引分布） | 先做探针日志量测真实索引大小分布，再谈扩窗口；不许猜 | 待办（需真机/抓包） |
+| PF-03 | 冷启动链路不可测量 | `infra/coldstart` | T3 遗留；`ColdStartClient.kt:82` 的 catch 还吞取消（并入 ST-06） | A（可测性，非新功能） | 输出可解析的阶段耗时日志 + 一个 JVM 侧的耗时口径单测 | 待办 |
+| PF-04 | 首屏预热路径 jank（稳态已达标，剩冷缓存 r1~r3 1.0~1.8%） | `feature/home` | 见记忆第二轮结论与 `docs/performance-baseline.md` | B | 需真机 A-B-A ≥5 轮中位，无设备不下结论 | 挂起 |
+| PF-05 | 文字选区 `getPathForRange` 在 `drawBehind` 里每次重绘都分配 `Path` | `core/designsystem` | `SelectableText.kt:106-110` | A（每帧分配，属 `ListAllocationStructureTest` 范畴） | 长文本拖动选择的 Path 分配计数守卫 | 待复核 |
+| PF-06 | 勋章拼图五个 `PolygonShape/StarShape` 在组合体内联构造 | `feature/user` | `UserCollageSection.kt:38-42` + `UserCollageCanvas.kt:147,195` 每次 `createOutline` 分配 `Path`/`Outline.Generic`；现有棘轮正则盖不到 `Path()` | A | `ListAllocationStructureTest` 扩计数字段（含 `Path(`/`Outline.Generic`），棘轮只降不升 | 待复核 |
+
+---
+
+## C-好看
+
+> UI 主线在 `docs/2026-09-25-iOS界面风格升级方案.md` 的阶段框架内推进；
+> 每批次只动一个视觉维度。阶段 A/B/C 的**已完成部分**见 PROGRESS B0。
+
+| 编号 | 标题 | 模块 | 根因线索 | 级 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| UI-01 | `LocalUiStyle.current == UiStyle.IOS` 散点仍未收口到 0 | designsystem + 11 个 feature 文件 | 方案 §7.2 清单；材质门禁（`GlassEffect.kt:101,211`、`HomeVideoPage.kt:338`）应改读 `GlassConfig` | A | `grep` 计数棘轮（只许减），designsystem 内部之外为 0 | 待办 |
+| UI-02 | 6 处内联 `typography.x.copy(...)` 未消 | `core/designsystem` | `DesignTokenLintTest` 棘轮 6 | A | 棘轮 6 → 0 | 待办 |
+| UI-03 | 6/10dp 间距档已补，字面量离群值待继续收敛 | `core/designsystem` | `Spacing.kt` 新增档位后的残留字面量；`DesignTokenLintTest` 上限需按实际下调 | A | 棘轮**下调**（写明基线依据） | 待办 |
+| UI-04 | 三态（加载/空/错误）未全站统一 | 各 feature | `StateMessageCard` 体系；`AdaptiveMediaGrid` 错误优先已修，其余界面待审 | A | 三态组件覆盖清单 + 结构守卫 | 待办 |
+| UI-05 | 三处小触控目标被 `AccessibilityStructureTest` 冻结（D4） | `core/designsystem` | 任务书把"触控 ≥48dp"列为 **A 级可机器判定** | A | 能静态判定就抬到 48dp 并解冻结 | 待办 |
+| UI-06 | 玻璃材质层级（Thin/Regular/Thick）与 vibrancy 参数统一 | `core/designsystem/glass` | 方案 §3-D、`LiquidBackdrop.kt:73` 与 `VideoPlayerPane.playerControlGlass` 两处 vibrancy 无单一来源 | **B**（观感） | 只出参数表 + 待真机清单，默认值冻结 | 挂起 |
+| UI-07 | 动效 tween → spring 族 | `core/designsystem/theme/Animation.kt` | 方案 §3-D | **B** | 同上，默认值冻结 | 挂起 |
+| UI-08 | `materialTypography()` 定义了但无人调用（死代码 or 漏接） | `core/designsystem/theme/Typography.kt` | PROGRESS B0 归档时发现 | A | 查清后删除或接线；不留未消费的真值源 | 待复核 |
+| UI-09 | `SecondaryLabelAAVariants` 只被测试引用 | `core/designsystem/theme/iOSColor.kt` | 阶段 B"两版 token 待翻转"的产物；AA 版已翻成本地默认值 | A | 若已无用则删；否则补用途注释 | 待复核 |
+| UI-10 | `IosDarkLiftedBackground` 未被引用 | `core/designsystem/theme/iOSColor.kt` | 深色改炭色阶梯后残留 | A | 删除（未使用即删，勿留 `_vars`） | 待复核 |
+
+---
+
+## 已关闭 / 不需再做（防重复劳动）
+
+- 可执行优化方案 §7 全部条目、§9.1 的 B1–B9（PROGRESS B0 已归档提交）。
+- `GlobalScope` 全仓零使用；两处 `runBlocking` 均有 `withTimeoutOrNull` 上限（冷启动镜像回退路径）。
+- `LiveRepository.kt:119`、`PlaybackCdnSelector.kt:37` 的 `first()`、`ImRepository.kt:412,416` 的 `[0]`
+  均已被上游空值守卫 —— **审计误报**，不要修。
+- `AuthRepository` 的 `json.getString/getLong` 全在 `runCatchingCancellable` 内 → 不会崩，只成 failure。
