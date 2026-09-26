@@ -1,15 +1,19 @@
 package com.naaammme.bbspace
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.view.Display
+import android.Manifest
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
@@ -77,9 +82,52 @@ class MainActivity : ComponentActivity() {
 
     private var pendingAppLink by mutableStateOf<WebLinkTarget?>(null)
 
+    // Android 13+ 通知运行时权限：后台播放的媒体通知没有它会被系统静默丢弃。
+    // 时序（重要）：播放开始只**记标记**，真正弹窗推迟到 MainActivity 回到前台、
+    // 拿到焦点且返回 morph 结束之后 —— 此前直接在 onPlaybackUiStarted（无缝打开
+    // 动画期间的详情 Activity onCreate）里 launch，系统权限弹窗压在视频页上、
+    // 并把返回键抢走（按返回先关弹窗，返回动画被吞），表现为"返回动画异常"。
+    // 拒绝后不再骚扰（需要时用户可去系统设置授予）。
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Logger.d(TAG) { "POST_NOTIFICATIONS granted=$granted" }
+        }
+
+    private var pendingNotificationPermission = false
+
+    private fun maybeRequestNotificationPermission() {
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            pendingNotificationPermission = false
+            return
+        }
+        val prefs = getSharedPreferences("app_flags", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("notif_perm_asked", false)) {
+            pendingNotificationPermission = false
+            return
+        }
+        prefs.edit().putBoolean("notif_perm_asked", true).apply()
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    /**
+     * 消费待弹的权限请求。只在 MainActivity 处于前台时调用（onResume /
+     * onWindowFocusChanged），且系统无缝返回 morph 进行中继续等待 —— 弹窗
+     * 绝不落在动画窗口内，也不落在视频详情页上。
+     */
+    private fun maybeShowPendingNotificationPermission() {
+        if (!pendingNotificationPermission) return
+        if (com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState.isReturnRunning) return
+        pendingNotificationPermission = false
+        maybeRequestNotificationPermission()
+    }
+
     override fun onResume() {
         super.onResume()
         tryRestoreVideoPage("onResume")
+        maybeShowPendingNotificationPermission()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -89,6 +137,14 @@ class MainActivity : ComponentActivity() {
             // onResume 落地，focus 时刻重查一次。展开后 hostMode!=Hidden，
             // shouldRestoreVideoPage 自身即去重，不会重复恢复。
             tryRestoreVideoPage("onWindowFocus")
+            if (pendingNotificationPermission) {
+                // 焦点刚落定可能还在返回 morph 里：等一段再试一次，仍进行中就
+                // 交给下一次 onResume（标记保留，只弹一次的语义不变）
+                lifecycleScope.launch {
+                    kotlinx.coroutines.delay(1_200)
+                    maybeShowPendingNotificationPermission()
+                }
+            }
         }
     }
 
@@ -119,6 +175,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 播放开始（覆盖层展开 / 无缝详情 Activity 创建）只记标记；权限弹窗在
+        // onResume/onWindowFocusChanged 且返回 morph 结束后才弹（见
+        // maybeShowPendingNotificationPermission 的时序注释）
+        hostState.onPlaybackUiStarted = { pendingNotificationPermission = true }
         if (savedInstanceState == null) {
             autoCheckUpdate()
         }
@@ -143,12 +203,16 @@ class MainActivity : ComponentActivity() {
             //   theme-first-real uiStyle=IOS      glass=LIQUID    ← 真实配置
             //
             // 修法：在**首次组合期**同步预读一次真实配置，作为 state 的初值。
-            // `remember { runBlocking {...} }` 保证只在首次组合执行；带 300ms 超时，
-            // DataStore 异常或磁盘慢时静默回退默认值，绝不拖住启动。
+            // 优先读**设置镜像**（SharedPreferences 完整快照，微秒级、不碰 DataStore），
+            // 首帧主线程不再 runBlocking；只有镜像缺失（升级后首启 / 清数据）才回退
+            // `preloadThemeConfig()` 那条带 300ms 超时的慢路径 —— 这种情况下宁可阻塞
+            // 一次，也不能让首帧主题闪一下。
             // 用 MutableState 承载：它本身就是 Compose 可观察对象，直接读 .value 即可，
             // 不需要也不应该再 collectAsState（那是 Flow → State 的转换）。
             val themeConfigState: MutableState<ThemeConfig> =
-                remember { mutableStateOf(preloadThemeConfig()) }
+                remember {
+                    mutableStateOf(appSettings.peekThemeConfigBlocking() ?: preloadThemeConfig())
+                }
             // 初值来自同步预读（首帧即正确主题）；随后继续跟随 DataStore，
             // 设置页改主题时立即生效。
             LaunchedEffect(Unit) {
@@ -196,13 +260,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 同步预读真实主题配置，作为首帧的初值。
+     * 同步预读真实主题配置的**兜底**路径。正常情况下首帧走
+     * [com.naaammme.bbspace.core.settings.AppSettings.peekThemeConfigBlocking]
+     * 的设置镜像（SharedPreferences 快照，微秒级），不会走到这里。
      *
-     * 为什么必须同步：`collectAsState(initial = ThemeConfig())` 的首帧是**默认值**
-     * （MATERIAL + FROSTED），用户真实配置（如 IOS + LIQUID）异步到达后界面风格、
-     * 玻璃材质、配色整体翻一次 —— 就是"打开软件闪一下"。
+     * 为什么仍要保留：镜像缺失（升级后首启、清数据、镜像写入被进程终止打断）时，
+     * 首帧用默认主题会造成"打开软件闪一下"，那比阻塞一次更糟。
      *
-     * 为什么可以同步：AppSettings 是进程内单例，DataStore 已初始化，首次读盘只是
+     * 为什么可以同步兜底：AppSettings 是进程内单例，DataStore 已初始化，首次读盘只是
      * 读一个已 mmap 的小文件，实测个位数毫秒。仍加 [THEME_PRELOAD_TIMEOUT_MS] 超时，
      * 异常时回退默认值，绝不把启动拖住。
      */

@@ -133,7 +133,11 @@ class VideoDetailActivity : ComponentActivity() {
             //
             // 为什么可以同步：AppSettings 是进程内单例、DataStore 已初始化，首次读盘只是
             // 读一个已 mmap 的小文件（个位数毫秒）；仍带超时兜底，异常时回退默认值。
-            val themeConfigState = remember { mutableStateOf(preloadThemeConfig()) }
+            // 优先读设置镜像（SharedPreferences 快照，微秒级），首帧不 runBlocking；
+            // 镜像缺失才回退 preloadThemeConfig() 的带超时慢路径（宁可阻塞一次也不白闪）。
+            val themeConfigState = remember {
+                mutableStateOf(appSettings.peekThemeConfigBlocking() ?: preloadThemeConfig())
+            }
             LaunchedEffect(Unit) {
                 appSettings.themeConfig.collect { themeConfigState.value = it }
             }
@@ -177,7 +181,8 @@ class VideoDetailActivity : ComponentActivity() {
     }
 
     /**
-     * 同步预读真实主题配置，作为首帧初值。与 MainActivity 的同名方法同源。
+     * 同步预读真实主题配置的**兜底**，与 MainActivity 的同名方法同源。
+     * 正常情况下走 [com.naaammme.bbspace.core.settings.AppSettings.peekThemeConfigBlocking]。
      *
      * 详情页是**独立 Activity**，有自己的一次 setContent，所以必须自己预读一次；
      * 否则无缝打开动画期间会先渲染 MATERIAL 浅色，再翻成用户真实主题 —— 观感是白闪。
