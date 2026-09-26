@@ -60,7 +60,7 @@ object PlaybackHistoryModule {
             PlaybackHistoryDb::class.java,
             "playback_history.db"
         )
-            .fallbackToDestructiveMigration(true)
+            .addMigrations(*PlaybackHistoryMigrations.ALL)
             .build()
     }
 

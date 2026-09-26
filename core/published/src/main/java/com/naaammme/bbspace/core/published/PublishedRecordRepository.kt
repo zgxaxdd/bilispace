@@ -117,13 +117,14 @@ object PublishedModule {
     fun providePublishedRecordDb(
         @ApplicationContext context: Context
     ): PublishedRecordDb {
+        // 原先挂过 fallbackToDestructiveMigration(true)：该库自 `4d88a66c` 起 version 恒为 1
+        // （git log -L 查得是出生值，不存在旧安装），回退一次也没保护到东西，却会把
+        // "下次改实体忘写迁移"从开发期崩溃降级成用户本地发布记录被静默清空。
         return Room.databaseBuilder(
             context,
             PublishedRecordDb::class.java,
             "published_record.db"
-        )
-            .fallbackToDestructiveMigration(true)
-            .build()
+        ).build()
     }
 
     @Provides
