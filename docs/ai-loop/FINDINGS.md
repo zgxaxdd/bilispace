@@ -30,6 +30,13 @@
 `AdaptiveMediaGrid` 原来有错误也显示"暂无内容"。网络失败对用户而言不是"空"，
 把失败说成空 = 用户以为数据没了。审其它界面按同一判据。
 
+**S6 数据库的"静默清库"永远比"开发期崩溃"坏 —— 所以 `fallbackToDestructiveMigration` 一律禁用。**
+它把"改实体忘写迁移"这一类缺陷从**开发者当场红**降级成**用户数据没了且没有任何日志**。
+本仓 `PlaybackHistoryDb` 就是这么清掉过用户的本地观看历史（B11/ST-02）。
+判据：升级路径要么给真实 Migration，要么显式写一条"就是要把这张表清掉"的 Migration 并说明理由 ——
+后者会出现在 diff 里、会被 review，前者不会。
+**配套**：只禁回退还不够，必须同时 `exportSchema = true` + 快照入库，否则连"改了什么"都无从差分。
+
 ## 2 · 流畅手法
 
 **P1 缓存键必须同源。**
@@ -190,3 +197,18 @@ Apple secondaryLabel 语义本身约 3.2:1；三级文字（占位/时间戳）�
 本会话用 `git commit -m "..."`（双引号）写带反引号的中文说明，bash 把反引号当命令替换执行，
 `?:` 被当命令跑掉、那一段直接从消息里消失，构建与 diff 都正常 —— 只有日志烂了。
 用 `git commit -F - <<'EOF'`（带引号的 heredoc）或 `git commit -m` 单引号可避免。
+
+**W16 Room 跑完手写 Migration 后「不会」拿 schema 快照校验建出来的表，只更新 `room_master_table` 的 identityHash。**
+所以少拷一列、写错 NOT NULL 在"打开库"这一刻不报错：要么静默把该列写成 NULL，
+要么到第一次查询才炸，而炸的位置看起来跟迁移毫无关系。
+**结论**：手写迁移的正确性必须自己兜 —— 姿势是把 **Kotlin 源码里的 `execSQL` 字面量还原成 SQL**
+（不是另抄一份）与导出的 JSON 逐字比（`RoomMigrationCopyListTest`），再用本机真实 SQLite 回放整条链。
+**另一个坑**：`version` 一 bump、重编译一次，KSP 就自动写出新的 JSON 快照 ——
+所以"快照文件存在性"这类断言会被重编译**抵消**，真正拦得住的是**升级链检查**（每步都有 Migration）。
+
+**W17 Windows 上连续构建会撞 `classes.jar` 文件锁，报"另一个进程正在使用此文件"，这不是回归。**
+现象：`:core:published:bundleLibCompileToJarDebug FAILED` + `java.nio.file.FileSystemException`，
+且发生在**代码已还原、上一轮刚绿过**之后。原因是残留的 Gradle 守护进程还占着上一轮的 jar。
+处置：`./gradlew --stop` → `tasklist` 确认无 java 进程 → 重跑即过（W12 的同类，都是"并发/残留构建"代价）。
+**顺带教训**：这一轮测试根本没跑，而我读的 `test-results` XML 是**上一轮留下的**，
+差点得出"守卫没咬"的错误结论。破坏性验证先看 `BUILD` 行、再看 XML 的 mtime，最后才读内容。

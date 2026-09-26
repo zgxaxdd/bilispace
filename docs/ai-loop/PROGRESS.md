@@ -213,20 +213,60 @@
   而非 `UP-TO-DATE`/`FROM-CACHE`（ST-26 的口径）
 - commit：`fix(infra): ticket/冷启动/遥测/预热的取消不再被当成失败`
 
-## 批次 B10 · （下一批）· ST-01/ST-02 Room schema 可差分（或 ST-06 收尾）
+## 批次 B10 · 2026-09-26 · ST-06 再收两处 + ST-16 恒假分支清零
+**详情**：`report-2026-09-26-B10.md`（该报告由 B11 会话补写，当时只落了本条目）
 
-
-
-
-
-
-
-
-
-
-
-## 批次 B10 · 2026-09-26 · ST-06 收尾两处 + ST-16 恒假分支清零
 - `runCatchingCancellable`：`VideoDownloadRepository.cacheDanmaku`、`AppInitializer` 转场默认值迁移；守卫表补两条（AppInitializer 裸 runCatching 上限 4→3，棘轮如期下降）
 - ST-16：两处 OkHttp 5 下 `response.body ?:` 恒假分支删除（`SingleFileDashMediaSourceFactory:220`、`VideoDownloadRepository:584`，后者是本批构建新暴露的同类）→ **全量构建 Elvis 告警数 2 → 0**
 - 未做：`BbSpaceScreen:131`（仍在 ST-06 清单）；Room/ST-01、ST-06b、C 类全部仍未动
-- 验证：删 test-results 强制守卫真跑 → BUILD SUCCESSFUL in 4m25s，0 失败
+- 验证：删 test-results 强制守卫真跑 → BUILD SUCCESSFUL in 4m25s，0 失败。**测试总数当时未留档**，
+  由 B11 的 206 减去 B11 自身新增 12 反推为 194（与 B9 持平，说明本批未新增测试）
+- commit：`d077273d` + 说明更正 `03698e04`（反引号被 bash 当命令替换吞掉一段，教训 W15）
+
+## 批次 B11 · 2026-09-26 · Room schema 可差分 + 历史库真实迁移（ST-01/ST-02，P0 清零）
+
+**分区**：A-稳定 **P0**｜**级别**：A 级·可机器判定 + 一项转 L4｜**详情**：`report-2026-09-26-B11.md`
+
+- 复核修正两处（BACKLOG 都低估了）：① `bbspace.android.room` 约定插件**早就存在但没有任何模块应用**，
+  且它自己不设 schema 位置 —— "导出快照"这件事从来没有归属；
+  ② `PlaybackHistoryDb` 的**出生版本是 1**（当时叫 `LocalHistoryDb`），1→2 与 2→3 **两次都只靠破坏性回退**，
+  只补 2→3 会把停在 v1 的安装从"被清空"变成"打开即崩"
+- 又一个 BACKLOG 未记的事实：v1 表名是 `local_history`，主键比 v2 起**多一段 `:video:`**；
+  照抄 id 会让旧行与 `PlaybackHistoryKey.videoId()` 对不上 → 同一条视频留两行、继续观看查不到。
+  故 `Migration(1,2)` 里按 v2 规则**重算主键**
+- 改动：约定插件补 `room.schemaLocation`；5 个 Room 模块应用 `bbspace.android.room` + `exportSchema = true`；
+  5 份 schema 快照入库；新增 `PlaybackHistoryMigrations`（1→2、2→3，建新表-拷贝-删旧表-改名）；
+  删掉 `PlaybackHistoryRepository` / `PublishedRecordRepository` 的 `fallbackToDestructiveMigration(true)`
+- 新增守卫 `RoomSchemaGuardTest`（7）+ `RoomMigrationCopyListTest`（5）：后者**从 Kotlin 源码还原
+  execSQL 字面量**并与导出 JSON 逐字对比（Room 跑完迁移不校验表结构，少拷一列会静默写 NULL）
+- 本机真实 SQLite 回放（`build/b11_migration_check.py`，SQLite 3.50）：v1 建表塞 4 行样本 → 1→2 断言
+  行数保全且重算 id 与 Kotlin 规则一致 → 2→3 断言列结构/索引与 3.json 逐字段一致
+- 全量（先删 test-results）：`BUILD SUCCESSFUL`，**206 单测 / 0 失败 / 0 错误**（194 → +12）。
+  `:core:designsystem`、`:core:rank` 仍报 UP-TO-DATE、`:core:common`、`:infra:player` 报 FROM-CACHE
+  → 按 ST-26 口径追加 `--rerun-tasks` 强制复跑这 5 个模块，全绿
+- 四处故意改坏全部被咬：exportSchema 关回 false / 塞回破坏性回退 / INSERT 漏 `watchMs`
+  （守卫打列 diff，SQLite 同时报 `12 values for 11 columns`）/ version 升 4 不写迁移（4 条断言红）
+- **新查清的守卫设计事实**：version 一 bump、重编译一次 KSP 就自动写出新 JSON，
+  所以"快照存在性"会被重编译抵消，真正拦得住的是**升级链检查** → 记入 FINDINGS
+- 两次非回归红灯：`bundleLibCompileToJarDebug` 的 `classes.jar` 被残留守护进程锁死（`--stop` 即解，W17）；
+  一次"守卫没咬"其实是那轮构建在编译期就 FAILED、测试没跑，我读的是旧 XML（以后先看 BUILD 行再看 mtime）
+- 诚实边界：Room 侧真正执行迁移只发生在设备上 → **L4-14**；已在 v3 的设备本次零影响
+- commits：`build(room)` 导出配置与快照 / `fix(history,published)` 真实迁移与回退清零 /
+  `test(room)` 两道守卫 / `docs(ai-loop)` 台账与报告
+
+## 批次 B12 · （下一批）· A-稳定 P1 剩余：ST-06 最后一处 + ST-07 单 Owner 仲裁
+
+
+
+
+
+
+
+
+
+
+
+
+> 台账口径提醒：改过 Room / 构建配置之后，测试任务若显示 `UP-TO-DATE` 或 `FROM-CACHE`，
+> 必须 `--rerun` 复跑后才能宣称守卫真跑（W5 / ST-26）。
+
