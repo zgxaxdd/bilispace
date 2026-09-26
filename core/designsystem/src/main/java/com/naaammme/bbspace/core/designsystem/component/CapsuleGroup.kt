@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.core.designsystem.component
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,18 +28,24 @@ import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.theme.biliColorRoles
 
 @Composable
 fun <T> CapsuleGroup(
     items: List<T>,
     modifier: Modifier = Modifier,
     gap: Dp = 2.dp,
+    header: (@Composable () -> Unit)? = null,
+    footer: (@Composable () -> Unit)? = null,
     itemContent: @Composable (item: T, index: Int, shape: Shape) -> Unit
 ) {
     val isIOS = LocalUiStyle.current == UiStyle.IOS
     val shapes = MaterialTheme.shapes
 
     Column(modifier = modifier) {
+        // iOS Inset Grouped 的 section 标题/脚注：与卡片左缘对齐、内缩 16dp，
+        // 由 [BiliGroupHeader]/[BiliGroupFooter] 提供默认排版（阶段 C，方案 §2-G7）
+        header?.invoke()
         items.forEachIndexed { index, item ->
             itemContent(item, index, capsuleGroupShape(index, items.size, shapes, isIOS))
             if (index < items.lastIndex) {
@@ -55,6 +62,7 @@ fun <T> CapsuleGroup(
                 }
             }
         }
+        footer?.invoke()
     }
 }
 
@@ -83,7 +91,8 @@ fun CapsuleListItem(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = resolvedColor)
+        colors = CardDefaults.cardColors(containerColor = resolvedColor),
+        border = biliDarkHairlineBorder(resolvedColor)
     ) {
         Row(
             modifier = Modifier
@@ -131,7 +140,8 @@ fun CapsuleListItem(
 @Composable
 private fun GroupedHairline() {
     val cardColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val lineColor = MaterialTheme.colorScheme.outlineVariant
+    // 语义角色色（阶段 A）：separator 与原 outlineVariant 取值一致，词汇归位
+    val lineColor = biliColorRoles().separator
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -174,4 +184,33 @@ private fun capsuleGroupShape(index: Int, count: Int, shapes: Shapes, isIOS: Boo
         )
         else -> inner
     }
+}
+
+/**
+ * 分组列表 section 标题（iOS Inset Grouped 惯例）：footnote 半粗、secondaryLabel 灰、
+ * 左缘内缩 16dp（与组内分隔线左缩进同一网格）。供 [CapsuleGroup] 的 header 槽使用。
+ */
+@Composable
+fun BiliGroupHeader(text: String, modifier: Modifier = Modifier) {
+    // labelLarge 本身即 SemiBold 14/20（iOS Headline 档）——不内联 copy，
+    // 守住 ListAllocationStructureTest 的内联棘轮
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = biliColorRoles().groupHeader,
+        modifier = modifier.padding(start = 16.dp, top = 12.dp, bottom = 6.dp)
+    )
+}
+
+/**
+ * 分组列表 section 脚注：caption、tertiaryLabel、同网格内缩。
+ */
+@Composable
+fun BiliGroupFooter(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = biliColorRoles().groupFooter,
+        modifier = modifier.padding(start = 16.dp, top = 6.dp, bottom = 12.dp)
+    )
 }

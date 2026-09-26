@@ -135,8 +135,9 @@ fun BiliTheme(
     ) {
         when (config.uiStyle) {
             // iOS：固定语义色板 + tint（seedColor）覆盖 primary。
-            // 动态取色 / 调色板 / 纯黑在 iOS 模式下不参与（设置页置灰，值保留）。
-            UiStyle.IOS -> iOSColorScheme(darkTheme, config.seedColor)
+            // 动态取色 / 调色板在 iOS 模式下不参与（设置页置灰，值保留）；
+            // isPureBlack 参与：纯黑 OLED 底 / 抬升软黑两档（见 iOSColor.kt）。
+            UiStyle.IOS -> iOSColorScheme(darkTheme, config.seedColor, config.isPureBlack)
             UiStyle.MATERIAL -> {
                 val base = when {
                     config.paletteStyle == PaletteStyle.MONOCHROME -> createMonochromeColorScheme(darkTheme)

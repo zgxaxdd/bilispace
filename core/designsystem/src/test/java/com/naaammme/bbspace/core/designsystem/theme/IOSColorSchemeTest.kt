@@ -3,6 +3,7 @@ package com.naaammme.bbspace.core.designsystem.theme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,10 +30,17 @@ class IOSColorSchemeTest {
     }
 
     @Test
-    fun `iOS 深色 surface 等于 background 且为纯黑`() {
-        val scheme = iOSColorScheme(darkTheme = true, tint = Color(0xFFFB7299))
-        assertEquals(scheme.background, scheme.surface)
-        assertEquals(Color.Black, scheme.surface)
+    fun `iOS 深色 surface 等于 background 且分纯黑与染色炭底两档`() {
+        // isPureBlack=true：纯黑 OLED 底
+        val pure = iOSColorScheme(darkTheme = true, tint = Color(0xFFFB7299), isPureBlack = true)
+        assertEquals(pure.background, pure.surface)
+        assertEquals(Color.Black, pure.surface)
+        // isPureBlack=false（默认）：seed 染色的炭底——现代深色（Telegram/Discord/Spotify
+        // 的通行做法），底不再取纯黑，解决"纯黑单调"（用户反馈 2026-09-26）
+        val tinted = iOSColorScheme(darkTheme = true, tint = Color(0xFFFB7299))
+        assertEquals(tinted.background, tinted.surface)
+        assertTrue("染色炭底应比纯黑亮（有可感知的层底）", tinted.surface != Color.Black)
+        assertTrue("染色炭底亮度应低于卡片色", tinted.surface.luminance() < tinted.surfaceContainerLow.luminance())
     }
 
     // ===== 灰底白卡分层：卡片白只给 surfaceContainerLow =====
@@ -45,10 +53,21 @@ class IOSColorSchemeTest {
     }
 
     @Test
-    fun `iOS 深色卡片底为 1C1C1E（isPureBlack 不参与，防进一步压暗）`() {
-        val scheme = iOSColorScheme(darkTheme = true, tint = Color(0xFFFB7299))
-        assertEquals(Color(0xFF1C1C1E), scheme.surfaceContainerLow)
-        assertEquals(Color(0xFF1C1C1E), iOSColorScheme(darkTheme = true, tint = Color.Black).surfaceContainerLow)
+    fun `iOS 深色卡片底为 seed 染色炭色且随 isPureBlack 只改底色`() {
+        // 深色重设计（2026-09-26）：卡片/容器进入 seed 染色炭色阶梯（4–10% tint），
+        // 两档 isPureBlack 的卡片色一致（只有底色不同）
+        val tint = Color(0xFFFB7299)
+        val scheme = iOSColorScheme(darkTheme = true, tint = tint)
+        val pure = iOSColorScheme(darkTheme = true, tint = tint, isPureBlack = true)
+        assertEquals(scheme.surfaceContainerLow, pure.surfaceContainerLow)
+        assertEquals(scheme.surfaceContainerHigh, pure.surfaceContainerHigh)
+        // 染色必须存在：卡片底不再等于 Apple 原始 #1C1C1E
+        assertTrue(
+            "卡片底应带 seed 染色（不等于原始 #1C1C1E）",
+            scheme.surfaceContainerLow != Color(0xFF1C1C1E)
+        )
+        // 仍是暗色：亮度显著低于 onSurface 白
+        assertTrue(scheme.surfaceContainerLow.luminance() < 0.1f)
     }
 
     // ===== 文字与分隔线（iOS label / separator 语义）=====

@@ -134,7 +134,7 @@ class ColorContrastTest {
                 val r = ratioOn(scheme.onSurfaceVariant, bg)
                 assertTrue(
                     "$name onSurfaceVariant 坐在 $bgName 上只有 ${"%.2f".format(r)}:1，" +
-                        "低于已冻结的次要文字下限 3.0:1（现状 3.13~6.36，见本方法注释）。",
+                        "低于次要文字下限 3.0:1（浅色已提至 AA，见下方棘轮记录）。",
                     r >= 3.0
                 )
             }
@@ -151,7 +151,9 @@ class ColorContrastTest {
     @Test
     fun secondaryTextFloorIsRatcheted() {
         val minLight = textBackgrounds(light).minOf { (_, bg) -> ratioOn(light.onSurfaceVariant, bg) }
-        val floor = 3.12
+        // 棘轮上调 3.12 → 4.5（2026-09-26）：浅色 onSurfaceVariant 0x99 → 0xBC（AA），
+        // 用户反馈"浅色下设置页部分文字看不清"后拍板，旧 3.1~3.4:1 不再使用
+        val floor = 4.5
         assertTrue(
             "浅色 onSurfaceVariant 的最小对比度现在是 ${"%.2f".format(minLight)}:1，" +
                 "低于棘轮下限 $floor:1。这个值只许升：往下走意味着在让本就不足 AA 的" +
@@ -180,5 +182,71 @@ class ColorContrastTest {
             naive - composited > 5.0
         )
         assertTrue("合成后的实测值应约等于 3.44:1", composited in 3.3..3.6)
+    }
+
+    // ── 语义角色色审计（iOS 升级阶段 B，BiliColorRoles）─────────────────────
+    //
+    // BiliColorRoles 是组件层的角色真值源；它与 iOSColorScheme 的关系必须钉死，
+    // 否则两处取值会漂移（角色层改了 scheme 忘改、或反之）。
+
+    /** secondaryLabel 必须与 onSurfaceVariant 同值（Apple secondaryLabel 的单一来源）。 */
+    @Test
+    fun iosSecondaryLabelMatchesScheme() {
+        assertTrue(iosColorRoles(dark = false).secondaryLabel == light.onSurfaceVariant)
+        assertTrue(iosColorRoles(dark = true).secondaryLabel == dark.onSurfaceVariant)
+    }
+
+    /** separator 必须与 outlineVariant 同值（同一根 hairline 语义，不许两套灰）。 */
+    @Test
+    fun iosSeparatorMatchesScheme() {
+        assertTrue(iosColorRoles(dark = false).separator == light.outlineVariant)
+        assertTrue(iosColorRoles(dark = true).separator == dark.outlineVariant)
+    }
+
+    /**
+     * 三级文字（占位/时间戳）下限 1.6:1。
+     *
+     * Apple tertiaryLabel（30% 灰）合成到本仓 grouped 背景 F2F2F7 上实测 1.71:1
+     * （Apple 的比例是按纯白算的，灰底上会再低一档）。它承载的本来就是"最弱信息"，
+     * 不按正文/次要档要求；地板取实测值下取整——它的角色语义就是"存在但退后"，
+     * 若要"可读性优先"请改用 secondaryLabel 而不是抬这个值的 alpha（那会破坏
+     * 与 Apple 的取值对齐）。分档依据：WCAG 对 placeholder/低强调文本按大字号
+     * 以下豁免，这里只防"退化到看不见"。
+     */
+    @Test
+    fun iosTertiaryLabelMeetsFloor() {
+        for ((name, scheme) in listOf("浅色" to light, "深色" to dark)) {
+            val roles = iosColorRoles(dark = name == "深色")
+            for ((bgName, bg) in textBackgrounds(scheme)) {
+                val r = ratioOn(roles.tertiaryLabel, bg)
+                assertTrue(
+                    "$name tertiaryLabel 坐在 $bgName 上只有 ${"%.2f".format(r)}:1，低于三级文字地板 1.6:1",
+                    r >= 1.6
+                )
+            }
+        }
+    }
+
+    /** 破坏性红（systemRed）在卡片底色上必须可读（动作面板/警告框按钮的承载面）。 */
+    @Test
+    fun iosDestructiveMeetsFloor() {
+        val cards = listOf(
+            "浅色 surfaceContainerLow" to light.surfaceContainerLow,
+            "深色 surfaceContainerLow" to dark.surfaceContainerLow
+        )
+        for ((name, bg) in cards) {
+            val roles = iosColorRoles(dark = name.startsWith("深"))
+            val r = ratioOn(roles.destructive, bg)
+            assertTrue("$name destructive 坐在卡片底上只有 ${"%.2f".format(r)}:1，低于 3.0:1", r >= 3.0)
+        }
+    }
+
+    /** AA 预案常量必须真的达到 4.5:1（切不切换等设计拍板，但数值本身必须有效）。 */
+    @Test
+    fun secondaryLabelAAVariantActuallyMeetsAA() {
+        val lightAA = Color(SecondaryLabelAAVariants.LIGHT)
+        val darkAA = Color(SecondaryLabelAAVariants.DARK)
+        assertTrue("浅色 AA 变体在 background 上未达 4.5:1", ratioOn(lightAA, light.background) >= 4.5)
+        assertTrue("深色 AA 变体在 background 上未达 4.5:1", ratioOn(darkAA, dark.background) >= 4.5)
     }
 }
