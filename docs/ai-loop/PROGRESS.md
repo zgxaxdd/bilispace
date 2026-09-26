@@ -444,7 +444,33 @@
   **改坏要最小化，否则测的是另一件事**
 - commits：`fix(network)` 超时显式化 + 禁令守卫 / `feat(coldstart)` 耗时口径（属可测性非新功能）/ `docs(ai-loop)`
 
-## 批次 B20 · （下一批）· PF-05 SelectableText 每帧分配 Path + PF-06 勋章拼图 Shape 内联
+## 批次 B20 · 2026-09-26 · PF-05 选区路径 + PF-06 形状分配
+
+**分区**：B-流畅｜**级别**：A 级·可机器判定（写法层；无帧率结论）｜**详情**：`report-2026-09-26-B20.md`
+
+- **PF-06 的原描述已过期**：勋章拼图那五个形状**早就**在文件级 `UserCollageShapes` 里。
+  按一次性扫描实测出真正还内联的是**播放器** 8 处（`VideoScreen` 2 + `VideoPlayerPane` 6，
+  含两处 `RoundedCornerShape(20.dp)` 裸字面量与两处链内联），全部提到文件级
+  （先确认 `BiliRadius` 那些值是对象上的普通 dp `val`、不读主题状态，提升才是恒定值）
+- 真实代价不只是"每次重组新建 Shape"：这些值同时被 `clip`/`background`/`border` 和
+  `remember(backdrop, shape, scrim, …)` 玻璃链当**键** —— 键每帧变新实例，
+  等于把"remember 住整条链"的优化静默抵消
+- **PF-05**：`getPathForRange` 只有返回新 Path 的重载（javap 查 1.11.2 / 1.12.1 确认），
+  所以省不掉"选区变了分配一次"，省的是**重绘但选区没变**的那些：从 `drawBehind` 挪进
+  带 key 的 `remember(textLayoutResult, selection, text.length)`
+- 守卫按 W7 扩覆盖面，新增 4 条：形状内联改按"最外层顶层声明类型"判定（不看变量名，
+  `val octagon = PolygonShape(` 也算）、`Path()`/`Outline.*` 按实测 4 处冻结、
+  collage 常量防回潮、drawBehind 里不许再出现 getPathForRange
+- 全量（先删 test-results）：`BUILD SUCCESSFUL in 4m56s`，**268 单测 / 0 失败 / 0 错误**（264 → +4）
+- **W21（新教训，两次都靠破坏性验证才发现）**：① 锚点写 `contains("drawBehind")` 被我自己
+  那句性能注释带到 KDoc 上，断言变永真；改成只认代码形态后才咬。
+  ② 放行文件级 object 时误用 `Regex.matches`（整行匹配）—— 是**自检正反例**抓出来的，
+  不是"全仓 0 处"那条（它只会假装"确有 2 处违规"）。结论：扫描断言必须配一对能失败的正反例
+- 边界：本批纯写法层，**不下帧率结论**（PF 收益要真机 A-B-A ≥5 轮中位，且第二轮结论已说明
+  稳态 jank 0.21% 大概率测不出差异）
+- commits：`perf(video,designsystem)` 形状与选区路径 + 守卫 4 条 / `docs(ai-loop)`
+
+## 批次 B21 · （下一批）· C-好看：UI-01~05 棘轮 + UI-08/09/10 死代码
 
 
 
