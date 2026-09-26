@@ -43,6 +43,9 @@ class ColdStartClient @Inject constructor(
     }
 
     suspend fun getColdStartData(): ColdStartData {
+        // 阶段耗时口径（PF-03）：成功也要留下"慢在哪一段"的数据，失败更要留。
+        // 一行 key=value，跨版本可比；格式与解析由 ColdStartTimingTest 钉住。
+        val timing = ColdStartTiming()
         try {
             val request = Coldstart.GetColdStartDataReq.newBuilder()
                 .addReqList(
@@ -57,12 +60,14 @@ class ColdStartClient @Inject constructor(
                 //         .build()
                 // )
                 .build()
+            timing.mark(ColdStartTiming.BUILD)
 
             val coldStartResp = grpcClient.get().call(
                 endpoint = ENDPOINT,
                 requestBytes = request.toByteArray(),
                 parser = Coldstart.GetColdStartDataResp.parser()
             )
+            timing.mark(ColdStartTiming.GRPC)
 
             var ipInfo: IpInfo? = null
             // var freeFlowRules: FreeFlowRules? = null
@@ -73,19 +78,25 @@ class ColdStartClient @Inject constructor(
                     // BIZ_KEY_RULE -> freeFlowRules = parseFreeFlowRules(resp.bizResp)
                 }
             }
+            timing.mark(ColdStartTiming.PARSE)
 
             ipInfo?.let { info ->
                 regionCodeCache.set(info.regionCode)
                 Logger.d(TAG) { "IP 区域已缓存: ${info.regionCode}" }
             }
 
+            val outcome = if (ipInfo == null) ColdStartTiming.OUTCOME_EMPTY else ColdStartTiming.OUTCOME_OK
+            Logger.i(TAG) { timing.render(outcome, ColdStartTiming.CACHE) }
             return ColdStartData(ipInfo, null)
         } catch (e: CancellationException) {
             // 取消不是"获取冷启动数据失败"：DNS 回调晚到后再被取消时，
             // 原来这条会把取消打成错误日志并返回空数据，掩盖真实故障也污染统计
+            Logger.w(TAG) { timing.render(ColdStartTiming.OUTCOME_CANCELLED, ColdStartTiming.CACHE) }
             throw e
         } catch (e: Exception) {
-            Logger.e(TAG, e) { "获取冷启动数据失败" }
+            Logger.e(TAG, e) {
+                "获取冷启动数据失败 ${timing.render(ColdStartTiming.OUTCOME_ERROR, ColdStartTiming.CACHE)}"
+            }
             return ColdStartData(null, null)
         }
     }
