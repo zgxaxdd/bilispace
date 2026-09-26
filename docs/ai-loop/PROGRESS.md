@@ -208,6 +208,9 @@
 - **守卫也咬了我自己一次**：`AppInitializer` 裸 runCatching 上限我拍了 0，实测 4 处 →
   逐个读语义（3 处包非挂起代码，1 处挂起留给 ST-06 收尾）后才登记事实值 4
 - 破坏性验证：把 TicketGenerator 的 CE 出口换成别的异常类型 → `rethrowFormStaysRethrowing FAILED`；恢复后绿
+- 全量（先删 `build/test-results` 强制守卫真跑）：`BUILD SUCCESSFUL in 4m23s`，
+  **194 单测 / 0 失败 0 错误**，并核对 `:app` 与 `:core:designsystem` 的测试任务确实是 `> Task`
+  而非 `UP-TO-DATE`/`FROM-CACHE`（ST-26 的口径）
 - commit：`fix(infra): ticket/冷启动/遥测/预热的取消不再被当成失败`
 
 ## 批次 B10 · （下一批）· ST-01/ST-02 Room schema 可差分（或 ST-06 收尾）
