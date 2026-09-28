@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.feature.video.swipe
 
+import com.naaammme.bbspace.core.model.VideoTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -47,5 +48,41 @@ class SwipeRefillPolicyTest {
     fun constantsMatchBiliPai() {
         assertEquals("最多拉 3 页", 3, SWIPE_REFILL_MAX_ATTEMPTS)
         assertEquals("目标净增 8 条", 8, SWIPE_REFILL_TARGET)
+    }
+
+    // ===== 兜底（拉满页数仍不足 → 用队尾候选的详情 relates 补）=====
+
+    @Test
+    fun fallbackRunsOnlyWhenStillShort() {
+        assertTrue("一条没补到 → 必须走兜底", shouldRunSwipeRefillFallback(appended = 0))
+        assertTrue("差一点 → 也走兜底", shouldRunSwipeRefillFallback(appended = 7))
+        assertFalse("已凑满 → 不必再拉一次详情", shouldRunSwipeRefillFallback(appended = 8))
+        assertFalse(shouldRunSwipeRefillFallback(appended = 20))
+    }
+
+    @Test
+    fun fallbackTargetIsTheLastUsableEntry() {
+        fun entry(bvid: String, aid: Long) = SwipeEntry(
+            target = VideoTarget.Ugc(aid = aid, cid = 1L, bvid = bvid),
+            bvid = bvid,
+            title = "t$bvid",
+            cover = "c$bvid",
+            author = null,
+            durationText = null
+        )
+        // 队尾是用户下一个会滑到的位置：补厚它后面的内容才有意义
+        val queue = listOf(
+            entry("BV1", 101L),
+            entry("BV2", 0L), // 查不了（aid 缺失）→ 跳过
+            entry("BV3", 103L),
+            entry("", 0L) // 同样查不了
+        )
+        assertEquals("BV3", selectSwipeRefillFallbackTarget(queue)?.bvid)
+        assertEquals(
+            "全都没 aid → 没有可兜底的目标",
+            null,
+            selectSwipeRefillFallbackTarget(listOf(entry("", 0L)))
+        )
+        assertEquals(null, selectSwipeRefillFallbackTarget(emptyList()))
     }
 }

@@ -36,10 +36,13 @@ import com.naaammme.bbspace.core.sponsorblock.SbSegment
 import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import com.naaammme.bbspace.core.video.VideoActionRepository
+import com.naaammme.bbspace.core.video.VideoDetailRepository
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
 import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.feature.video.swipe.appendSwipeEntries
 import com.naaammme.bbspace.feature.video.swipe.shouldFetchNextRefillPage
+import com.naaammme.bbspace.feature.video.swipe.shouldRunSwipeRefillFallback
+import com.naaammme.bbspace.feature.video.swipe.selectSwipeRefillFallbackTarget
 import com.naaammme.bbspace.feature.video.swipe.swipeEntriesFromRelates
 import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromFeedItem
 import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromStory
@@ -128,6 +131,8 @@ class VideoViewModel @Inject constructor(
     private val feedRepository: FeedRepository,
     /** 相邻页预取：与正常开播共用同一份 playurl LRU（见 [VideoPlayerRepository.preloadPlayUrl]）。 */
     private val playbackVideoRepository: VideoPlayerRepository,
+    /** 补货兜底：拉队尾那一支的详情，用它的相关推荐补队列。 */
+    private val detailRepository: VideoDetailRepository,
     /** 预取条数按网络类型决定（WiFi 才多预）。 */
     private val networkTypeProvider: NetworkTypeProvider
 ) : ViewModel() {
@@ -545,12 +550,50 @@ class VideoViewModel @Inject constructor(
                         "added=$added attempts=$attempts queue=${_swipeQueue.value.size}"
                 )
             }
+            // 兜底（BiliPai 用 getRelatedVideos 补，这里零新接口）：
+            // 推荐流拉满 3 页仍凑不满时，取队尾那一支的详情 relates 再补一轮 ——
+            // 队尾正是用户下一个会滑到的位置，把它后面补厚才不会"滑到最后一条就没了"。
+            if (shouldRunSwipeRefillFallback(appended = appended)) {
+                val tail = selectSwipeRefillFallbackTarget(_swipeQueue.value)
+                if (tail != null) {
+                    val added = appendSwipeRefillFallback(tail)
+                    appended += added
+                    android.util.Log.i(
+                        "PortraitSwipe",
+                        "more fallback: tail=${tail.key} added=$added queue=${_swipeQueue.value.size}"
+                    )
+                }
+            }
             android.util.Log.i(
                 "PortraitSwipe",
                 "more done: attempts=$attempts appended=$appended queue=${_swipeQueue.value.size}"
             )
             loadingMoreSwipe = false
         }
+    }
+
+    /**
+     * 兜底补货：拉某一支的详情，把它自带的相关推荐并进队列。
+     *
+     * 详情会被 [VideoDetailRepository] 自己缓存，所以这次请求不算白花 ——
+     * 用户真滑到队尾那一支时，详情/简介是直接命中缓存的。
+     *
+     * @return 实际净增的条数（全部被去重挡掉时是 0）。
+     */
+    private suspend fun appendSwipeRefillFallback(entry: SwipeEntry): Int {
+        val params = entry.target.toPlayableParams()
+        val result = runCatchingCancellable {
+            detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
+        }.getOrNull() ?: return 0
+        val incoming = swipeEntriesFromRelates(result.detail.relates)
+        if (incoming.isEmpty()) return 0
+        val before = _swipeQueue.value.size
+        _swipeQueue.value = appendSwipeEntries(
+            existing = _swipeQueue.value,
+            incoming = incoming,
+            anchorKey = _swipeAnchor.value?.key.orEmpty()
+        )
+        return _swipeQueue.value.size - before
     }
 
     /**
