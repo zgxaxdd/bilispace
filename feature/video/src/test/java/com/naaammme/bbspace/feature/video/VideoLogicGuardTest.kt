@@ -893,34 +893,41 @@ class VideoLogicGuardTest {
     }
 
     /**
-     * 会话内点赞按钮（信息层第三阶段第一步）。
+     * 会话内互动栏（信息层第三阶段）：点赞 + 分享。
      *
-     * 竖屏连播时双击点赞是"隐式"的：用户想确认"这支我赞过没有"看不到任何状态。
-     * BiliPai 的竖屏页右侧常驻互动栏（`PortraitFullscreenOverlay.kt:194-394`）；
-     * 这里先落点赞一个（状态/计数/动作三者都在 ViewModel 里现成，闭环最完整）。
+     * 竖屏连播时双击点赞是"隐式"的：用户想确认"这支我赞过没有"看不到任何状态；
+     * 分享更是在连播里完全没有入口（详情页有）。BiliPai 的竖屏页右侧常驻互动栏
+     * （`PortraitFullscreenOverlay.kt:194-394`）。
+     *
+     * 收藏（要先选文件夹）、投币（二次确认）、评论（面板是详情 pager 的一页，
+     * 需要另起弹层宿主 + 评论列表状态）留到后续批次 —— 这里钉住"已有闭环的两个"
+     * 真的接上了真实状态与共用链接构造。
      */
     @Test
-    fun swipeSessionShowsPersistentLikeButton() {
+    fun swipeSessionShowsActionRail() {
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
-            "点赞按钮必须接上真实状态与计数（userState.liked / stat.like），" +
-                "并且动作走 viewModel.toggleLike —— 不许自己造一份本地状态。",
-            countMatching(pane, """private fun SwipeSessionLikeButton\(""") == 1 &&
+            "互动栏必须接上真实状态与计数（userState.liked / stat.like）、" +
+                "点赞走 viewModel.toggleLike，分享走 ShareUtils.videoUrl + shareText" +
+                "（与详情页同一套链接构造）—— 不许自己造本地状态或另写一套分享。",
+            countMatching(pane, """private fun SwipeSessionActionRail\(""") == 1 &&
                 countMatching(pane, """value\.detail\?\.userState\?\.liked == true""") == 1 &&
                 countMatching(pane, """value\.detail\?\.stat\?\.like""") == 1 &&
-                countMatching(pane, """onToggle = viewModel::toggleLike""") == 1 &&
-                countMatching(pane, """contentDescription = if \(liked\) "取消点赞" else "点赞"""") == 1
+                countMatching(pane, """onToggleLike = viewModel::toggleLike""") == 1 &&
+                countMatching(pane, """ShareUtils\.videoUrl\(shareBvid, shareAid, page = 0\)""") == 1 &&
+                countMatching(pane, """ShareUtils\.shareText\(context, shareTitle, url\)""") == 1 &&
+                countMatching(pane, """contentDescription = "分享"""") == 1
         )
         assertTrue(
-            "点赞按钮必须排在加载层之前（加载层是 Box 最后一个子节点），" +
+            "互动栏必须排在加载层之前（加载层是 Box 最后一个子节点），" +
                 "且尺寸/间距走 token（不新增 dp 字面量）。",
-            blockBody(pane, "private fun SwipeSessionLikeButton(").let { body ->
+            blockBody(pane, "private fun SwipeSessionActionRail(").let { body ->
                 body.none { it.contains(".dp") }
             } &&
                 run {
-                    val likeAt = pane.indexOfFirst { it.contains("SwipeSessionLikeButton(") && !it.contains("private fun") }
+                    val railAt = pane.indexOfFirst { it.contains("SwipeSessionActionRail(") && !it.contains("private fun") }
                     val veilAt = pane.indexOfFirst { it.trimStart().startsWith("SwipeWaitVeil(") }
-                    likeAt >= 0 && veilAt >= 0 && likeAt < veilAt
+                    railAt >= 0 && veilAt >= 0 && railAt < veilAt
                 }
         )
     }

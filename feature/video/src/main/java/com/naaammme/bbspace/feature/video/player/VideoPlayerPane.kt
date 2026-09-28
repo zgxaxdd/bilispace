@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -121,6 +122,7 @@ import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
@@ -794,12 +796,16 @@ internal fun VideoPlayerPane(
                 // 而用户想确认"这支我赞过没有"时没有任何可见状态 —— BiliPai 的竖屏页右侧
                 // 常驻互动栏（PortraitFullscreenOverlay.kt:194-394）。这里先落**点赞**一个，
                 // 因为它有完整闭环（状态 + 计数 + 动作都在 ViewModel 里，无新依赖）。
-                SwipeSessionLikeButton(
+                SwipeSessionActionRail(
                     liked = viewModel.videoState.collectAsStateWithLifecycle()
                         .value.detail?.userState?.liked == true,
                     likeText = viewModel.videoState.collectAsStateWithLifecycle()
                         .value.detail?.stat?.like,
-                    onToggle = viewModel::toggleLike,
+                    onToggleLike = viewModel::toggleLike,
+                    shareBvid = viewModel.videoState.collectAsStateWithLifecycle().value.ids.bvid,
+                    shareAid = viewModel.videoState.collectAsStateWithLifecycle().value.ids.aid,
+                    shareTitle = viewModel.videoState.collectAsStateWithLifecycle()
+                        .value.detail?.title,
                     modifier = Modifier.align(Alignment.CenterEnd)
                 )
             }
@@ -994,29 +1000,35 @@ private fun SwipeProgressLine(
 }
 
 /**
- * 会话内点赞按钮（右侧中部）：心形 + 计数，已赞时用主题粉色高亮。
+ * 会话内互动栏（右侧中部）：**点赞 + 分享**。
  *
- * 为什么只做点赞：它是**唯一有完整闭环**的互动（状态 `userState.liked` / 计数
- * `stat.like` / 动作 `toggleLike` 都在 ViewModel 里现成）。收藏要先选文件夹、
- * 投币有自己的二次确认、评论面板的开关状态在 VideoScreen 层 —— 那几个都属于
- * 后续批次，不在这里半成品化。
+ * 为什么是这两个：它们的"状态/动作/依赖"都现成 ——
+ * 点赞有 `userState.liked` + `stat.like` + `toggleLike()`；分享有
+ * `ShareUtils.videoUrl/shareText`（详情页同一套链接构造）。
+ * **收藏**要先选文件夹（`toggleFavFolder(fid)`）、**投币**有二次确认交互、
+ * **评论**面板在 bbspace 里是详情 pager 的**一页**（不是弹层），要在连播里用需要
+ * 另起一个弹层宿主 + 评论列表状态 —— 这三个留到后续批次，不在这里做假按钮。
  *
- * 触摸：这是会话覆盖层里唯一的可点区域（除了失败态的重试按钮），位置固定在右侧中部，
- * 不挡上下滑的起手区（pager 的手势从屏幕中部起）。
+ * 触摸：这是会话覆盖层里的可点区域（除失败态的重试按钮），固定在右侧中部，
+ * 不挡 pager 的手势起手区。
  */
 @Composable
-private fun SwipeSessionLikeButton(
+private fun SwipeSessionActionRail(
     liked: Boolean,
     likeText: String?,
-    onToggle: () -> Unit,
+    onToggleLike: () -> Unit,
+    shareBvid: String?,
+    shareAid: Long,
+    shareTitle: String?,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     Column(
         modifier = modifier.padding(end = BiliSpacing.md),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
-        IconButton(onClick = onToggle) {
+        IconButton(onClick = onToggleLike) {
             Icon(
                 imageVector = Icons.Filled.Favorite,
                 contentDescription = if (liked) "取消点赞" else "点赞",
@@ -1029,6 +1041,19 @@ private fun SwipeSessionLikeButton(
                 color = Color.White.copy(alpha = 0.86f),
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1
+            )
+        }
+        IconButton(
+            onClick = {
+                // 与详情页共用同一套链接构造（BV 优先、av 兜底）
+                val url = ShareUtils.videoUrl(shareBvid, shareAid, page = 0)
+                ShareUtils.shareText(context, shareTitle, url)
+            }
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Share,
+                contentDescription = "分享",
+                tint = Color.White.copy(alpha = 0.92f)
             )
         }
     }
