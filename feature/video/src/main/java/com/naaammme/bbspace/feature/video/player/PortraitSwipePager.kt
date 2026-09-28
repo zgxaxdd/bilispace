@@ -38,6 +38,7 @@ import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
 import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
+import com.naaammme.bbspace.feature.video.swipe.SwipeQueueTail
 import com.naaammme.bbspace.feature.video.swipe.shouldExtendSwipeQueue
 import com.naaammme.bbspace.feature.video.swipe.swipeKey
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -93,6 +94,8 @@ internal fun PortraitSwipePager(
     onPrefetch: (Int) -> Unit = {},
     /** 取流/解码失败后的重试（沿用同一目标重开一次播放）。 */
     onRetryPlayback: () -> Unit = {},
+    /** 队列尾部状态：驱动"正在为你找更多视频…" / "已经是最后一个了"。 */
+    tailState: SwipeQueueTail = SwipeQueueTail.Idle,
     /** 当前是否已被用户手动锁成横屏（"横屏/竖屏"胶囊的状态）。 */
     landscapeForced: Boolean = false,
     /** 手动横屏开关；由 VideoScreen 落到 requestedOrientation 上。 */
@@ -237,38 +240,81 @@ internal fun PortraitSwipePager(
         val stream = playbackState.currentStream ?: return@remember true
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
     }
-    VerticalPager(state = pagerState, modifier = modifier) { page ->
-        val entry = pages.getOrNull(page) ?: return@VerticalPager
-        if (entry.isCurrentVideo(currentBvid, currentAid)) {
-            VideoPlayerPane(
-                modifier = Modifier.fillMaxSize(),
-                viewModel = viewModel,
-                videoTitle = detailTitle,
-                isFull = isFull,
-                onToggleFull = onToggleFull,
-                onBackClick = onBackClick,
-                onGoHome = onGoHome,
-                // 翻页会话激活：垂直拖动让位给 pager（否则亮度/音量手势抢走上下滑）
-                swipePagingActive = true,
-                // 等首帧加载层：深色底 + 大尺寸粒子，首帧到达后淡出
-                swipeWaitingFirstFrame = waitingFirstFrame,
-                // 失败态：加载层留着并切成"错误 + 重试"（见 VideoPlayerPane 的 KDoc）
-                swipeFailed = playbackFailed,
-                onRetrySwipe = onRetryPlayback,
-                // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
-                landscapeForced = landscapeForced,
-                onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }
-            )
-        } else {
-            SwipeCoverPage(
-                entry = entry,
-                isLoading = page == pagerState.currentPage && detailLoading
+    Box(modifier = modifier) {
+        VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            val entry = pages.getOrNull(page) ?: return@VerticalPager
+            if (entry.isCurrentVideo(currentBvid, currentAid)) {
+                VideoPlayerPane(
+                    modifier = Modifier.fillMaxSize(),
+                    viewModel = viewModel,
+                    videoTitle = detailTitle,
+                    isFull = isFull,
+                    onToggleFull = onToggleFull,
+                    onBackClick = onBackClick,
+                    onGoHome = onGoHome,
+                    // 翻页会话激活：垂直拖动让位给 pager（否则亮度/音量手势抢走上下滑）
+                    swipePagingActive = true,
+                    // 等首帧加载层：深色底 + 大尺寸粒子，首帧到达后淡出
+                    swipeWaitingFirstFrame = waitingFirstFrame,
+                    // 失败态：加载层留着并切成"错误 + 重试"（见 VideoPlayerPane 的 KDoc）
+                    swipeFailed = playbackFailed,
+                    onRetrySwipe = onRetryPlayback,
+                    // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
+                    landscapeForced = landscapeForced,
+                    onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }
+                )
+            } else {
+                SwipeCoverPage(
+                    entry = entry,
+                    isLoading = page == pagerState.currentPage && detailLoading
+                )
+            }
+        }
+
+        // 队列尾部的反馈：只有停在**最后一页**时才提示，否则会打扰正常浏览。
+        // 以前滑到最后一条什么都看不到：用户分不清"卡住了"还是"真的没有更多"。
+        if (pagerState.currentPage >= pages.lastIndex && tailState != SwipeQueueTail.Idle) {
+            SwipeQueueTailHint(
+                state = tailState,
+                modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
     }
 }
 
 private const val TAG = "PortraitSwipe"
+
+/**
+ * 队列尾部提示（停在最后一页时）：
+ * - [SwipeQueueTail.Extending]：还在补货 —— 让用户知道"系统在忙"，不是卡住；
+ * - [SwipeQueueTail.Exhausted]：补货跑完也没拿到新的 —— 明确"到头了"。
+ *
+ * 不可点、不消费触摸（上下滑与返回手势照常）；间距走 [BiliSpacing] token，
+ * 不新增 dp 字面量（`DesignTokenLintTest` 的棘轮）。
+ */
+@Composable
+private fun SwipeQueueTailHint(
+    state: SwipeQueueTail,
+    modifier: Modifier = Modifier,
+) {
+    val text = when (state) {
+        SwipeQueueTail.Extending -> "正在为你找更多视频…"
+        SwipeQueueTail.Exhausted -> "已经是最后一个了"
+        SwipeQueueTail.Idle -> return
+    }
+    Box(
+        modifier = modifier
+            .padding(bottom = BiliSpacing.xxxl)
+            .background(Color.Black.copy(alpha = 0.55f), MaterialTheme.shapes.extraLarge)
+            .padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.smPlus)
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
 
 /** 封面页加载动画的边长（占屏宽比例）。比播放器页的加载层小一档：它压在封面之上。 */
 private const val COVER_LOADER_WIDTH_FRACTION = 0.26f

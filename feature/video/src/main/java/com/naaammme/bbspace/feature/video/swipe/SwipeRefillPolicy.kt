@@ -37,6 +37,27 @@ fun shouldRunSwipeRefillFallback(
 ): Boolean = appended in 0 until target
 
 /**
+ * 队列尾部的补货状态：驱动"正在为你找更多视频…" / "已经是最后一个了"的提示。
+ *
+ * 为什么需要：以前滑到最后一条**什么都看不到** —— 用户不知道自己是不是卡住了、
+ * 还是真的没有更多；BiliPai 的 story 页有明确三态（加载/内容/错误）。
+ */
+enum class SwipeQueueTail {
+    /** 队列还有余量，不打扰用户。 */
+    Idle,
+
+    /** 正在补货（推荐流分页 / related 兜底进行中）。 */
+    Extending,
+
+    /** 补货跑完仍一无所获：到尽头了。 */
+    Exhausted
+}
+
+/** 一轮补货结束后的状态：净增 > 0 说明还能继续刷，否则就是"没有更多了"。 */
+fun resolveSwipeQueueTail(appended: Int): SwipeQueueTail =
+    if (appended > 0) SwipeQueueTail.Idle else SwipeQueueTail.Exhausted
+
+/**
  * 兜底目标选择：推荐流拉满 3 页仍凑不满时，用**队尾那一支的"相关推荐"**再补一轮
  * （零新接口：详情响应自带 relates，与播放时的接力链同一条，去重交给 `appendSwipeEntries`）。
  *

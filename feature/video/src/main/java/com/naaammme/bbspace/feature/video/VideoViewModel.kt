@@ -39,7 +39,9 @@ import com.naaammme.bbspace.core.video.VideoActionRepository
 import com.naaammme.bbspace.core.video.VideoDetailRepository
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
 import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
+import com.naaammme.bbspace.feature.video.swipe.SwipeQueueTail
 import com.naaammme.bbspace.feature.video.swipe.appendSwipeEntries
+import com.naaammme.bbspace.feature.video.swipe.resolveSwipeQueueTail
 import com.naaammme.bbspace.feature.video.swipe.shouldFetchNextRefillPage
 import com.naaammme.bbspace.feature.video.swipe.shouldRunSwipeRefillFallback
 import com.naaammme.bbspace.feature.video.swipe.selectSwipeRefillFallbackTarget
@@ -146,6 +148,10 @@ class VideoViewModel @Inject constructor(
     val swipeAnchor: StateFlow<SwipeEntry?> = _swipeAnchor.asStateFlow()
     private val _swipeQueue = MutableStateFlow<List<SwipeEntry>>(emptyList())
     val swipeQueue: StateFlow<List<SwipeEntry>> = _swipeQueue.asStateFlow()
+
+    /** 队列尾部状态（补货中 / 到尽头）：驱动连播页底部的提示。 */
+    private val _swipeTail = MutableStateFlow(SwipeQueueTail.Idle)
+    val swipeTail: StateFlow<SwipeQueueTail> = _swipeTail.asStateFlow()
 
     val player: StateFlow<Player?> = playbackController.player
     val videoState: StateFlow<VideoPlaybackState> = playbackController.videoState
@@ -456,6 +462,7 @@ class VideoViewModel @Inject constructor(
     fun clearSwipeSession() {
         _swipeAnchor.value = null
         _swipeQueue.value = emptyList()
+        _swipeTail.value = SwipeQueueTail.Idle
         resetSwipePrefetchState()
     }
 
@@ -523,6 +530,7 @@ class VideoViewModel @Inject constructor(
     fun loadMoreSwipeQueue() {
         if (loadingMoreSwipe) return
         loadingMoreSwipe = true
+        _swipeTail.value = SwipeQueueTail.Extending
         viewModelScope.launch {
             var attempts = 0
             var appended = 0
@@ -568,6 +576,8 @@ class VideoViewModel @Inject constructor(
                 "PortraitSwipe",
                 "more done: attempts=$attempts appended=$appended queue=${_swipeQueue.value.size}"
             )
+            // 提示状态：补到东西就回到 Idle（不打扰），一条没补到就是"到尽头了"
+            _swipeTail.value = resolveSwipeQueueTail(appended = appended)
             loadingMoreSwipe = false
         }
     }

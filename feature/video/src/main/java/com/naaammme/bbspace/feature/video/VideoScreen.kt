@@ -333,6 +333,7 @@ fun VideoScreen(
     }
     val swipeAnchor by viewModel.swipeAnchor.collectAsStateWithLifecycle()
     val swipeQueue by viewModel.swipeQueue.collectAsStateWithLifecycle()
+    val swipeTail by viewModel.swipeTail.collectAsStateWithLifecycle()
 
     if (hostExpanded) {
         BackHandler {
@@ -496,6 +497,8 @@ fun VideoScreen(
                             // 相邻页预取：拖动 25% 偏移 / 停稳各触发一次（按网络与开关定量）
                             onPrefetch = viewModel::prefetchSwipeQueue,
                             onRetryPlayback = viewModel::retryCurrentPlayback,
+                            // 队列尾部状态：停在最后一页时提示"正在找更多/到头了"
+                            tailState = swipeTail,
                             // 会话锁竖屏 → 横屏视频要给一个"手动横屏"的出口（见方向 effect）
                             landscapeForced = swipeLandscape,
                             onToggleLandscape = { swipeLandscape = !swipeLandscape },

@@ -807,6 +807,36 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 队列到底的反馈（C10）：停在最后一页时给"正在为你找更多视频…" / "已经是最后一个了"。
+     *
+     * 以前滑到最后一条**什么都看不到**：用户分不清"卡住了"还是"真的没有更多"。
+     * 钉三件事：① 只在最后一页提示；② 两种状态都有文案；③ 提示不可点、间距走 token。
+     */
+    @Test
+    fun swipeQueueTailShowsHintOnLastPage() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "尾部提示必须只在**最后一页**且状态非 Idle 时出现（否则会打扰正常浏览）。",
+            countMatching(
+                pager,
+                """if \(pagerState\.currentPage >= pages\.lastIndex && tailState != SwipeQueueTail\.Idle\) \{"""
+            ) == 1 &&
+                countMatching(pager, """private fun SwipeQueueTailHint\(""") == 1 &&
+                countMatching(pager, """SwipeQueueTail\.Extending -> "正在为你找更多视频…"""") == 1 &&
+                countMatching(pager, """SwipeQueueTail\.Exhausted -> "已经是最后一个了"""") == 1 &&
+                countMatching(codeOf("VideoScreen.kt"), """tailState = swipeTail""") == 1
+        )
+        assertTrue(
+            "提示不许带 pointerInput/clickable（不能吃掉上下滑手势），" +
+                "间距必须走 BiliSpacing token（不新增 dp 字面量，lint 棘轮会判红）。",
+            blockBody(pager, "private fun SwipeQueueTailHint(").let { body ->
+                body.none { it.contains("pointerInput") || it.contains("clickable") } &&
+                    body.none { it.contains(".dp") }
+            }
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }

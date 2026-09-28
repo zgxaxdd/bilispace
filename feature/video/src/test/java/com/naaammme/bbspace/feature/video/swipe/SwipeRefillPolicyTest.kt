@@ -85,4 +85,22 @@ class SwipeRefillPolicyTest {
         )
         assertEquals(null, selectSwipeRefillFallbackTarget(emptyList()))
     }
+
+    // ===== 队列到底的反馈 =====
+
+    @Test
+    fun tailStateReflectsRefillOutcome() {
+        assertEquals(
+            "补到东西 → 不打扰用户",
+            SwipeQueueTail.Idle,
+            resolveSwipeQueueTail(appended = 1)
+        )
+        assertEquals(
+            "一条都没补到 → 明确告诉用户到头了",
+            SwipeQueueTail.Exhausted,
+            resolveSwipeQueueTail(appended = 0)
+        )
+        // 判据默认值也必须一致（写错会变成"永远显示正在找更多"）
+        assertEquals(8, SWIPE_REFILL_TARGET)
+    }
 }
