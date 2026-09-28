@@ -360,6 +360,13 @@ private fun PlaybackSettingsSection(
     )
 
     SheetSwitchCard(
+        title = "播完自动下一个",
+        subtitle = "竖屏连播时播完自动翻到下一支；关闭后停在结尾（与单曲循环互斥）",
+        checked = settingsState.playback.swipeAutoAdvance,
+        onCheckedChange = viewModel::updateSwipeAutoAdvance
+    )
+
+    SheetSwitchCard(
         title = "预加载下一个视频",
         subtitle = "竖屏连播时提前取好后几支的播放地址（WiFi 预取更多；关闭后仅在 WiFi 下预取）",
         checked = settingsState.playback.prefetchVideo,

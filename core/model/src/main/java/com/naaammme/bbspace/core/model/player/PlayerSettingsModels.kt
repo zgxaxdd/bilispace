@@ -132,7 +132,15 @@ data class PlayerPlaybackPrefs(
      */
     val prefetchVideo: Boolean = true,
     /** 单视频循环播放（播完自动重播） */
-    val repeatMode: PlayerRepeatMode = PlayerRepeatMode.Off
+    val repeatMode: PlayerRepeatMode = PlayerRepeatMode.Off,
+    /**
+     * 竖屏连播：播完**自动翻到下一支**（默认开，与 BiliPai 的连播行为一致）。
+     *
+     * 关掉后播完就停在结尾 —— 想「一支看完停下来回味/截图」的用户需要这个开关；
+     * 与 [repeatMode] 的关系：单曲循环时播放器不会发 `STATE_ENDED`，自动翻页天然不生效；
+     * 开着自动翻页但非循环时，播完前进一支（这条判据在 [SwipeAutoAdvancePolicy] 里）。
+     */
+    val swipeAutoAdvance: Boolean = true
 )
 
 @Immutable

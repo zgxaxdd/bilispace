@@ -867,6 +867,31 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 播完行为可配（C10）：自动翻页必须受设置与幂等键共同约束。
+     *
+     * 以前是"只要不是单曲循环就自动翻"——用户想"看完停在结尾"没有任何办法；
+     * 现在判据抽到 `SwipeAutoAdvancePolicy`，pager 只负责把四个入参喂进去。
+     */
+    @Test
+    fun autoAdvanceConsultsSettingAndIdempotency() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "自动翻页必须走 shouldAutoAdvanceToNextSwipePage，并把「开关 / 单曲循环 / 最后一页 / " +
+                "本支是否已翻过」四个判据都传进去 —— 少任何一个都会退化成旧行为。",
+            countMatching(pager, """shouldAutoAdvanceToNextSwipePage\(""") == 1 &&
+                countMatching(pager, """autoAdvanceEnabled = playerSettings\.playback\.swipeAutoAdvance""") == 1 &&
+                countMatching(pager, """repeatOne = playerSettings\.playback\.repeatMode != PlayerRepeatMode\.Off""") == 1 &&
+                countMatching(pager, """isLastPage = next > pages\.lastIndex""") == 1 &&
+                countMatching(
+                    pager,
+                    """alreadyAdvancedForThisVideo = key\.isNotEmpty\(\) && key == lastAutoAdvancedKey"""
+                ) == 1 &&
+                countMatching(pager, """if \(!shouldAdvance\) return""") == 1 &&
+                countMatching(codeOf("player/VideoPlaybackSheet.kt"), """title = "播完自动下一个"""") == 1
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }

@@ -605,6 +605,7 @@ class AppSettings @Inject constructor(
     private val bgPlayKey = booleanPreferencesKey("bg_play")
     private val seamlessTransitionKey = booleanPreferencesKey("seamless_transition")
     private val prefetchVideoKey = booleanPreferencesKey("prefetch_video")
+    private val swipeAutoAdvanceKey = booleanPreferencesKey("swipe_auto_advance")
     private val autoRotateFullscreenKey = booleanPreferencesKey("auto_rotate_fullscreen")
     private val gestureSpeedKey = floatPreferencesKey("gesture_speed")
     private val doubleTapLikeKey = booleanPreferencesKey("double_tap_like")
@@ -641,6 +642,7 @@ class AppSettings @Inject constructor(
                 backgroundPlayback = prefs[bgPlayKey] ?: defaultPlaybackPrefs.backgroundPlayback,
                 seamlessTransition = prefs[seamlessTransitionKey] ?: defaultPlaybackPrefs.seamlessTransition,
                 prefetchVideo = prefs[prefetchVideoKey] ?: defaultPlaybackPrefs.prefetchVideo,
+                swipeAutoAdvance = prefs[swipeAutoAdvanceKey] ?: defaultPlaybackPrefs.swipeAutoAdvance,
                 reportPlayback = prefs[reportPlaybackKey] ?: defaultPlaybackPrefs.reportPlayback,
                 preferSoftwareDecode = prefs[preferSoftDecKey]
                     ?: defaultPlaybackPrefs.preferSoftwareDecode,
@@ -721,6 +723,11 @@ class AppSettings @Inject constructor(
     /** 竖屏连播预加载开关（默认开）：见 `PlayerPlaybackPrefs.prefetchVideo`。 */
     suspend fun setPrefetchVideo(enabled: Boolean) {
         editSettingsMirrored { it[prefetchVideoKey] = enabled }
+    }
+
+    /** 竖屏连播「播完自动翻下一支」（默认开）：见 `PlayerPlaybackPrefs.swipeAutoAdvance`。 */
+    suspend fun setSwipeAutoAdvance(enabled: Boolean) {
+        editSettingsMirrored { it[swipeAutoAdvanceKey] = enabled }
     }
 
     suspend fun setReportPlayback(enabled: Boolean) {

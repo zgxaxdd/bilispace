@@ -747,6 +747,13 @@ class VideoViewModel @Inject constructor(
         }
     }
 
+    /** 竖屏连播「播完自动翻下一支」（默认开）：判据见 [shouldAutoAdvanceToNextSwipePage]。 */
+    fun updateSwipeAutoAdvance(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setSwipeAutoAdvance(enabled)
+        }
+    }
+
     fun updateReportPlayback(enabled: Boolean) {
         viewModelScope.launch {
             playerSettings.setReportPlayback(enabled)

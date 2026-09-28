@@ -36,9 +36,12 @@ import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.feature.video.VideoViewModel
+import com.naaammme.bbspace.core.model.PlayerRepeatMode
+import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
 import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.feature.video.swipe.SwipeQueueTail
+import com.naaammme.bbspace.feature.video.swipe.shouldAutoAdvanceToNextSwipePage
 import com.naaammme.bbspace.feature.video.swipe.shouldExtendSwipeQueue
 import com.naaammme.bbspace.feature.video.swipe.swipeKey
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -180,15 +183,25 @@ internal fun PortraitSwipePager(
     // 没有去重就会**一次翻两页**（用户看到"跳过了一支"）。同一支视频只自动翻一次。
     var lastAutoAdvancedKey by remember { mutableStateOf<String?>(null) }
     val player by viewModel.player.collectAsStateWithLifecycle()
-    DisposableEffect(player, pages) {
+    // 初值给默认设置：DataStore 的 Flow 没有同步初值，而默认值就是"自动翻页开"，
+    // 第一帧判据与落地后的真实值一致（不会出现"先不翻、过一帧才开始翻"的抖动）。
+    val playerSettings by viewModel.settingsState.collectAsStateWithLifecycle(
+        initialValue = PlayerSettingsState()
+    )
+    DisposableEffect(player, pages, playerSettings.playback.swipeAutoAdvance) {
         val p = player ?: return@DisposableEffect onDispose { }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState != Player.STATE_ENDED) return
-                val next = pagerState.currentPage + 1
-                if (next > pages.lastIndex) return
                 val key = swipeKey(currentBvid, currentAid)
-                if (key.isNotEmpty() && key == lastAutoAdvancedKey) return
+                val next = pagerState.currentPage + 1
+                val shouldAdvance = shouldAutoAdvanceToNextSwipePage(
+                    autoAdvanceEnabled = playerSettings.playback.swipeAutoAdvance,
+                    repeatOne = playerSettings.playback.repeatMode != PlayerRepeatMode.Off,
+                    isLastPage = next > pages.lastIndex,
+                    alreadyAdvancedForThisVideo = key.isNotEmpty() && key == lastAutoAdvancedKey
+                )
+                if (!shouldAdvance) return
                 lastAutoAdvancedKey = key
                 Log.i(TAG, "autoAdvance: page=${pagerState.currentPage} -> $next key=$key")
                 scope.launch { pagerState.animateScrollToPage(next) }
