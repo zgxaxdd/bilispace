@@ -612,6 +612,7 @@ class VideoViewModel @Inject constructor(
      * 只搬运**判据与触发时机**：预取走 [VideoPlayerRepository.preloadPlayUrl]，
      * 与正常开播共用同一份进程内 playurl LRU —— 于是"上滑之后画面来得快不快"取决于
      * 这一步有没有提前把地址取回来，而不是再等一个 gRPC 往返。
+     * 同一次预取还会热**详情**（标题/UP/简介先落地，见 [prefetchEntry]）。
      *
      * - 条数由 [SwipePrefetchPolicy.prefetchCount] 决定（WiFi+开关 3 / WiFi 2 /
      *   蜂窝+开关 1 / 否则 0）；
@@ -642,10 +643,16 @@ class VideoViewModel @Inject constructor(
         val key = "${target.aid}#${target.cid}"
         if (!prefetchedKeys.add(key)) return
         viewModelScope.launch {
+            val params = target.toPlayableParams()
             runCatchingCancellable {
-                playbackVideoRepository.preloadPlayUrl(
-                    target.toPlayableParams().getResolveParams()
-                )
+                playbackVideoRepository.preloadPlayUrl(params.getResolveParams())
+            }
+            // 顺带把**详情**也热了：连播页左下角的标题/UP 直接取 `videoState.detail`，
+            // 而详情是开播时才并发请求的 —— 不预热就会"翻过去先空一拍再补上标题"。
+            // 预热后 `StreamPlaybackSessionImpl` 那条 `reuseDetail` 短路会命中，
+            // 连"取详情"这次请求都省了（详情仓库自己有 LRU）。失败一律吞掉。
+            runCatchingCancellable {
+                detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
             }
             android.util.Log.i("PortraitSwipe", "prefetch: key=$key count=${prefetchedKeys.size}")
         }

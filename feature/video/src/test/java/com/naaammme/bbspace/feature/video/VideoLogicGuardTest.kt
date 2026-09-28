@@ -932,6 +932,25 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 预取必须**同时热详情**（C10 收尾项）。
+     *
+     * 连播页左下角的标题/UP 直接取 `videoState.detail`，而详情原本是开播时才并发请求的
+     * —— 只预热播放地址就会"翻过去先空一拍再补上标题"。预热详情后，
+     * `StreamPlaybackSessionImpl` 的 `reuseDetail` 短路会命中，连取详情那次请求都省了。
+     */
+    @Test
+    fun prefetchWarmsDetailNotOnlyPlayUrl() {
+        val vm = codeOf("VideoViewModel.kt")
+        assertTrue(
+            "prefetchEntry 里必须既 preloadPlayUrl 又 fetchVideoDetail（同一个 params，" +
+                "详情失败静默）—— 只热一个都会留下可见的空拍。",
+            countMatching(vm, """playbackVideoRepository\.preloadPlayUrl\(params\.getResolveParams\(\)\)""") == 1 &&
+                countMatching(vm, """detailRepository\.fetchVideoDetail\(ids = params\.ids, src = params\.src\)""") >= 1 &&
+                countMatching(vm, """val params = target\.toPlayableParams\(\)""") == 1
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
