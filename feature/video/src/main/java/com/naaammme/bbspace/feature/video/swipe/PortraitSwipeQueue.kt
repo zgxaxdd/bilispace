@@ -194,6 +194,8 @@ fun appendSwipeEntries(
     anchorKey: String,
     recentWindow: Int = SWIPE_OWNER_DIVERSITY_WINDOW,
     maxPerOwnerPerWindow: Int = SWIPE_MAX_PER_OWNER,
+    /** 排序种子：默认按会话锚点派生 —— 同一会话内可复现，不同会话不同序。 */
+    arrangeSeed: Int = anchorKey.hashCode(),
 ): List<SwipeEntry> {
     if (incoming.isEmpty()) return existing
     val accepted = existing.toMutableList()
@@ -205,7 +207,16 @@ fun appendSwipeEntries(
     val seenCovers = accepted.mapNotNullTo(mutableSetOf()) {
         swipeCoverKey(it.cover).takeIf(String::isNotEmpty)
     }
-    incoming.forEach { candidate ->
+    // 相似度签名缓存：见文件末尾 areSwipeEntriesSimilarCached 的说明
+    val signatures = HashMap<String, Set<String>>(incoming.size + accepted.size)
+    // 新批次先洗牌 + 相邻不同 UP 排布（BiliPai 同款）：只重排**这一批**，
+    // 已在队列里的页顺序不动（pager 以页号为身份，重排会让用户当前页跳变）。
+    val ordered = arrangeSwipeEntries(
+        seed = arrangeSeed,
+        incoming = incoming,
+        precedingOwner = accepted.lastOrNull()?.displayAuthor
+    )
+    ordered.forEach { candidate ->
         val key = candidate.key
         val title = normalizeSwipeTitle(candidate.title)
         val cover = swipeCoverKey(candidate.cover)
@@ -218,12 +229,53 @@ fun appendSwipeEntries(
                 .mapNotNull { it.displayAuthor }
             if (recentOwners.count { it == owner } >= maxPerOwnerPerWindow) return@forEach
         }
+        // 相似度档（BiliPai `PortraitPagerSwitchPolicy.kt:407-441` 的移植）：
+        // 同一支视频被不同 UP 以不同标题后缀反复推荐时，上面的"标题全等/封面相等"挡不住，
+        // 用户会连着刷到同一支。签名缓存把 O(n²) 里的正则抽取摊成一次。
+        if (accepted.any { existing -> areSwipeEntriesSimilarCached(existing, candidate, signatures) }) {
+            return@forEach
+        }
         accepted += candidate
         seenKeys += key
         if (title.isNotEmpty()) seenTitles += title
         if (cover.isNotEmpty()) seenCovers += cover
     }
     return accepted
+}
+
+/**
+ * 相似度比较（带签名缓存）：关键词抽取是正则 + 集合运算，逐对比较里必须缓存，
+ * 否则队列长到几十条时每次补货都要重跑上百次正则。
+ *
+ * `internal` 而不是 `private`：`SwipeArrangement` 的排布也要用同一份判据 +
+ * 自己的缓存（同一批次内共享）。
+ */
+internal fun areSwipeEntriesSimilarCached(
+    first: SwipeEntry,
+    second: SwipeEntry,
+    cache: MutableMap<String, Set<String>>,
+): Boolean {
+    val firstCoverKey = swipeCoverKey(first.cover)
+    val secondCoverKey = swipeCoverKey(second.cover)
+    if (firstCoverKey.isNotEmpty() && firstCoverKey == secondCoverKey) return true
+    val firstKeywords = cache.getOrPut(first.key) { extractSwipeTitleKeywords(first.title) }
+    val secondKeywords = cache.getOrPut(second.key) { extractSwipeTitleKeywords(second.title) }
+    if (firstKeywords.isEmpty() || secondKeywords.isEmpty()) return false
+    val overlap = firstKeywords.intersect(secondKeywords).size
+    if (overlap >= SWIPE_KEYWORD_OVERLAP_STRONG) return true
+    // 时长未知 → 后两条判据不成立（与 SwipeSimilarity.areSwipeEntriesSimilar 同一适配：
+    // bbspace 的条目常常没有时长，用 0 参与比较会把同 UP 的不同视频误判成同一支）
+    val firstSec = swipeDurationSec(first.durationText)
+    val secondSec = swipeDurationSec(second.durationText)
+    if (firstSec <= 0 || secondSec <= 0) return false
+    val durationDelta = kotlin.math.abs(firstSec - secondSec)
+    if (overlap >= SWIPE_KEYWORD_OVERLAP_WEAK && durationDelta <= SWIPE_DURATION_DELTA_WEAK_SEC) return true
+    val firstOwner = first.displayAuthor
+    val secondOwner = second.displayAuthor
+    return firstOwner != null &&
+        firstOwner == secondOwner &&
+        overlap >= 1 &&
+        durationDelta <= SWIPE_DURATION_DELTA_SAME_OWNER_SEC
 }
 
 /**

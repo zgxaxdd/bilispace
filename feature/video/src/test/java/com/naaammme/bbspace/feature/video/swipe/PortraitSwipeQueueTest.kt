@@ -111,15 +111,26 @@ class PortraitSwipeQueueTest {
             entry("BV2", author = null),
             entry("BV3", author = null)
         )
+        val incoming = listOf(
+            entry("BV5", author = null),
+            entry("BV4", author = null)
+        )
         val appended = appendSwipeEntries(
             existing = existing,
-            incoming = listOf(
-                entry("BV5", author = null),
-                entry("BV4", author = null)
-            ),
+            incoming = incoming,
             anchorKey = "BV1"
         )
-        assertEquals(listOf("BV2", "BV3", "BV5", "BV4"), appended.map { it.bvid })
+        // 硬约束不变：**已有页的顺序一个都不许动**（pager 以页号为身份）
+        assertEquals(listOf("BV2", "BV3"), appended.take(2).map { it.bvid })
+        // 新批次成员不丢（顺序由 arrangeSwipeEntries 的洗牌决定，见 SwipeArrangementTest）
+        assertEquals(setOf("BV2", "BV3", "BV4", "BV5"), appended.map { it.bvid }.toSet())
+        // 同一锚点（同一 seed）重复合并 → 顺序可复现
+        val again = appendSwipeEntries(
+            existing = existing,
+            incoming = incoming.reversed(),
+            anchorKey = "BV1"
+        )
+        assertEquals(appended.map { it.bvid }, again.map { it.bvid })
     }
 
     @Test
