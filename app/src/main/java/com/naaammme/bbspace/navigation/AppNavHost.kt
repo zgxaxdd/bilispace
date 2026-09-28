@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.navigation
 
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -25,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +58,7 @@ import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraph
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -369,6 +372,13 @@ fun AppNavHost(
             themeConfig.animationSpeed
         )
     }
+    // 诊断：这一版 NavHost 实际装配的过渡（真机反馈"退出动画调不动"时，先看这里）
+    LaunchedEffect(themeConfig.transitionStyle, themeConfig.animationSpeed) {
+        android.util.Log.i(
+            "NavTransitions",
+            "installed style=${themeConfig.transitionStyle} speed=${themeConfig.animationSpeed}"
+        )
+    }
 
     // （原 forcedDismissMode 一次性 hack 已删除：它靠"假装收起"绕过 hostMode，
     //  但 hostMode 不离开 Expanded 就永不复位，反而把小横条重新展开也挡死了。
@@ -424,6 +434,48 @@ fun AppNavHost(
         LocalStoryCardOpener provides storyCardOpener,
         LocalBottomNavOcclusionRatio provides { bottomNavOcclusionRatio }
     ) {
+        // ── 返回键：应用自己兜住"回到上一层" ──────────────────────────────────
+        //
+        // ## 为什么必须自己注册（真机故障根因，2026-09-28）
+        //
+        // `navigation-compose` 升到 **2.10.1** 后，NavHost 的返回处理从
+        // `OnBackPressedDispatcher` 换成了 `androidx.navigationevent`
+        // （javap 实证：2.5.1 的 `NavHostKt` 里有 `setOnBackPressedDispatcher` /
+        // `enableOnBackPressed`；2.10.1 里改成 `NavHostEventHandler :
+        // NavigationEventHandler`，启用判据是它自己那条
+        // `composeNavigator.backStack.size > 1`，且经 `LifecycleStartEffect` 写入、
+        // `onStopOrDispose` 复位）。
+        //
+        // 而 activity 1.13.0 侧：`OnBackInvokedInput.updateBackInvokedCallbackState()`
+        // 只在**存在 enabled handler** 时才 `registerOnBackInvokedCallback`。两者叠加
+        // 的结果是：只要没有 enabled handler，平台就反注册系统回调、回到遗留路径
+        // `Activity.onBackPressed()` → `finishAfterTransition()` —— **整个 Activity 被关掉**。
+        //
+        // 用户看到的就是：「退出动画一直是那个缩放动画、调过渡动画不生效」——
+        // 那不是应用内转场，而是**系统关闭任务的窗口动画**；打开走
+        // NavHost 的 enterTransition、退出走系统，两者永远不可能对称。
+        //
+        // ## 为什么注册在 NavHost **之前**
+        //
+        // navigationevent 的处理器 Deque 用 `addFirst` 插入、`resolveEnabledHandler`
+        // 取"第一个 enabled"（javap 实证）→ **后注册者优先级更高**。放在 NavHost
+        // 之前，优先级天然是：
+        //   1. 目的地内部的 BackHandler（评论面板 / 搜索 / 直播等，后注册）—— 它们要的
+        //      "先关面板再弹栈"语义完全不受影响；
+        //   2. NavHost 自己的 `NavHostEventHandler`（带预测式返回的跟手预览）；
+        //   3. 本处理器 —— 只在 2 失效时兜底（生命周期竞态 / 进程恢复后
+        //      `ComposeNavigator.backStack` 与 NavController 失步）。
+        // 放在 NavHost 之后会把它顶到最高优先级，抢掉预测式预览与面板优先级。
+        val rootBackStack by rootNavController.currentBackStack.collectAsStateWithLifecycle()
+        val canPopRoot by remember(rootBackStack) {
+            // 与 `NavController.updateOnBackPressedCallbackEnabled()` 同判据：
+            // 只数真实目的地，NavGraph 根不算（否则停在首页时会把返回键吃掉、
+            // 用户退不出 App）。
+            derivedStateOf { rootBackStack.count { it.destination !is NavGraph } > 1 }
+        }
+        BackHandler(enabled = canPopRoot) {
+            rootNavController.popBackStack()
+        }
         Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             modifier = Modifier
@@ -434,7 +486,13 @@ fun AppNavHost(
             enterTransition = { transitions.enter(this) },
             exitTransition = { transitions.exit(this) },
             popEnterTransition = { transitions.popEnter(this) },
-            popExitTransition = { transitions.popExit(this) }
+            popExitTransition = { transitions.popExit(this) },
+            // 预测式返回（手势跟手预览）也走同一套 pop 过渡：不接这两个参数时
+            // 2.10.1 会退回它内置的默认值，既与设置风格不一致、也让"返回到底走没走
+            // NavHost"这件事在日志上不可见（排查时踩过）。
+            // 与上面四个参数同为**带接收者的 lambda**，多出来的那一个是 swipeEdge。
+            predictivePopEnterTransition = { _ -> transitions.popEnter(this) },
+            predictivePopExitTransition = { _ -> transitions.popExit(this) }
         ) {
             composable(MAIN_ROUTE) {
                 MainTabsScaffold(

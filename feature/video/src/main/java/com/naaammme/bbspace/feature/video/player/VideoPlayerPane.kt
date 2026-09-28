@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -117,6 +118,7 @@ import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
@@ -393,7 +395,30 @@ internal fun VideoPlayerPane(
      * 上下滑翻页会话（全屏 pager）激活：垂直拖动让位给 pager 翻页，
      * 亮度/音量手势禁用（水平 seek、单击/双击/长按不受影响）。
      */
-    swipePagingActive: Boolean = false
+    swipePagingActive: Boolean = false,
+    /**
+     * 上下滑会话里"正在等这支视频出画面"（pager 判据：切到这个条目后首帧还没到）。
+     *
+     * 为什么需要：PlayerView 开了 `setKeepContentOnPlayerReset(true)`，换流期间画面会
+     * **停留在上一支视频的最后一帧**；而 pager 那边新页此刻刚从"封面页"切成播放器页
+     * ——用户看到的就是"上滑时预览图又闪一下、然后画面还是上一条的"。真机反馈第 2 条。
+     *
+     * 置 true 时整屏只剩一层**深色加载层 + 大尺寸粒子**（见 [SwipeWaitVeil]）：
+     * 不重复铺封面、也不让中央播放键/控制栏露出来，首帧到达后淡出。
+     */
+    swipeWaitingFirstFrame: Boolean = false,
+    /**
+     * 手动横屏开关（`null` = 不显示该入口）。
+     *
+     * 为什么需要：上下滑会话期间 VideoScreen **锁死竖屏**（否则切视频时会因
+     * `isPortraitVideo` 瞬时翻转而转屏，见那边 effect 的注释）。锁的代价是
+     * "横屏视频只能看 letterbox"，所以必须给用户一个显式要横屏的入口——
+     * BiliPai 的竖屏 pager 也是同一个做法（`onRotateToLandscape`）。
+     * 只在**当前视频是横屏**时由 pager 传入（竖屏视频转横屏只会更小）。
+     */
+    onToggleLandscape: (() -> Unit)? = null,
+    /** 当前是否已被用户手动锁成横屏（决定"横屏/竖屏"胶囊的文案与高亮）。 */
+    landscapeForced: Boolean = false,
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -593,7 +618,9 @@ internal fun VideoPlayerPane(
                     showCtrl = true
                     onToggleFull()
                 },
-                swipePagingActive = swipePagingActive
+                swipePagingActive = swipePagingActive,
+                landscapeForced = landscapeForced,
+                onToggleLandscape = onToggleLandscape
             )
 
             // A5：控制层显隐动画（fadeIn + 4dp 轻位移 200ms Standard，退出 150ms fadeOut）
@@ -686,6 +713,19 @@ internal fun VideoPlayerPane(
                                 )
                             }
                         )
+                        // 手动横屏（只在允许的宿主里出现，见 onToggleLandscape 的参数注释）：
+                        // 竖屏连播是锁竖屏的，横屏视频想看满屏只能由用户显式要一次。
+                        onToggleLandscape?.let { toggle ->
+                            PlayerPillChip(
+                                text = if (landscapeForced) "竖屏" else "横屏",
+                                showDot = landscapeForced,
+                                dimmed = false,
+                                onClick = {
+                                    showCtrl = true
+                                    toggle()
+                                }
+                            )
+                        }
                         IconButton(
                             onClick = {
                                 showCtrl = true
@@ -712,6 +752,17 @@ internal fun VideoPlayerPane(
                         .fillMaxSize()
                 )
             }
+
+            // 上下滑的「等首帧」加载层。
+            //
+            // ⚠️ **必须写在播放器 Box 的里面、并且是最后一个子节点**：
+            // 这个 `}` 下面几行的那个 `}` 就是 Box 的收尾 —— 放到它外面，这一层会成为
+            // CompositionLocalProvider 的第二个子节点、被父级布局排到屏幕外：
+            // 组合照常发生（日志、状态都对），但**永远看不见**。
+            // 实测踩过：真机上"加载动画不出现"就是这个位置问题。
+            // 放在最后 = 盖住视频/弹幕/手势 HUD/中央播放键/上下控制栏；
+            // 它自身不带 pointerInput，不消费触摸，上下滑翻页照常。
+            SwipeWaitVeil(visible = swipeWaitingFirstFrame)
         }
 
         if (activeDialog == PlayerDialog.Quality) {
@@ -766,6 +817,72 @@ internal fun VideoPlayerPane(
         }
     }
 }
+
+/**
+ * 「等新视频出画面」的加载层：深色底 + 大尺寸粒子加载。
+ *
+ * ## 为什么是深色底而不是铺封面（真机反馈）
+ * 第一版铺的是当前条目封面（本意是"封面开场、首帧交接"），但用户在真机上看到的是
+ * 「刷下一个视频的时候**还是有预览图**」——上滑时封面页已经把这张图给用户看过了，
+ * 再铺一次读作"预览图又闪了一下"。现在改为**纯加载态**：不重复任何画面，
+ * 只给一个明确的"内容马上来"。
+ *
+ * ## 为什么必须在控件**之上**（真机反馈）
+ * 第一版插在弹幕层之后、控件层之前，于是中央那颗 72dp 播放/暂停键与底栏控件会
+ * 压在加载层上面——用户的原话是「同时出现的有一个大大的暂停按钮」。
+ * 现在它是播放页 Box 的**最后一个子节点**：等首帧期间整屏只有加载动画，
+ * 而它自己不带任何 pointerInput，**不挡手势**（上下滑翻页照常）。
+ *
+ * 淡出用 [Animatable] + `graphicsLayer` 读值：动画期间零重组（同 `CoverSettleBackdrop`）。
+ * `mounted` 单独记：淡出结束后整层从组合里摘掉，不在后台留一个常驻粒子循环。
+ */
+@Composable
+private fun SwipeWaitVeil(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    // 初值就按 visible 落位：进入全屏/打开 story 时本来就在等首帧，加载层必须**首帧就在**，
+    // 否则会先露一帧黑（或上一支视频的最后一帧）再盖上——那正是要修掉的闪。
+    val alpha = remember { Animatable(if (visible) 1f else 0f) }
+    var mounted by remember { mutableStateOf(visible) }
+    val fadeSpec = tween<Float>(durationMillis = LocalAnimations.current.medium)
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            mounted = true
+            alpha.snapTo(1f)
+        } else if (mounted) {
+            alpha.animateTo(0f, fadeSpec)
+            mounted = false
+        }
+    }
+    if (!mounted) return
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer { this.alpha = alpha.value }
+            .background(
+                // 深色纵向渐变而不是纯黑：纯黑读作"没画面了"，渐变读作"在加载"
+                Brush.verticalGradient(listOf(WaitVeilTopColor, WaitVeilBottomColor))
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        BiliParticleLoader(
+            modifier = Modifier
+                // 大尺寸：占屏宽 34% 的正方形（不写 dp 字面量，跟着屏幕走）
+                .fillMaxWidth(LOADER_WIDTH_FRACTION)
+                .aspectRatio(1f)
+        )
+    }
+}
+
+/** 加载层底色（播放器族统一「深色底 + 白前景」，与主题色解耦）。 */
+private val WaitVeilTopColor = Color(0xFF14161A)
+private val WaitVeilBottomColor = Color(0xFF08090B)
+
+/** 加载动画边长占屏宽的比例。0.34 在 1272px 屏上约 433px（≈155dp）—— 是"主角"不是"小转圈"。 */
+private const val LOADER_WIDTH_FRACTION = 0.34f
 
 /** 双击点赞爱心动效：在点击位置放大、上浮并淡出 */
 
@@ -850,7 +967,11 @@ private fun VideoPlayerOverlay(
     onShowSp: () -> Unit,
     onToggleFull: () -> Unit,
     // 上下滑翻页会话激活：垂直拖动让位给 pager（见 videoGestures 的参数注释）
-    swipePagingActive: Boolean = false
+    swipePagingActive: Boolean = false,
+    /** 当前是否已被用户手动锁成横屏（决定"横屏/竖屏"胶囊的文案与高亮）。 */
+    landscapeForced: Boolean = false,
+    /** 手动横屏开关；null = 本宿主不提供该入口（非会话路径没有竖屏锁，不需要）。 */
+    onToggleLandscape: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val gestureState = remember { VideoGestureState() }

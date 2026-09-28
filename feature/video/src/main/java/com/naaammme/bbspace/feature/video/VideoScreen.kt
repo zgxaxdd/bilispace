@@ -388,14 +388,25 @@ fun VideoScreen(
     // 会话期间第一分支短路，这两条都不会再发生（锁是 PORTRAIT 而不是 UNSPECIFIED：
     // 用户此刻要的是"连播"，方向由 pager 说了算，不听传感器）。
     val portraitSwipeActive = swipeSessionActive || effectiveStoryMode
+    // 用户显式要横屏（刷视频会话里点"横屏"胶囊）：只对**当前这一支**视频生效——
+    // 切到下一条（ids 变化）或离开会话就收回，于是连播始终是竖屏节奏，
+    // 只有用户点名的那条视频会满屏。对齐 BiliPai 的做法
+    // （`onRotateToLandscape` → `setPortraitFullscreen(false)` + SENSOR_LANDSCAPE）。
+    var swipeLandscape by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(videoState.ids, swipeSessionActive) {
+        swipeLandscape = false
+    }
     DisposableEffect(
         act,
         fullOn,
         settingsState.playback.autoRotateFullscreen,
         isPortraitVideo,
-        portraitSwipeActive
+        portraitSwipeActive,
+        swipeLandscape
     ) {
         act?.requestedOrientation = when {
+            // 手动横屏优先于竖屏锁：用户点名要看满屏，就给满屏
+            swipeLandscape && portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             fullOn &&
                 settingsState.playback.autoRotateFullscreen &&
@@ -482,6 +493,9 @@ fun VideoScreen(
                             onGoHome = onGoHome,
                             onSwipeTo = viewModel::openSwipeTarget,
                             onNeedMore = viewModel::loadMoreSwipeQueue,
+                            // 会话锁竖屏 → 横屏视频要给一个"手动横屏"的出口（见方向 effect）
+                            landscapeForced = swipeLandscape,
+                            onToggleLandscape = { swipeLandscape = !swipeLandscape },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -499,7 +513,14 @@ fun VideoScreen(
                                 }
                             },
                             onBackClick = handleBack,
-                            onGoHome = onGoHome
+                            onGoHome = onGoHome,
+                            // story 入口在 bootstrapStorySession 返回之前锚点还是 null，
+                            // pager 分支不成立 —— 这段"还没有内容"的时间必须由加载层盖住：
+                            // 否则首屏是黑底 + 中央 72dp 播放键（真机帧序列实证，用户说的
+                            // 「大大的暂停按钮」）。非 story 路径保持原样（它有自己的
+                            // CoverSettleBackdrop 封面垫底）。
+                            swipeWaitingFirstFrame = effectiveStoryMode &&
+                                !videoState.hasRenderedFirstFrame
                         )
                     }
                 }

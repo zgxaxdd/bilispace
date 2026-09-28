@@ -28,6 +28,13 @@ enum class BiliImageVariant(
     CardCoverLarge,
     PreviewThumb,
     Banner,
+
+    /**
+     * 播放器预览图：**保持原始比例**（不裁切）的限宽大图。
+     * 刷视频模式的封面页 / 等首帧加载层用它 —— 那里要的是"完整封面居中显示"，
+     * 而 [CardCoverLarge] 之类会按 16:9 裁切，竖屏视频的主体会被切掉。
+     */
+    PlayerPreview,
     Original(original = true)
 }
 
@@ -48,6 +55,7 @@ fun biliImageUrlForVariant(url: String?, variant: BiliImageVariant): String? = w
     variant == BiliImageVariant.Avatar -> avatarThumbnailUrl(url)
     variant == BiliImageVariant.CardCoverLarge -> coverUrlFor(url, BiliCoverSize.Large)
     variant == BiliImageVariant.CardCover43 -> coverUrlFor(url, BiliCoverSize.Small43)
+    variant == BiliImageVariant.PlayerPreview -> coverUrlFor(url, BiliCoverSize.PlayerPreview)
     variant == BiliImageVariant.CardCover -> coverThumbnailUrl(url)
     else -> thumbnailUrl(url, variant.q)
 }

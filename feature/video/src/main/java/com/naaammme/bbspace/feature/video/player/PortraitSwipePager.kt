@@ -3,13 +3,13 @@ package com.naaammme.bbspace.feature.video.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
+import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
@@ -84,6 +85,10 @@ internal fun PortraitSwipePager(
     onGoHome: () -> Unit,
     onSwipeTo: (SwipeEntry) -> Unit,
     onNeedMore: () -> Unit = {},
+    /** 当前是否已被用户手动锁成横屏（"横屏/竖屏"胶囊的状态）。 */
+    landscapeForced: Boolean = false,
+    /** 手动横屏开关；由 VideoScreen 落到 requestedOrientation 上。 */
+    onToggleLandscape: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val pages = remember(anchor, queue) { listOf(anchor) + queue }
@@ -160,6 +165,38 @@ internal fun PortraitSwipePager(
         val owner = pages.indexOfFirst { it.isCurrentVideo(currentBvid, currentAid) }
         Log.i(TAG, "bind: page=${pagerState.currentPage} current=$currentKey playerPage=$owner")
     }
+    // ── 等首帧（真机反馈：上滑后第一个出现的是"黑屏 + 大暂停键"）──────────────────
+    // 症状链：翻页 → 新页立刻从 SwipeCoverPage 切成 VideoPlayerPane → 但播放器
+    // 开了 `setKeepContentOnPlayerReset(true)`，这一瞬间画面还是**上一支视频的最后一帧**；
+    // 中央那颗 72dp 播放键也会因为 playWhenReady 短暂为假而冒出来。
+    //
+    // **不能直接取 `!hasRenderedFirstFrame` 的瞬时值**：换视频后的头几十毫秒里它仍然是
+    // 上一支的 `true` —— `finishVideoPlayback` 是**先**发布新 ids
+    // （`_videoState.value = nextState.toVideoPlaybackState(state = 引擎当时的值)`）、
+    // **后**才 `stopForReuse()` 把 `firstFrameSeq` 归零。跟着瞬时值走，加载层会先卸载、
+    // 几十毫秒后再挂上，中间那一帧就是用户看到的黑屏 + 大暂停键
+    // （真机日志实证：`veil: visible=false mounted=false` 之后 37ms 又 `visible=true`）。
+    //
+    // 所以用**粘滞**状态：换视频（currentKey 变化）进入等待，直到"这一支"真的出帧、
+    // 或这一支出错（不能让加载层把错误界面永远盖住）才退出。
+    val playbackState by viewModel.videoState.collectAsStateWithLifecycle()
+    val firstFrameRendered = playbackState.hasRenderedFirstFrame
+    val playbackFailed = playbackState.error != null
+    var waitingKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentKey) {
+        // 首次组合同样置位：锚点视频还没出帧时，一样该看到加载层而不是黑屏
+        waitingKey = currentKey
+    }
+    LaunchedEffect(firstFrameRendered, playbackFailed) {
+        if (firstFrameRendered || playbackFailed) waitingKey = null
+    }
+    val waitingFirstFrame = waitingKey != null
+    // 当前视频是不是横屏：决定要不要给"手动横屏"入口（竖屏视频转横屏只会更小）。
+    // 与 VideoScreen 的 isPortraitVideo 同源同键（currentStream），不会两处算出不同结论。
+    val isPortraitVideo = remember(playbackState.currentStream) {
+        val stream = playbackState.currentStream ?: return@remember true
+        (stream.width ?: 0) in 1..<(stream.height ?: 0)
+    }
     VerticalPager(state = pagerState, modifier = modifier) { page ->
         val entry = pages.getOrNull(page) ?: return@VerticalPager
         if (entry.isCurrentVideo(currentBvid, currentAid)) {
@@ -172,7 +209,12 @@ internal fun PortraitSwipePager(
                 onBackClick = onBackClick,
                 onGoHome = onGoHome,
                 // 翻页会话激活：垂直拖动让位给 pager（否则亮度/音量手势抢走上下滑）
-                swipePagingActive = true
+                swipePagingActive = true,
+                // 等首帧加载层：深色底 + 大尺寸粒子，首帧到达后淡出
+                swipeWaitingFirstFrame = waitingFirstFrame,
+                // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
+                landscapeForced = landscapeForced,
+                onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }
             )
         } else {
             SwipeCoverPage(
@@ -184,6 +226,9 @@ internal fun PortraitSwipePager(
 }
 
 private const val TAG = "PortraitSwipe"
+
+/** 封面页加载动画的边长（占屏宽比例）。比播放器页的加载层小一档：它压在封面之上。 */
+private const val COVER_LOADER_WIDTH_FRACTION = 0.26f
 
 /** 非当前页：封面铺满 + 底部标题/UP 渐变信息条 + 当前页取流中的加载指示。 */
 @Composable
@@ -197,18 +242,25 @@ private fun SwipeCoverPage(
                 url = entry.cover,
                 contentDescription = entry.title,
                 modifier = Modifier.fillMaxSize(),
-                // 全屏铺满必须用大图 variant：CardCover 的 q 限制会糊
-                variant = BiliImageVariant.CardCoverLarge,
-                contentScale = ContentScale.Crop
+                // **保持原始比例 + Fit 居中**（用户反馈：「预览图完美地显示在视频中间」）：
+                // 之前用 CardCoverLarge（960×540 裁切）+ Crop 铺满，竖屏视频的封面被切成
+                // 16:9 再放大铺满整屏，主体被切掉、比例也不对。改成不裁切的限宽大图 +
+                // Fit 之后，预览图的取景与接下来播放的视频**完全一致**
+                // （视频也是按自身比例居中 letterbox），封面 → 视频的交接不再有跳动。
+                variant = BiliImageVariant.PlayerPreview,
+                contentScale = ContentScale.Fit
             )
         }
         if (isLoading) {
-            CircularProgressIndicator(
+            // 粒子加载（用户要求"等待加载时给一个高级的加载动画"）：
+            // 与播放器页的等首帧加载层用同一个组件，两处观感一致。
+            // 封面可能是浅色的，先压暗一档再叠粒子，保证白粒子始终读得清。
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)))
+            BiliParticleLoader(
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(BiliSpacing.xxl),
-                color = Color.White.copy(alpha = 0.85f),
-                trackColor = Color.White.copy(alpha = 0.18f)
+                    // 大尺寸：占屏宽 26% 的正方形（不写 dp 字面量，跟着屏幕走）
+                    .fillMaxWidth(COVER_LOADER_WIDTH_FRACTION)
+                    .aspectRatio(1f)
             )
         }
         Column(

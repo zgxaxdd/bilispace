@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -98,6 +99,16 @@ private val homeRankTabPage = 3
 private val homeProfileAvatarSize = 38.dp
 private val homeProfileIconSize = 24.dp
 private const val homeDefaultPage = 1
+
+/**
+ * 顶栏「刷视频模式」入口的芯片形状：**38dp 圆形**，与旁边「我的」头像同款。
+ *
+ * 写成 `homeProfileAvatarSize / 2` 而不是 `19.dp`：一个角色只有一个来源——芯片尺寸
+ * 改了这里自动跟着变（也避免新增 dp 字面量触发 DesignTokenLintTest 棘轮）。
+ * 必须是**固定 dp 圆角**（不是 `CircleShape` 的百分比角）：无缝的 `BUNDLE_RADIUS`
+ * 要从形状里静态解析出 px 值，百分比角随 view 尺寸变化、解析不出来。
+ */
+private val homeStoryChipShape: Shape = RoundedCornerShape(homeProfileAvatarSize / 2)
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -323,14 +334,15 @@ fun HomeScreen(
             derivedStateOf { topBarOffsetProvider() > 0f }
         }
         // ── 刷视频模式入口（顶栏按钮）────────────────────────────────────────
-        // 锚点 = 按钮自身上的零绘制 View（SeamlessAnchor），OPPO 无缝 morph 把按钮
-        // 位置长成全屏刷视频页；decorateAnchor=false + fallbackColor=按钮底色，
-        // 两方向都是体面的纯色 morph（封面拉伸失真在 48dp 锚点上不可读，弃用）。
+        // 锚点 = 芯片自身上的零绘制 View（SeamlessAnchor），OPPO 无缝 morph 把**这颗
+        // 看得见的芯片**长成全屏刷视频页（芯片底与形状见 HomeTopBar 的注释：
+        // 用户反馈"凭空出现一个边框"，根因是入口静止态没有底色）。
         // 无缝不可用时回退 onEnterStoryMode（普通 startActivity，走统一窗口动画）。
         val storyOpener = LocalStoryCardOpener.current
         val storyAnchorState = rememberSeamlessAnchorState()
+        // 半径/兜底色与芯片同源：形状是 38dp 圆形，底色是芯片底色
         val storySpec = rememberSeamlessCardSpec(
-            shape = RoundedCornerShape(BiliRadius.dockChip),
+            shape = homeStoryChipShape,
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         )
         val canStorySeamless = storyOpener != null &&
@@ -339,21 +351,34 @@ fun HomeScreen(
             // 流第一条 = 刷视频的起点（页 0）；无视频卡（全直播/空流）时无操作
             val first = state.items.firstOrNull { it.target != null && it.liveRoute == null }
             val target = first?.target
+            val anchorView = storyAnchorState.anchor
             if (target != null) {
-                val opened = if (canStorySeamless && storyOpener != null && storyAnchorState.anchor != null) {
-                    storyOpener.tryOpen(
-                        anchor = storyAnchorState.anchor,
-                        target = target,
-                        coverUrl = first.cover,
-                        coverLarge = false,
-                        anchorRadiusPx = storySpec.radiusPx,
-                        fallbackColor = storySpec.fallbackColor,
-                        decorateAnchor = false
-                    )
+                if (canStorySeamless && storyOpener != null && anchorView != null) {
+                    // 与卡片同款时序：点击这一帧先 PixelCopy 截取锚点（= 芯片）的**真实像素**
+                    // （圆底 + 箭头），在回调里完成 tryOpen + startActivity。
+                    // 为什么必须截真实像素：框架捕获不到锚点内容时会退回 BUNDLE_COLOR
+                    // 纯色兜底 —— 那正是"打开时冒出一块色块、返回时色块消失"的观感来源。
+                    // 截到真实像素后，两个方向 morph 的都是用户眼睛看到的那颗芯片。
+                    storyOpener.captureCardBitmap(anchorView) { captured ->
+                        val opened = storyOpener.tryOpen(
+                            anchor = anchorView,
+                            target = target,
+                            coverUrl = first?.cover,
+                            coverLarge = false,
+                            anchorRadiusPx = storySpec.radiusPx,
+                            fallbackColor = storySpec.fallbackColor,
+                            cardBitmap = captured,
+                            keepAnchorVisible = true,
+                            // 截屏失败（极少数）时不装饰锚点：此时退回纯色兜底，
+                            // 形状/颜色仍与静止态那颗芯片一致，不会出现"封面拉伸进圆芯片"
+                            decorateAnchor = captured != null
+                        )
+                        if (!opened) {
+                            captured?.recycle()
+                            onEnterStoryMode(target)
+                        }
+                    }
                 } else {
-                    false
-                }
-                if (!opened) {
                     onEnterStoryMode(target)
                 }
             }
@@ -496,18 +521,38 @@ private fun HomeTopBar(
                     )
                 }
             }
-            // 刷视频模式入口（原「单/双列布局切换」按钮）：OPPO 无缝 morph 从按钮
-            // 长成全屏刷视频页； SeamlessAnchor 是铺在按钮上的零绘制锚点 View
-            // （must 在内容 z 序之下，与首页卡片的锚点同款）。
-            Box {
+            // 刷视频模式入口（原「单/双列布局切换」按钮）。
+            //
+            // ## 为什么这里有**可见的芯片底**（用户反馈："会突兀地出现一个边框"）
+            //
+            // OPPO 无缝动画从"锚点矩形"长成全屏，框架画的是**锚点那一块的内容**。
+            // 锚点是零绘制 View，框架捕获不到内容就退回 `BUNDLE_COLOR` 纯色兜底——
+            // 于是打开时凭空冒出一块圆角色块、返回时又凭空消失。
+            //
+            // 根因是**入口在静止态根本没有底色**：旁边「我的」是 38dp 圆形头像
+            // （AvatarImage 自带底），只有它是个裸图标。这里给同一颗 38dp 圆形芯片底，
+            // 两个方向就都从"用户本来就看得见的那颗芯片"出发/收回，不再有突起突灭。
+            // 形状/尺寸与头像同源（[homeProfileAvatarSize] + [homeStoryChipShape]）。
+            Box(contentAlignment = Alignment.Center) {
                 IconButton(onClick = onEnterStoryMode) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = "进入刷视频模式",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(homeProfileAvatarSize)
+                            .clip(homeStoryChipShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = "进入刷视频模式",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(homeProfileIconSize)
+                        )
+                        // 锚点与**芯片**同边界（不是 48dp 的 IconButton 触摸区）：
+                        // morph 的起点矩形 = 用户看见的那颗圆，半径也取它的一半。
+                        SeamlessAnchor(storyAnchorState, Modifier.matchParentSize())
+                    }
                 }
-                SeamlessAnchor(storyAnchorState, Modifier.matchParentSize())
             }
             IconButton(onClick = onNavigateToProfile) {
                 AvatarImage(

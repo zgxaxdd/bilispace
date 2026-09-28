@@ -452,11 +452,30 @@ class VideoLogicGuardTest {
         val home = codeOf("HomeScreen.kt")
         assertTrue(
             "顶栏入口必须用 LocalStoryCardOpener（story 专用 route）+ SeamlessAnchor 锚点" +
-                "做无缝 morph，并保留 onEnterStoryMode 回退链路。",
+                "做无缝 morph，并保留 onEnterStoryMode 回退链路（截屏失败/不支持无缝）。",
             countMatching(home, """LocalStoryCardOpener\.current""") == 1 &&
                 countMatching(home, """SeamlessAnchor\(storyAnchorState""") == 1 &&
-                countMatching(home, """decorateAnchor = false""") == 1 &&
-                countMatching(home, """onEnterStoryMode\(target\)""") == 1
+                countMatching(home, """onEnterStoryMode\(target\)""") >= 2
+        )
+        assertTrue(
+            "入口**必须有自己的可见芯片底**（用户反馈：「会突兀地出现一个边框」——" +
+                "静息态没有底色时，框架只能用 BUNDLE_COLOR 画一块纯色，打开时凭空冒出、" +
+                "返回时凭空消失）。形状与旁边「我的」头像同源（homeStoryChipShape / " +
+                "homeProfileAvatarSize），底色走主题 token。",
+            countMatching(home, """homeStoryChipShape""") >= 2 &&
+                countMatching(home, """\.size\(homeProfileAvatarSize\)""") >= 2 &&
+                countMatching(
+                    home,
+                    """background\(MaterialTheme\.colorScheme\.surfaceContainerHigh\)"""
+                ) >= 1
+        )
+        assertTrue(
+            "无缝 morph 的内容必须是**锚点真实像素**：点击这一帧先 captureCardBitmap，" +
+                "再把它作为 cardBitmap 交给 tryOpen（与首页卡片同一时序）。" +
+                "退回 decorateAnchor=false 的纯色兜底就又会看到「边框突兀出现/消失」。",
+            countMatching(home, """captureCardBitmap\(anchorView\)""") == 1 &&
+                countMatching(home, """cardBitmap = captured""") == 1 &&
+                countMatching(home, """decorateAnchor = captured != null""") == 1
         )
         val intents = codeOf("navigation/VideoDetailIntents.kt")
         assertTrue(
@@ -510,10 +529,12 @@ class VideoLogicGuardTest {
         val screen = codeOf("VideoScreen.kt")
         assertTrue(
             "刷视频会话期间必须锁竖屏（而不是让 isPortraitVideo 的瞬时值决定方向）：" +
-                "一次翻页会转两圈，用户看到的就是「每次下滑都有旋转动画」。",
+                "一次翻页会转两圈，用户看到的就是「每次下滑都有旋转动画」。" +
+                "SENSOR_LANDSCAPE 共两处：原有「单视频全屏自动横屏」分支 + 会话内" +
+                "「手动横屏」分支（后者优先，见 swipeSessionOffersManualLandscape）。",
             countMatching(screen, """val\s+portraitSwipeActive\s*=""") == 1 &&
                 countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_PORTRAIT""") == 1 &&
-                countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_SENSOR_LANDSCAPE""") == 1
+                countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_SENSOR_LANDSCAPE""") == 2
         )
         assertTrue(
             "竖屏锁判据必须同时覆盖「详情全屏的滑动会话」与「story 常驻全屏」两条入口。",
@@ -522,18 +543,176 @@ class VideoLogicGuardTest {
                 """portraitSwipeActive\s*=\s*swipeSessionActive\s*\|\|\s*effectiveStoryMode"""
             ) == 1
         )
-        val lockAt = screen.indexOfFirst { it.contains("portraitSwipeActive ->") }
+        val lockAt = screen.indexOfFirst {
+            it.trim() == "portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT"
+        }
         val landscapeAt = screen.indexOfFirst {
-            it.contains("ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE")
+            it.contains("ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE") &&
+                !it.contains("swipeLandscape")
         }
         assertTrue(
-            "锁竖屏分支必须排在横屏分支**之前**（when 取首个命中分支）——写在后面等于没写。",
+            "锁竖屏分支必须排在（原有的「单视频全屏自动横屏」）横屏分支**之前**（when 取首个命中分支）。",
             lockAt in 0 until landscapeAt
         )
         assertTrue(
             "会话结束（effect 重跑/退出组合）必须把方向复位成 UNSPECIFIED：" +
                 "留在竖屏锁里会让后续页面出不去横屏（与原先 SENSOR_LANDSCAPE 泄漏同理）。",
             countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_UNSPECIFIED""") == 2
+        )
+    }
+
+    // ── 刷视频的加载观感（真机反馈：上滑闪预览页 / 要高级加载动画）────────────────
+
+    /**
+     * 用户反馈第 2 条：「刷视频模式每次上滑都会**闪一下预览页**」，以及
+     * 第二轮追加的「还是有**预览图**出现，同时有一个**大大的暂停按钮**」。
+     *
+     * 根因链：
+     * 1. 翻页后新页立刻从 `SwipeCoverPage` 切成 `VideoPlayerPane`，而 PlayerView 开了
+     *    `setKeepContentOnPlayerReset(true)` —— 那一瞬间画面还是**上一支视频的最后一帧**；
+     * 2. 第一版修法在播放器之上铺了一层**封面**当遮罩：封面页刚给用户看过同一张图，
+     *    再铺一次读作"预览图又闪了一下"；
+     * 3. 那一层插在控件**之前**，于是中央 72dp 播放键与底栏控件压在它上面 = 用户看到的
+     *    「大大的暂停按钮」。
+     *
+     * 现在的形态：等首帧期间整屏只剩一层**深色加载层 + 大尺寸粒子**，
+     * 不重复铺封面、不露控件、不带 pointerInput（不挡上下滑）。
+     */
+    @Test
+    fun swipeWaitsFirstFrameBehindLoadingVeil() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "「等首帧」必须是**粘滞**状态：换视频（currentKey）进入等待，" +
+                "直到这一支真的出帧、或这一支出错才退出。" +
+                "直接取 `!hasRenderedFirstFrame` 的瞬时值是错的 —— 换视频后的头几十毫秒里" +
+                "它仍是上一支的 true（finishVideoPlayback 先发布新 ids、后 stopForReuse 归零），" +
+                "加载层会先卸载再挂上，中间那一帧就是真机看到的「黑屏 + 大暂停键」。" +
+                "出错分支不能省：否则加载层会把错误界面永远盖住。",
+            countMatching(pager, """var\s+waitingKey\s+by\s+remember""") == 1 &&
+                countMatching(pager, """val\s+waitingFirstFrame\s*=\s*waitingKey != null""") == 1 &&
+                countMatching(pager, """LaunchedEffect\(currentKey\)""") == 1 &&
+                countMatching(
+                    pager,
+                    """if \(firstFrameRendered \|\| playbackFailed\) waitingKey = null"""
+                ) == 1
+        )
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "加载层必须是播放页 Box 的**最后一个子节点**：插在控件之前时，" +
+                "中央那颗 72dp 播放键会压在它上面（真机反馈「大大的暂停按钮」）。" +
+                "判据只允许用 swipeWaitingFirstFrame —— 不许再与 swipePagingActive 相与：" +
+                "story 入口在锚点就位前走的是「单播放器」分支（没有 pager），" +
+                "那条路上 swipePagingActive 恒 false，相与等于那段黑屏没有加载层。",
+            countMatching(pane, """private fun SwipeWaitVeil\(""") == 1 &&
+                countMatching(pane, """SwipeWaitVeil\(visible = swipeWaitingFirstFrame\)""") == 1 &&
+                countMatching(pane, """BiliParticleLoader\(""") == 1 &&
+                countMatching(
+                    codeOf("VideoScreen.kt"),
+                    """swipeWaitingFirstFrame = effectiveStoryMode"""
+                ) == 1
+        )
+        assertTrue(
+            "加载层必须写在**播放器 Box 内部**：写在 Box 收尾之后，它会成为 " +
+                "CompositionLocalProvider 的第二个子节点、被父级布局排到屏幕外——" +
+                "组合照常（状态/日志全对）但永远看不见（真机实测踩过）。" +
+                "判据：它必须排在那些**在 Box 之外**的对话框之前" +
+                "（Quality/Audio/Speed 三个 dialog 都在 Box 收尾之后）。",
+            run {
+                val veilAt = pane.indexOfFirst { it.contains("SwipeWaitVeil(visible =") }
+                val dialogAt = pane.indexOfFirst {
+                    it.contains("activeDialog == PlayerDialog.Quality")
+                }
+                veilAt >= 0 && dialogAt >= 0 && veilAt < dialogAt
+            }
+        )
+        assertTrue(
+            "加载层**不许再铺封面**（上滑时封面页已经把那张图给用户看过了，再铺一次就是" +
+                "「还是有预览图」），也不许带任何 pointerInput/clickable —— 它要盖住控件，" +
+                "但不能把上下滑翻页的手势一起吃掉。",
+            countMatching(pane, """coverUrl: String\?""") == 0 &&
+                countMatching(pane, """BiliAsyncImage\(""") == 0 &&
+                blockBody(pane, "private fun SwipeWaitVeil(")
+                    .none { it.contains("pointerInput") || it.contains("clickable") }
+        )
+    }
+
+    /**
+     * 会话锁竖屏（`portraitSwipeSessionLocksOrientation`）的**配套出口**：
+     * 竖屏连播里刷到横屏视频时，用户必须有一个显式要横屏的入口——否则只能看 letterbox，
+     * "锁竖屏"这条修复就成了功能倒退。BiliPai 同款（`onRotateToLandscape`）。
+     *
+     * 约束：
+     * - 只在**当前视频是横屏**时出现（竖屏视频转横屏只会更小）；
+     * - 手动横屏**优先于**竖屏锁（写在锁之后就是摆设）；
+     * - 只对当前这支视频生效：切视频 / 离开会话就收回。
+     */
+    @Test
+    fun swipeSessionOffersManualLandscape() {
+        val screen = codeOf("VideoScreen.kt")
+        assertTrue(
+            "手动横屏必须参与方向决策，并在切视频/离开会话时收回。",
+            countMatching(screen, """swipeLandscape && portraitSwipeActive""") == 1 &&
+                countMatching(screen, """LaunchedEffect\(videoState\.ids, swipeSessionActive\)""") == 1 &&
+                countMatching(screen, """onToggleLandscape = \{ swipeLandscape = !swipeLandscape \}""") == 1
+        )
+        val lockAt = screen.indexOfFirst { it.contains("swipeLandscape && portraitSwipeActive") }
+        // 竖屏锁分支：当行就是 `portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT`
+        // —— 不能用 contains("portraitSwipeActive ->")，手动横屏那行也以它结尾。
+        val portraitAt = screen.indexOfFirst {
+            it.trim() == "portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT"
+        }
+        assertTrue(
+            "手动横屏分支必须排在竖屏锁分支**之前**（when 取首个命中分支）——写在后面等于没写。",
+            lockAt >= 0 && portraitAt >= 0 && lockAt < portraitAt
+        )
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "入口只在当前视频是横屏时给（onToggleLandscape.takeIf{!isPortraitVideo}），" +
+                "且与 VideoScreen 的 isPortraitVideo 同源（currentStream）。",
+            countMatching(
+                pager,
+                """onToggleLandscape = onToggleLandscape\.takeIf \{ !isPortraitVideo \}"""
+            ) == 1 &&
+                countMatching(pager, """remember\(playbackState\.currentStream\)""") == 1
+        )
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "播放器要把开关渲染成胶囊（与「弹幕」胶囊同一套 chrome），null 时不出现。",
+            countMatching(pane, """onToggleLandscape\?\.let \{ toggle ->""") == 1 &&
+                countMatching(pane, """landscapeForced\) "竖屏" else "横屏"""") == 1
+        )
+    }
+
+    /**
+     * 用户反馈第 3 条：「等待视频加载的时候加一个**高级的加载动画**（最好用粒子效果）」。
+     */
+    @Test
+    fun waitingUsesParticleLoader() {
+        val loader = codeOf("component/BiliParticleLoader.kt")
+        assertTrue(
+            "粒子加载必须**只经绘制期读相位**：withInfiniteAnimationFrameMillis + " +
+                "mutableFloatStateOf 在 Canvas 的 draw lambda 里读值，既不加 " +
+                "rememberInfiniteTransition、也不用 animate*AsState（两者都在 " +
+                "FrameBudgetLintTest 的棘轮里，组合期读值等于每帧重组宿主）。",
+            countMatching(loader, """withInfiniteAnimationFrameMillis""") == 1 &&
+                countMatching(loader, """rememberInfiniteTransition""") == 0 &&
+                countMatching(loader, """animate[A-Za-z]*AsState\(""") == 0 &&
+                countMatching(loader, """Canvas\(""") == 1
+        )
+        assertTrue(
+            "两处等待都必须用同一个粒子组件（观感一致）：播放器页的等首帧遮罩、" +
+                "封面页的加载指示；且封面页不许回退成 CircularProgressIndicator。",
+            countMatching(codeOf("player/VideoPlayerPane.kt"), """BiliParticleLoader\(""") == 1 &&
+                countMatching(codeOf("player/PortraitSwipePager.kt"), """BiliParticleLoader\(""") == 1 &&
+                countMatching(codeOf("player/PortraitSwipePager.kt"), """CircularProgressIndicator""") == 0
+        )
+        val code = loader
+            .filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
+            .joinToString("\n")
+        assertTrue(
+            "粒子组件的尺寸必须全部取 size.minDimension 的比例，**不许出现 dp/sp 字面量**" +
+                "（否则 DesignTokenLintTest 的棘轮要为它让路）。",
+            !Regex("""\b\d+(\.\d+)?\.(dp|sp)\b""").containsMatchIn(code)
         )
     }
 
