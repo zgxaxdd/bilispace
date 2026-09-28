@@ -122,6 +122,7 @@ import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
@@ -778,6 +779,17 @@ internal fun VideoPlayerPane(
                     viewModel = viewModel,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
+                // 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
+                //
+                // 为什么需要：连播时控件 2 秒自动隐藏，用户连"在看谁的作品"都不知道
+                // （BiliPai 的竖屏页默认就常驻信息区与互动栏，PortraitFullscreenOverlay.kt:194-394）。
+                // 这里只搬**信息**（不含互动按钮），是最小且不打扰的一步：
+                // 两行文字、左对齐、不与进度条抢位置、不可点。
+                SwipeSessionInfoLine(
+                    title = viewModel.videoState.collectAsStateWithLifecycle().value.detail?.title,
+                    owner = viewModel.videoState.collectAsStateWithLifecycle().value.detail?.owner?.name,
+                    modifier = Modifier.align(Alignment.BottomStart)
+                )
             }
 
             // 上下滑的「等首帧」加载层。
@@ -971,6 +983,52 @@ private fun SwipeProgressLine(
 
 /** 轨道高度占屏高比例（≈3dp）：够看清、又不抢画面。 */
 private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
+
+/**
+ * 会话内常驻信息：标题 + UP 名（左下角，压在进度条之上）。
+ *
+ * 设计约束：
+ * - **只读**（无点击、无 pointerInput）：连播时任何可点区域都会和上下滑抢手指；
+ * - 单行省略：标题可能很长，不允许换行把画面推高；
+ * - 间距/字号全部走 token（`BiliSpacing` + `MaterialTheme.typography`），
+ *   不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）；
+ * - 底色用纯文字 + 半透明阴影，不加背板：竖屏视频下背板会显得像"贴纸"。
+ */
+@Composable
+private fun SwipeSessionInfoLine(
+    title: String?,
+    owner: String?,
+    modifier: Modifier = Modifier,
+) {
+    val titleText = title?.takeIf(String::isNotBlank) ?: return
+    Column(
+        modifier = modifier
+            // 底部留出进度条 + 导航栏的空间（进度条贴在 BottomCenter）
+            .padding(
+                start = BiliSpacing.lg,
+                end = BiliSpacing.xxxl,
+                bottom = BiliSpacing.xl
+            ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+    ) {
+        Text(
+            text = titleText,
+            color = Color.White,
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        owner?.takeIf(String::isNotBlank)?.let { name ->
+            Text(
+                text = "@$name",
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
 
 private val SwipeProgressTrackColor = Color.White.copy(alpha = 0.20f)
 private val SwipeProgressBarColor = Color.White.copy(alpha = 0.86f)

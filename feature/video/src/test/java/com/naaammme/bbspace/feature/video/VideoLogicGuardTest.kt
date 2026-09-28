@@ -837,6 +837,36 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
+     *
+     * 连播时控件 2 秒自动隐藏，用户连"在看谁的作品"都不知道；BiliPai 的竖屏页默认常驻
+     * 信息区（`PortraitFullscreenOverlay.kt:194-394`）。这里钉：门控与进度条一致、
+     * 单行省略、只读（不许有 pointerInput/clickable）、间距走 token。
+     */
+    @Test
+    fun swipeSessionShowsPersistentInfoLine() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "常驻信息必须与进度条同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。",
+            countMatching(pane, """private fun SwipeSessionInfoLine\(""") == 1 &&
+                countMatching(pane, """SwipeSessionInfoLine\(""") == 2 &&
+                countMatching(pane, """title = viewModel\.videoState\.collectAsStateWithLifecycle\(\)\.value\.detail\?\.title""") == 1 &&
+                countMatching(pane, """owner = viewModel\.videoState\.collectAsStateWithLifecycle\(\)\.value\.detail\?\.owner\?\.name""") == 1 &&
+                countMatching(pane, """val titleText = title\?\.takeIf\(String::isNotBlank\) \?: return""") == 1
+        )
+        assertTrue(
+            "常驻信息必须只读（连播时任何可点区域都会和上下滑抢手指），" +
+                "且标题/UP 都是单行省略（长标题不许把画面推高）、间距走 BiliSpacing。",
+            blockBody(pane, "private fun SwipeSessionInfoLine(").let { body ->
+                body.none { it.contains("pointerInput") || it.contains("clickable") } &&
+                    body.none { it.contains(".dp") } &&
+                    body.count { it.contains("maxLines = 1") } == 2 &&
+                    body.any { it.contains("BiliSpacing.lg") }
+            }
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
