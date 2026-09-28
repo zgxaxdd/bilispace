@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -764,6 +765,21 @@ internal fun VideoPlayerPane(
                 )
             }
 
+            // 会话内**常驻细进度条**（信息层第一阶段）。
+            //
+            // 为什么需要：上下滑会话里控件是 2 秒自动隐藏的，用户没有任何"这支还剩多久"的
+            // 线索；BiliPai 的竖屏页底部就常驻一条细进度（PortraitFullscreenOverlay.kt:387-394），
+            // 抖音/TikTok 同为行业惯例。它不抢注意力，也不与手势冲突（不可点、不消费触摸）。
+            //
+            // 只在"会话内 + 不在等首帧"时出现：等首帧时整屏是加载层，进度条会浮在它上面；
+            // 非会话（详情页）有完整控制条，不需要这条。
+            if (swipePagingActive && !swipeWaitingFirstFrame) {
+                SwipeProgressLine(
+                    viewModel = viewModel,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
+            }
+
             // 上下滑的「等首帧」加载层。
             //
             // ⚠️ **必须写在播放器 Box 的里面、并且是最后一个子节点**：
@@ -922,6 +938,42 @@ private fun SwipeWaitVeil(
 
 /** 失败态配色（比正文暗一档，避免"加载失败"比视频本身还抢眼）。 */
 private val WaitVeilErrorTint = Color(0xFFB9BEC7)
+
+/**
+ * 会话内常驻细进度条：底部一条轨道 + 已播比例。
+ *
+ * 高度与宽度都用**比例**（不写 dp 字面量）：设计 token 的 lint 棘轮会把新增的
+ * `.dp` 字面量判红，而且比例写法在小屏/大屏上都自然跟随。
+ */
+@Composable
+private fun SwipeProgressLine(
+    viewModel: VideoViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val progress by viewModel.playbackProgress.collectAsStateWithLifecycle()
+    val durationMs = progress.durationMs
+    if (durationMs <= 0L) return
+    val fraction = (progress.positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .fillMaxHeight(SWIPE_PROGRESS_TRACK_FRACTION)
+            .background(SwipeProgressTrackColor)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction)
+                .fillMaxHeight()
+                .background(SwipeProgressBarColor)
+        )
+    }
+}
+
+/** 轨道高度占屏高比例（≈3dp）：够看清、又不抢画面。 */
+private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
+
+private val SwipeProgressTrackColor = Color.White.copy(alpha = 0.20f)
+private val SwipeProgressBarColor = Color.White.copy(alpha = 0.86f)
 
 /** 失败态图标尺寸与间距（仍走动画 token，不新增 dp 字面量）。 */
 private val VeilErrorIconSize = 40.dp

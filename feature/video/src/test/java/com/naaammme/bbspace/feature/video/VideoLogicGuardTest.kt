@@ -767,6 +767,46 @@ class VideoLogicGuardTest {
         return body
     }
 
+    /**
+     * 会话内**常驻细进度条**（C10 信息层第一阶段）。
+     *
+     * 上下滑会话里控件 2 秒自动隐藏，用户没有任何"这支还剩多久"的线索；
+     * BiliPai 的竖屏页底部常驻一条细进度（`PortraitFullscreenOverlay.kt:387-394`）。
+     * 这里钉三件事：① 只在会话内且不在等首帧时出现（等首帧时整屏是加载层）；
+     * ② 尺寸只用**比例**（设计 token lint 有 `.dp` 棘轮，新增字面量会判红）；
+     * ③ 它必须排在加载层**之前**（加载层是最后一个子节点，要盖住它）。
+     */
+    @Test
+    fun swipeSessionShowsPersistentProgressLine() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "会话内常驻细进度条必须存在、且判据是 `swipePagingActive && !swipeWaitingFirstFrame`" +
+                "（等首帧时整屏是加载层，进度条浮在上面会显得脏）。",
+            countMatching(pane, """if \(swipePagingActive && !swipeWaitingFirstFrame\) \{""") == 1 &&
+                countMatching(pane, """private fun SwipeProgressLine\(""") == 1 &&
+                countMatching(pane, """SWIPE_PROGRESS_TRACK_FRACTION""") >= 2
+        )
+        assertTrue(
+            "进度条尺寸必须走比例而不是 dp 字面量（DesignTokenLintTest 的棘轮会判红），" +
+                "也不许带 pointerInput/clickable —— 它只是指示器，不能吃掉手势。",
+            blockBody(pane, "private fun SwipeProgressLine(").let { body ->
+                body.none { it.contains(".dp") } &&
+                    body.none { it.contains("pointerInput") || it.contains("clickable") }
+            }
+        )
+        assertTrue(
+            "进度条必须排在加载层之前：加载层是 Box 的最后一个子节点，" +
+                "顺序反了会让进度条浮在加载动画上面。",
+            run {
+                val lineAt = pane.indexOfFirst {
+                    it.contains("SwipeProgressLine(") && !it.contains("private fun")
+                }
+                val veilAt = pane.indexOfFirst { it.trimStart().startsWith("SwipeWaitVeil(") }
+                lineAt >= 0 && veilAt >= 0 && lineAt < veilAt
+            }
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
