@@ -493,6 +493,9 @@ fun VideoScreen(
                             onGoHome = onGoHome,
                             onSwipeTo = viewModel::openSwipeTarget,
                             onNeedMore = viewModel::loadMoreSwipeQueue,
+                            // 相邻页预取：拖动 25% 偏移 / 停稳各触发一次（按网络与开关定量）
+                            onPrefetch = viewModel::prefetchSwipeQueue,
+                            onRetryPlayback = viewModel::retryCurrentPlayback,
                             // 会话锁竖屏 → 横屏视频要给一个"手动横屏"的出口（见方向 effect）
                             landscapeForced = swipeLandscape,
                             onToggleLandscape = { swipeLandscape = !swipeLandscape },

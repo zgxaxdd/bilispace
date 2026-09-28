@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -46,6 +47,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -408,6 +410,15 @@ internal fun VideoPlayerPane(
      */
     swipeWaitingFirstFrame: Boolean = false,
     /**
+     * 等首帧期间**取流/解码失败**：加载层不撤，切成"错误 + 重试"。
+     *
+     * 为什么需要：以前失败会把加载层撤掉 → 露出"纯黑 + 中央播放键"，看起来像卡死；
+     * 而错误详情只写在播放器侧栏里，用户在连播页面上看不到任何解释。
+     */
+    swipeFailed: Boolean = false,
+    /** 失败态的重试回调（`null` = 不给重试入口，只显示错误）。 */
+    onRetrySwipe: (() -> Unit)? = null,
+    /**
      * 手动横屏开关（`null` = 不显示该入口）。
      *
      * 为什么需要：上下滑会话期间 VideoScreen **锁死竖屏**（否则切视频时会因
@@ -761,8 +772,13 @@ internal fun VideoPlayerPane(
             // 组合照常发生（日志、状态都对），但**永远看不见**。
             // 实测踩过：真机上"加载动画不出现"就是这个位置问题。
             // 放在最后 = 盖住视频/弹幕/手势 HUD/中央播放键/上下控制栏；
-            // 它自身不带 pointerInput，不消费触摸，上下滑翻页照常。
-            SwipeWaitVeil(visible = swipeWaitingFirstFrame)
+            // 失败时它切成"错误 + 重试"态（只有按钮消费触摸），
+            // 其余情况自身不带 pointerInput，上下滑翻页照常。
+            SwipeWaitVeil(
+                visible = swipeWaitingFirstFrame,
+                failed = swipeFailed,
+                onRetry = onRetrySwipe
+            )
         }
 
         if (activeDialog == PlayerDialog.Quality) {
@@ -839,6 +855,9 @@ internal fun VideoPlayerPane(
 @Composable
 private fun SwipeWaitVeil(
     visible: Boolean,
+    /** 这一支取流/解码失败了：加载层留着，改成"错误 + 重试"，而不是撤掉露出一片黑。 */
+    failed: Boolean = false,
+    onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // 初值就按 visible 落位：进入全屏/打开 story 时本来就在等首帧，加载层必须**首帧就在**，
@@ -868,14 +887,45 @@ private fun SwipeWaitVeil(
             ),
         contentAlignment = Alignment.Center
     ) {
-        BiliParticleLoader(
-            modifier = Modifier
-                // 大尺寸：占屏宽 34% 的正方形（不写 dp 字面量，跟着屏幕走）
-                .fillMaxWidth(LOADER_WIDTH_FRACTION)
-                .aspectRatio(1f)
-        )
+        if (failed) {
+            // 失败态：图标 + 文案 + 重试。整层只有按钮可点，其余区域不消费触摸
+            // （刷视频的上下滑与返回手势照常可用）。
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(VeilErrorSpacing)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = WaitVeilErrorTint,
+                    modifier = Modifier.size(VeilErrorIconSize)
+                )
+                Text(
+                    text = "这一支加载失败了",
+                    color = WaitVeilErrorTint,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (onRetry != null) {
+                    TextButton(onClick = onRetry) { Text("重试") }
+                }
+            }
+        } else {
+            BiliParticleLoader(
+                modifier = Modifier
+                    // 大尺寸：占屏宽 34% 的正方形（不写 dp 字面量，跟着屏幕走）
+                    .fillMaxWidth(LOADER_WIDTH_FRACTION)
+                    .aspectRatio(1f)
+            )
+        }
     }
 }
+
+/** 失败态配色（比正文暗一档，避免"加载失败"比视频本身还抢眼）。 */
+private val WaitVeilErrorTint = Color(0xFFB9BEC7)
+
+/** 失败态图标尺寸与间距（仍走动画 token，不新增 dp 字面量）。 */
+private val VeilErrorIconSize = 40.dp
+private val VeilErrorSpacing = 12.dp
 
 /** 加载层底色（播放器族统一「深色底 + 白前景」，与主题色解耦）。 */
 private val WaitVeilTopColor = Color(0xFF14161A)

@@ -39,20 +39,52 @@ class VideoPlayerRepositoryImpl @Inject constructor(
     private val webPlaybackResolver: VideoWebPlaybackResolver
 ) : VideoPlayerRepository {
 
+    /** 播放地址进程内 LRU：正常开播与相邻页预取共用（见 [PlayUrlCache] 的 KDoc）。 */
+    private val playUrlCache = PlayUrlCache({ android.os.SystemClock.elapsedRealtime() })
+
     override suspend fun fetchPlaybackSource(request: PlaybackRequest): PlaybackSource {
-        if (shouldUseWebPlayback(request)) {
-            return webPlaybackResolver.fetchPlaybackSource(request)
+        val flavor = flavorOf()
+        val cacheKey = PlayUrlCache.keyOf(request, flavor)
+        playUrlCache.get(cacheKey)?.let { cached ->
+            // 预取命中：省掉一整个 gRPC 往返（竖屏连播的起播速度主要来自这里）
+            Logger.d(TAG) { "playurl cache hit aid=${request.ids.aid} cid=${request.ids.cid}" }
+            return cached
         }
-        val reply = withContext(Dispatchers.IO) {
-            val req = buildRequest(request)
-            grpcClient.call(
-                endpoint = ENDPOINT,
-                requestBytes = req.toByteArray(),
-                parser = PlayViewUniteReply.parser()
-            )
+        val source = if (shouldUseWebPlayback(request)) {
+            webPlaybackResolver.fetchPlaybackSource(request)
+        } else {
+            val reply = withContext(Dispatchers.IO) {
+                val req = buildRequest(request)
+                grpcClient.call(
+                    endpoint = ENDPOINT,
+                    requestBytes = req.toByteArray(),
+                    parser = PlayViewUniteReply.parser()
+                )
+            }
+            withContext(Dispatchers.Default) { mapReply(request, reply) }
         }
-        return withContext(Dispatchers.Default) { mapReply(request, reply) }
+        playUrlCache.put(cacheKey, source)
+        return source
     }
+
+    /**
+     * 相邻页预取：与正常开播**共用同一份 LRU**（同键同 TTL），命中即直接可播。
+     * 失败一律吞掉（预取是尽力而为，绝不冒泡成播放错误）。
+     */
+    override suspend fun preloadPlayUrl(request: PlaybackRequest): Boolean {
+        if (request.ids.aid <= 0L || request.ids.cid <= 0L) return false
+        return runCatching { fetchPlaybackSource(request) }
+            .onFailure { Logger.d(TAG) { "preload failed aid=${request.ids.aid} msg=${it.message}" } }
+            .isSuccess
+    }
+
+    /** 与 [buildRequest] 读的设置一一对应：它们变了，响应内容就变了，缓存键必须跟着变。 */
+    private suspend fun flavorOf(): String = PlayUrlCache.flavorOf(
+        enableHdrAnd8k = appSettings.enableHdrAnd8k.first(),
+        preferredCodec = appSettings.preferredCodec.first(),
+        needTrial = appSettings.needTrial.first(),
+        forceHost = appSettings.forceHost.first()
+    )
 
     private suspend fun shouldUseWebPlayback(request: PlaybackRequest): Boolean {
         return authProvider.accessToken.isBlank() &&

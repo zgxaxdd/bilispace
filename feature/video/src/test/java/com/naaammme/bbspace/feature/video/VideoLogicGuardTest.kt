@@ -583,17 +583,18 @@ class VideoLogicGuardTest {
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
             "「等首帧」必须是**粘滞**状态：换视频（currentKey）进入等待，" +
-                "直到这一支真的出帧、或这一支出错才退出。" +
+                "直到这一支真的出帧才退出。" +
                 "直接取 `!hasRenderedFirstFrame` 的瞬时值是错的 —— 换视频后的头几十毫秒里" +
                 "它仍是上一支的 true（finishVideoPlayback 先发布新 ids、后 stopForReuse 归零），" +
                 "加载层会先卸载再挂上，中间那一帧就是真机看到的「黑屏 + 大暂停键」。" +
-                "出错分支不能省：否则加载层会把错误界面永远盖住。",
+                "**失败不再撤掉加载层**（本轮 C10 改动）：撤掉会露出「纯黑 + 中央播放键」像卡死，" +
+                "而错误详情只在播放器侧栏里、连播页面上看不到；改成留着加载层并切成错误态 + 重试。",
             countMatching(pager, """var\s+waitingKey\s+by\s+remember""") == 1 &&
                 countMatching(pager, """val\s+waitingFirstFrame\s*=\s*waitingKey != null""") == 1 &&
                 countMatching(pager, """LaunchedEffect\(currentKey\)""") == 1 &&
                 countMatching(
                     pager,
-                    """if \(firstFrameRendered \|\| playbackFailed\) waitingKey = null"""
+                    """if \(firstFrameRendered\) waitingKey = null"""
                 ) == 1
         )
         val pane = codeOf("player/VideoPlayerPane.kt")
@@ -602,10 +603,15 @@ class VideoLogicGuardTest {
                 "中央那颗 72dp 播放键会压在它上面（真机反馈「大大的暂停按钮」）。" +
                 "判据只允许用 swipeWaitingFirstFrame —— 不许再与 swipePagingActive 相与：" +
                 "story 入口在锚点就位前走的是「单播放器」分支（没有 pager），" +
-                "那条路上 swipePagingActive 恒 false，相与等于那段黑屏没有加载层。",
+                "那条路上 swipePagingActive 恒 false，相与等于那段黑屏没有加载层。" +
+                "失败态必须真的接上（swipeFailed / onRetrySwipe 传进加载层，且加载层里有重试分支）。",
             countMatching(pane, """private fun SwipeWaitVeil\(""") == 1 &&
-                countMatching(pane, """SwipeWaitVeil\(visible = swipeWaitingFirstFrame\)""") == 1 &&
-                countMatching(pane, """BiliParticleLoader\(""") == 1 &&
+                countMatching(pane, """visible = swipeWaitingFirstFrame,""") == 1 &&
+                countMatching(pane, """failed = swipeFailed,""") == 1 &&
+                countMatching(pane, """onRetry = onRetrySwipe""") == 1 &&
+                countMatching(pane, """if \(failed\) \{""") == 1 &&
+                countMatching(pane, """TextButton\(onClick = onRetry\)""") == 1 &&
+                countMatching(pane, """BiliParticleLoader\(""") >= 1 &&
                 countMatching(
                     codeOf("VideoScreen.kt"),
                     """swipeWaitingFirstFrame = effectiveStoryMode"""
@@ -618,7 +624,7 @@ class VideoLogicGuardTest {
                 "判据：它必须排在那些**在 Box 之外**的对话框之前" +
                 "（Quality/Audio/Speed 三个 dialog 都在 Box 收尾之后）。",
             run {
-                val veilAt = pane.indexOfFirst { it.contains("SwipeWaitVeil(visible =") }
+                val veilAt = pane.indexOfFirst { it.trimStart().startsWith("SwipeWaitVeil(") }
                 val dialogAt = pane.indexOfFirst {
                     it.contains("activeDialog == PlayerDialog.Quality")
                 }
@@ -627,12 +633,12 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "加载层**不许再铺封面**（上滑时封面页已经把那张图给用户看过了，再铺一次就是" +
-                "「还是有预览图」），也不许带任何 pointerInput/clickable —— 它要盖住控件，" +
-                "但不能把上下滑翻页的手势一起吃掉。",
+                "「还是有预览图」），也不许让整层可点 —— 它要盖住控件，但不能把上下滑翻页的" +
+                "手势一起吃掉（失败态里那个「重试」按钮是唯一的例外，且只在失败分支里）。",
             countMatching(pane, """coverUrl: String\?""") == 0 &&
                 countMatching(pane, """BiliAsyncImage\(""") == 0 &&
                 blockBody(pane, "private fun SwipeWaitVeil(")
-                    .none { it.contains("pointerInput") || it.contains("clickable") }
+                    .none { it.contains("pointerInput") }
         )
     }
 

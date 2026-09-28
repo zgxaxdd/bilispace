@@ -37,6 +37,7 @@ import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
+import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.feature.video.swipe.shouldExtendSwipeQueue
 import com.naaammme.bbspace.feature.video.swipe.swipeKey
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -85,6 +86,13 @@ internal fun PortraitSwipePager(
     onGoHome: () -> Unit,
     onSwipeTo: (SwipeEntry) -> Unit,
     onNeedMore: () -> Unit = {},
+    /**
+     * 相邻页预取（页号）：拖动跨过 25% 偏移 / 停稳时各触发一次，
+     * 由 [VideoViewModel.prefetchSwipeQueue] 按网络与开关决定预几条。
+     */
+    onPrefetch: (Int) -> Unit = {},
+    /** 取流/解码失败后的重试（沿用同一目标重开一次播放）。 */
+    onRetryPlayback: () -> Unit = {},
     /** 当前是否已被用户手动锁成横屏（"横屏/竖屏"胶囊的状态）。 */
     landscapeForced: Boolean = false,
     /** 手动横屏开关；由 VideoScreen 落到 requestedOrientation 上。 */
@@ -123,6 +131,24 @@ internal fun PortraitSwipePager(
                 }
             }
     }
+    // ── 相邻页预取（对照 BiliPai：拖动 0.25 偏移 + 停稳各预一次）──────────────────
+    // 拖动中就预取（而不是等停稳）：用户"明确要往那一页去"时，playurl 请求已经飞出去了，
+    // 停稳后通常只等解码 —— 这是"上滑之后画面来得快不快"的关键一步。
+    // 用一个页面级的去重（lastPrefetchPage）压住每帧都会变化的 offsetFraction。
+    var lastPrefetchPage by remember { mutableStateOf(-1) }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage to pagerState.currentPageOffsetFraction }
+            .collect { (page, offset) ->
+                val target = SwipePrefetchPolicy.dragTargetPage(
+                    currentPage = page,
+                    offsetFraction = offset,
+                    lastPageIndex = pageCountState.value - 1
+                ) ?: page.takeIf { offset == 0f } ?: return@collect
+                if (target == lastPrefetchPage) return@collect
+                lastPrefetchPage = target
+                onPrefetch(target)
+            }
+    }
     LaunchedEffect(currentKey, pages) {
         // 取流完成后的对齐：正常路径上 pager 停在的页就是当前播放的视频，直接同步；
         // 若是快速往返翻页的迟到结果（pager 停在用户已离开的页），以用户所在页为
@@ -145,6 +171,11 @@ internal fun PortraitSwipePager(
     // 播完自动翻下一页（刷抖音的核心体验，BiliPai 的 autoAdvance 同款）：
     // 当前页是最后一页则不动。播放器 repeat 设置若为单曲循环则 STATE_ENDED 不会发出，
     // 天然与此逻辑互斥。animateScrollToPage 是挂起函数，经外部 scope 派发。
+    //
+    // **幂等键**（对照 BiliPai `lastAutoAdvancedBvid`，PortraitVideoPager.kt:902-905）：
+    // 某些机型/解码器会在同一次播完里连发两次 STATE_ENDED（或与引擎重建叠加），
+    // 没有去重就会**一次翻两页**（用户看到"跳过了一支"）。同一支视频只自动翻一次。
+    var lastAutoAdvancedKey by remember { mutableStateOf<String?>(null) }
     val player by viewModel.player.collectAsStateWithLifecycle()
     DisposableEffect(player, pages) {
         val p = player ?: return@DisposableEffect onDispose { }
@@ -153,6 +184,10 @@ internal fun PortraitSwipePager(
                 if (playbackState != Player.STATE_ENDED) return
                 val next = pagerState.currentPage + 1
                 if (next > pages.lastIndex) return
+                val key = swipeKey(currentBvid, currentAid)
+                if (key.isNotEmpty() && key == lastAutoAdvancedKey) return
+                lastAutoAdvancedKey = key
+                Log.i(TAG, "autoAdvance: page=${pagerState.currentPage} -> $next key=$key")
                 scope.launch { pagerState.animateScrollToPage(next) }
             }
         }
@@ -177,8 +212,13 @@ internal fun PortraitSwipePager(
     // 几十毫秒后再挂上，中间那一帧就是用户看到的黑屏 + 大暂停键
     // （真机日志实证：`veil: visible=false mounted=false` 之后 37ms 又 `visible=true`）。
     //
-    // 所以用**粘滞**状态：换视频（currentKey 变化）进入等待，直到"这一支"真的出帧、
-    // 或这一支出错（不能让加载层把错误界面永远盖住）才退出。
+    // 所以用**粘滞**状态：换视频（currentKey 变化）进入等待，直到"这一支"真的出帧才退出。
+    //
+    // **失败时不再撤掉加载层**（本轮改动，对照 BiliPai 的失败态）：以前这里是
+    // `if (firstFrameRendered || playbackFailed) waitingKey = null` —— 取流失败就把加载层
+    // 撤掉，露出"纯黑 + 中央播放键"，看起来像卡死；而且错误只写在播放器侧栏里，
+    // 用户在连播页面上根本看不到。现在改成：失败时加载层**留着**并切成错误态 + 重试按钮
+    // （见 VideoPlayerPane 的 SwipeWaitVeil），返回手势与上下滑照常可用。
     val playbackState by viewModel.videoState.collectAsStateWithLifecycle()
     val firstFrameRendered = playbackState.hasRenderedFirstFrame
     val playbackFailed = playbackState.error != null
@@ -187,8 +227,8 @@ internal fun PortraitSwipePager(
         // 首次组合同样置位：锚点视频还没出帧时，一样该看到加载层而不是黑屏
         waitingKey = currentKey
     }
-    LaunchedEffect(firstFrameRendered, playbackFailed) {
-        if (firstFrameRendered || playbackFailed) waitingKey = null
+    LaunchedEffect(firstFrameRendered) {
+        if (firstFrameRendered) waitingKey = null
     }
     val waitingFirstFrame = waitingKey != null
     // 当前视频是不是横屏：决定要不要给"手动横屏"入口（竖屏视频转横屏只会更小）。
@@ -212,6 +252,9 @@ internal fun PortraitSwipePager(
                 swipePagingActive = true,
                 // 等首帧加载层：深色底 + 大尺寸粒子，首帧到达后淡出
                 swipeWaitingFirstFrame = waitingFirstFrame,
+                // 失败态：加载层留着并切成"错误 + 重试"（见 VideoPlayerPane 的 KDoc）
+                swipeFailed = playbackFailed,
+                onRetrySwipe = onRetryPlayback,
                 // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
                 landscapeForced = landscapeForced,
                 onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }

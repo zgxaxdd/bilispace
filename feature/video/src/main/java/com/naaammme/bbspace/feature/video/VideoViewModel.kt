@@ -5,11 +5,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.feed.FeedRepository
 import com.naaammme.bbspace.core.feed.StoryFeedRepository
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
+import com.naaammme.bbspace.core.playback.VideoPlayerRepository
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
 import com.naaammme.bbspace.core.model.CommentSubject
 import com.naaammme.bbspace.core.model.CommentSubjectTool
@@ -28,13 +30,16 @@ import com.naaammme.bbspace.core.model.VideoStat
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoUserState
 import com.naaammme.bbspace.core.model.isSameEntry
+import com.naaammme.bbspace.core.model.toPlayableParams
 import com.naaammme.bbspace.core.sponsorblock.SbActionType
 import com.naaammme.bbspace.core.sponsorblock.SbSegment
 import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import com.naaammme.bbspace.core.video.VideoActionRepository
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
+import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.feature.video.swipe.appendSwipeEntries
+import com.naaammme.bbspace.feature.video.swipe.shouldFetchNextRefillPage
 import com.naaammme.bbspace.feature.video.swipe.swipeEntriesFromRelates
 import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromFeedItem
 import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromStory
@@ -53,6 +58,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -119,7 +125,11 @@ class VideoViewModel @Inject constructor(
     private val favoriteRepository: FavoriteRepository,
     private val authStore: AuthStore,
     private val storyFeedRepository: StoryFeedRepository,
-    private val feedRepository: FeedRepository
+    private val feedRepository: FeedRepository,
+    /** 相邻页预取：与正常开播共用同一份 playurl LRU（见 [VideoPlayerRepository.preloadPlayUrl]）。 */
+    private val playbackVideoRepository: VideoPlayerRepository,
+    /** 预取条数按网络类型决定（WiFi 才多预）。 */
+    private val networkTypeProvider: NetworkTypeProvider
 ) : ViewModel() {
 
     private val _targetStack = MutableStateFlow<List<VideoTarget>>(emptyList())
@@ -441,6 +451,7 @@ class VideoViewModel @Inject constructor(
     fun clearSwipeSession() {
         _swipeAnchor.value = null
         _swipeQueue.value = emptyList()
+        resetSwipePrefetchState()
     }
 
     // ===== 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）=====
@@ -448,6 +459,9 @@ class VideoViewModel @Inject constructor(
     private var storyBootstrapStarted = false
     private var storyFeedCursor = 0L
     private var loadingMoreSwipe = false
+
+    /** 本次刷视频会话已预取过的 `aid#cid`：同一支只预取一次（反复刷同一页不重复请求）。 */
+    private val prefetchedKeys: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
      * 刷视频模式（story）会话的启动：以入口视频为页 0 锚点，竖屏故事流
@@ -491,35 +505,102 @@ class VideoViewModel @Inject constructor(
      * 队列补货：翻到倒数第 [com.naaammme.bbspace.feature.video.swipe.SWIPE_EXTEND_THRESHOLD]
      * 页时由 pager 触发，接力首页推荐流（`fetchFeed(idx)` 分页，BiliPai StoryViewModel
      * 的 loadMoreStories 同款数据源）。详情全屏与 story 两种会话共用同一队列。
-     * 防抖：进行中忽略；失败允许下一次触发重试（游标不前进）。
+     *
+     * ## 为什么是"重试凑满"而不是"拉一页就完"（对照 BiliPai，本轮最大体验差距）
+     * 单页推荐流里**大量条目会被去重/UP 多样性挡掉**（实测一页 10 条只进 2~4 条）。
+     * BiliPai 的做法是：竖屏模式最多拉 3 页、直到凑够 8 条"已验证"的候选
+     * （`PortraitVideoPager.kt:1355-1406`）。只拉一页时队列很容易见底 ——
+     * 用户滑到尽头就"没有下一个视频了"，这是当前最高频的体验断点。
+     *
+     * 判据抽成纯函数 [resolveSwipeRefillPlan]，可单测。
+     * 失败允许下一次触发重试（游标不前进）；防抖：进行中忽略。
      */
     fun loadMoreSwipeQueue() {
         if (loadingMoreSwipe) return
         loadingMoreSwipe = true
         viewModelScope.launch {
-            val page = storyFeedCursor
-            runCatchingCancellable {
-                feedRepository.fetchFeed(idx = page, pull = false, flush = 0)
-            }.onSuccess { result ->
-                if (result.items.isNotEmpty()) {
-                    storyFeedCursor = page + 1
-                    val anchorKey = _swipeAnchor.value?.key.orEmpty()
-                    val incoming = result.items.mapNotNull(::swipeEntryFromFeedItem)
-                    _swipeQueue.value = appendSwipeEntries(
-                        existing = _swipeQueue.value,
-                        incoming = incoming,
-                        anchorKey = anchorKey
-                    )
-                    android.util.Log.i(
-                        "PortraitSwipe",
-                        "more: page=$page items=${result.items.size} mapped=${incoming.size} " +
-                            "bvidFilled=${incoming.count { it.bvid.isNotEmpty() }} " +
-                            "queue=${_swipeQueue.value.size}"
-                    )
-                }
+            var attempts = 0
+            var appended = 0
+            while (shouldFetchNextRefillPage(attempts = attempts, appended = appended)) {
+                val page = storyFeedCursor
+                val result = runCatchingCancellable {
+                    feedRepository.fetchFeed(idx = page, pull = false, flush = 0)
+                }.getOrNull() ?: break
+                if (result.items.isEmpty()) break
+                storyFeedCursor = page + 1
+                attempts += 1
+                val anchorKey = _swipeAnchor.value?.key.orEmpty()
+                val before = _swipeQueue.value.size
+                val incoming = result.items.mapNotNull(::swipeEntryFromFeedItem)
+                _swipeQueue.value = appendSwipeEntries(
+                    existing = _swipeQueue.value,
+                    incoming = incoming,
+                    anchorKey = anchorKey
+                )
+                val added = _swipeQueue.value.size - before
+                appended += added
+                android.util.Log.i(
+                    "PortraitSwipe",
+                    "more: page=$page items=${result.items.size} mapped=${incoming.size} " +
+                        "added=$added attempts=$attempts queue=${_swipeQueue.value.size}"
+                )
             }
+            android.util.Log.i(
+                "PortraitSwipe",
+                "more done: attempts=$attempts appended=$appended queue=${_swipeQueue.value.size}"
+            )
             loadingMoreSwipe = false
         }
+    }
+
+    /**
+     * 相邻页预取（对照 BiliPai 的"拖动 0.25 偏移 / 停稳后 1~3 条"）。
+     *
+     * 只搬运**判据与触发时机**：预取走 [VideoPlayerRepository.preloadPlayUrl]，
+     * 与正常开播共用同一份进程内 playurl LRU —— 于是"上滑之后画面来得快不快"取决于
+     * 这一步有没有提前把地址取回来，而不是再等一个 gRPC 往返。
+     *
+     * - 条数由 [SwipePrefetchPolicy.prefetchCount] 决定（WiFi+开关 3 / WiFi 2 /
+     *   蜂窝+开关 1 / 否则 0）；
+     * - 同一支视频在一次会话里只预取一次（[prefetchedKeys]），避免反复刷同一页时重复请求；
+     * - 失败静默（预取是尽力而为）。
+     */
+    fun prefetchSwipeQueue(page: Int) {
+        val anchor = _swipeAnchor.value ?: return
+        val pages = listOf(anchor) + _swipeQueue.value
+        viewModelScope.launch {
+            val prefetchEnabled = playerSettings.state.first().playback.prefetchVideo
+            val count = SwipePrefetchPolicy.prefetchCount(
+                prefetchEnabled = prefetchEnabled,
+                isUnmetered = networkTypeProvider.isUnmetered(),
+                available = pages.size - page - 1
+            )
+            if (count <= 0) return@launch
+            SwipePrefetchPolicy.targetPages(page, pages.size, count).forEach { index ->
+                val entry = pages.getOrNull(index) ?: return@forEach
+                prefetchEntry(entry)
+            }
+        }
+    }
+
+    private fun prefetchEntry(entry: SwipeEntry) {
+        val target = entry.target
+        if (target.aid <= 0L || target.cid <= 0L) return
+        val key = "${target.aid}#${target.cid}"
+        if (!prefetchedKeys.add(key)) return
+        viewModelScope.launch {
+            runCatchingCancellable {
+                playbackVideoRepository.preloadPlayUrl(
+                    target.toPlayableParams().getResolveParams()
+                )
+            }
+            android.util.Log.i("PortraitSwipe", "prefetch: key=$key count=${prefetchedKeys.size}")
+        }
+    }
+
+    /** 退出刷视频会话时清预取去重表：下次会话重新预取（缓存本身由仓库层管 TTL）。 */
+    private fun resetSwipePrefetchState() {
+        prefetchedKeys.clear()
     }
 
     /**
@@ -549,6 +630,19 @@ class VideoViewModel @Inject constructor(
         )
         _targetStack.value = stack.dropLast(1) + entry.target
         playbackController.openVideo(entry.target)
+    }
+
+    /**
+     * 取流/解码失败后的重试（连播页面的"重试"按钮）。
+     *
+     * 走 `openVideo(当前目标)` 而不是 `openSwipeTarget(...)`：后者对"同一支视频"会短路
+     * （那是**切页**语义，防重复开播），重试要的正是"再开一次"——
+     * `openVideo` 内部会自增 `openId`，等于一次全新的取流尝试。
+     */
+    fun retryCurrentPlayback() {
+        val target = _targetStack.value.lastOrNull() ?: return
+        android.util.Log.i("PortraitSwipe", "retry: target=$target")
+        playbackController.openVideo(target)
     }
 
     fun togglePlayPause() {
@@ -590,6 +684,13 @@ class VideoViewModel @Inject constructor(
     fun updateSeamlessTransition(enabled: Boolean) {
         viewModelScope.launch {
             playerSettings.setSeamlessTransition(enabled)
+        }
+    }
+
+    /** 竖屏连播预加载开关（默认开）：见 [SwipePrefetchPolicy] 的条数矩阵。 */
+    fun updatePrefetchVideo(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setPrefetchVideo(enabled)
         }
     }
 

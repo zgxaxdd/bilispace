@@ -360,6 +360,13 @@ private fun PlaybackSettingsSection(
     )
 
     SheetSwitchCard(
+        title = "预加载下一个视频",
+        subtitle = "竖屏连播时提前取好后几支的播放地址（WiFi 预取更多；关闭后仅在 WiFi 下预取）",
+        checked = settingsState.playback.prefetchVideo,
+        onCheckedChange = viewModel::updatePrefetchVideo
+    )
+
+    SheetSwitchCard(
         title = "播放行为上报",
         subtitle = "向服务端上报播放心跳和历史，关闭影响个性化推荐和历史记录",
         checked = settingsState.playback.reportPlayback,

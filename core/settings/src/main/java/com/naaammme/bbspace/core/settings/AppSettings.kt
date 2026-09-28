@@ -604,6 +604,7 @@ class AppSettings @Inject constructor(
     private val decFallbackKey = booleanPreferencesKey("dec_fallback")
     private val bgPlayKey = booleanPreferencesKey("bg_play")
     private val seamlessTransitionKey = booleanPreferencesKey("seamless_transition")
+    private val prefetchVideoKey = booleanPreferencesKey("prefetch_video")
     private val autoRotateFullscreenKey = booleanPreferencesKey("auto_rotate_fullscreen")
     private val gestureSpeedKey = floatPreferencesKey("gesture_speed")
     private val doubleTapLikeKey = booleanPreferencesKey("double_tap_like")
@@ -639,6 +640,7 @@ class AppSettings @Inject constructor(
             playback = PlayerPlaybackPrefs(
                 backgroundPlayback = prefs[bgPlayKey] ?: defaultPlaybackPrefs.backgroundPlayback,
                 seamlessTransition = prefs[seamlessTransitionKey] ?: defaultPlaybackPrefs.seamlessTransition,
+                prefetchVideo = prefs[prefetchVideoKey] ?: defaultPlaybackPrefs.prefetchVideo,
                 reportPlayback = prefs[reportPlaybackKey] ?: defaultPlaybackPrefs.reportPlayback,
                 preferSoftwareDecode = prefs[preferSoftDecKey]
                     ?: defaultPlaybackPrefs.preferSoftwareDecode,
@@ -714,6 +716,11 @@ class AppSettings @Inject constructor(
     /** ColorOS 无缝过渡动画开关（默认开）；关闭退回覆盖层路径。 */
     suspend fun setSeamlessTransition(enabled: Boolean) {
         editSettingsMirrored { it[seamlessTransitionKey] = enabled }
+    }
+
+    /** 竖屏连播预加载开关（默认开）：见 `PlayerPlaybackPrefs.prefetchVideo`。 */
+    suspend fun setPrefetchVideo(enabled: Boolean) {
+        editSettingsMirrored { it[prefetchVideoKey] = enabled }
     }
 
     suspend fun setReportPlayback(enabled: Boolean) {

@@ -123,6 +123,14 @@ data class PlayerPlaybackPrefs(
     val doubleTapLike: Boolean = false,
     /** ColorOS 系统级无缝过渡动画（首页卡片 → 全屏详情）：关闭则退回应用内覆盖层路径 */
     val seamlessTransition: Boolean = true,
+    /**
+     * 竖屏连播的「预加载下一个视频」（默认开，与 BiliPai `prefetchVideoEnabled` 同默认）。
+     *
+     * 开：WiFi 下停稳时预取后面 1~3 支的播放地址；蜂窝下预取 1 支。
+     * 关：只在 WiFi 下预取 2 支（不额外花蜂窝流量）。
+     * 这是"上滑之后画面来得快不快"的主要开关（见 `SwipePrefetchPolicy`）。
+     */
+    val prefetchVideo: Boolean = true,
     /** 单视频循环播放（播完自动重播） */
     val repeatMode: PlayerRepeatMode = PlayerRepeatMode.Off
 )
