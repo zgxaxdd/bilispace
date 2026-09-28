@@ -6,6 +6,7 @@ package com.naaammme.bbspace.feature.video.detail
  */
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.model.VideoRelate
 import com.naaammme.bbspace.core.model.VideoTarget
 
@@ -103,7 +105,7 @@ internal fun RelateRow(
                         modifier = Modifier
                             .background(
                                 MaterialTheme.colorScheme.secondaryContainer,
-                                MaterialTheme.shapes.extraSmall
+                                RoundedCornerShape(BiliRadius.badge)
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         maxLines = 1,
@@ -118,7 +120,7 @@ internal fun RelateRow(
 internal fun CurBadge() {
     Surface(
         color = MaterialTheme.colorScheme.primary,
-        shape = MaterialTheme.shapes.extraSmall
+        shape = RoundedCornerShape(BiliRadius.badge)
     ) {
         Text(
             text = "当前播放",

@@ -28,6 +28,7 @@ import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.navigation.EXTRA_COVER_LARGE
 import com.naaammme.bbspace.navigation.EXTRA_COVER_URL
 import com.naaammme.bbspace.navigation.EXTRA_FROM_SEAMLESS
+import com.naaammme.bbspace.navigation.EXTRA_STORY_MODE
 import com.naaammme.bbspace.navigation.VideoDetailNavBus
 import com.naaammme.bbspace.navigation.VideoTargetSerializer
 import com.naaammme.bbspace.playback.PlaybackHostState
@@ -80,6 +81,7 @@ class VideoDetailActivity : ComponentActivity() {
     private var pendingCoverUrl by mutableStateOf<String?>(null)
     private var pendingCoverLarge by mutableStateOf(false)
     private var pendingSeamlessLaunch by mutableStateOf(false)
+    private var pendingStoryMode by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -145,6 +147,13 @@ class VideoDetailActivity : ComponentActivity() {
                 LaunchedEffect(pendingTarget) {
                     pendingTarget?.let(videoViewModel::openRoot)
                 }
+                // 刷视频模式（首页顶栏入口）：会话锚点/队列由 story 流接管，
+                // 必须在 VideoScreen 的 beginSwipeSession 判据之外（storyMode 下那边跳过）
+                LaunchedEffect(pendingStoryMode, pendingTarget) {
+                    if (pendingStoryMode) {
+                        pendingTarget?.let(videoViewModel::bootstrapStorySession)
+                    }
+                }
                 ForegroundEnterBox {
                     VideoScreen(
                         onBack = ::finishWithHostState,
@@ -167,7 +176,8 @@ class VideoDetailActivity : ComponentActivity() {
                         viewModel = videoViewModel,
                         hostExpanded = true,
                         coverBackdropUrl = pendingCoverUrl,
-                        coverBackdropLarge = pendingCoverLarge
+                        coverBackdropLarge = pendingCoverLarge,
+                        storyMode = pendingStoryMode
                     )
                 }
             }
@@ -221,6 +231,7 @@ class VideoDetailActivity : ComponentActivity() {
         pendingCoverUrl = intent.getStringExtra(EXTRA_COVER_URL)
         pendingCoverLarge = intent.getBooleanExtra(EXTRA_COVER_LARGE, false)
         pendingSeamlessLaunch = intent.getBooleanExtra(EXTRA_FROM_SEAMLESS, false)
+        pendingStoryMode = intent.getBooleanExtra(EXTRA_STORY_MODE, false)
         return true
     }
 

@@ -62,6 +62,7 @@ import androidx.navigation.compose.rememberNavController
 import com.naaammme.bbspace.core.designsystem.component.roundScreenSafePadding
 import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
+import com.naaammme.bbspace.core.designsystem.seamless.LocalStoryCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
@@ -269,6 +270,41 @@ fun AppNavHost(
         { target, coverUrl, coverLarge, bundle ->
             openVideoRoute(target, coverUrl, coverLarge, bundle)
         }
+    // ── 刷视频模式（首页顶栏入口）────────────────────────────────────────────
+    // 与卡片路径同链路，但 intent 带 EXTRA_STORY_MODE：详情 Activity 直接以
+    // 全屏上下滑呈现（story 流为队列数据源）。
+    val openStoryActivity: (VideoTarget, String?, Boolean, Bundle?) -> Unit =
+        { target, coverUrl, coverLarge, bundle ->
+            val intent = videoDetailIntent(
+                context = context,
+                target = target,
+                coverUrl = coverUrl,
+                coverLarge = coverLarge,
+                fromSeamless = bundle != null,
+                storyMode = true
+            )
+            if (bundle != null) {
+                context.startActivity(intent, bundle)
+            } else {
+                context.startActivity(intent)
+            }
+        }
+    val openStoryRoute: (VideoTarget, String?, Boolean, Bundle?) -> Unit =
+        { target, coverUrl, coverLarge, bundle ->
+            if (OplusViewSeamlessCompat.isVersionSupported() && seamlessEnabledState.value) {
+                playbackHostViewModel.warmOpen(target)
+                openStoryActivity(target, coverUrl, coverLarge, bundle)
+            } else {
+                // 不支持无缝的设备：降级为普通详情打开（用户可再下滑进全屏刷）
+                playbackHostViewModel.capsuleState.deactivate()
+                playbackHostViewModel.expand()
+                videoViewModel.openRoot(target)
+            }
+        }
+    val openStorySeamless: (VideoTarget, String, Boolean, Bundle) -> Unit =
+        { target, coverUrl, coverLarge, bundle ->
+            openStoryRoute(target, coverUrl, coverLarge, bundle)
+        }
     // 共享无缝卡片执行器：任意页面的视频卡片经 LocalSeamlessCardOpener 接入；
     // 开关关闭时 tryOpen 直接返回 false，卡片侧自动退回普通打开。
     // cleanupScope 驱动锚点过渡位图的兜底清理（系统 onEnd 回调缺失时防残留）。
@@ -277,6 +313,17 @@ fun AppNavHost(
         SeamlessCardOpener(
             route = { target, coverUrl, coverLarge, bundle ->
                 openVideoSeamless(target, coverUrl ?: "", coverLarge, bundle)
+            },
+            cleanupScope = seamlessCleanupScope,
+            enabled = { seamlessEnabledState.value }
+        )
+    }
+    // 刷视频模式的独立执行器：route 打开带 EXTRA_STORY_MODE 的 intent，
+    // 其余（锚点装饰/PixelCopy/清理）与卡片执行器同一套契约
+    val storyCardOpener = remember(seamlessCleanupScope) {
+        SeamlessCardOpener(
+            route = { target, coverUrl, coverLarge, bundle ->
+                openStorySeamless(target, coverUrl ?: "", coverLarge, bundle)
             },
             cleanupScope = seamlessCleanupScope,
             enabled = { seamlessEnabledState.value }
@@ -374,6 +421,7 @@ fun AppNavHost(
 
     CompositionLocalProvider(
         LocalSeamlessCardOpener provides seamlessCardOpener,
+        LocalStoryCardOpener provides storyCardOpener,
         LocalBottomNavOcclusionRatio provides { bottomNavOcclusionRatio }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -412,6 +460,7 @@ fun AppNavHost(
                     },
                     onNavigateToDownload = { rootNavController.navigateToDownload() },
                     onNavigateToVideo = openVideo,
+                    onEnterStoryMode = { target -> openStoryRoute(target, null, false, null) },
                     onNavigateToSpace = rootNavController::navigateToSpace,
                     onNavigateToLive = openLive,
                     onNavigateToArticle = openArticle,
@@ -585,6 +634,7 @@ private fun MainTabsScaffold(
     onNavigateFromUser: (UserDest) -> Unit,
     onNavigateToDownload: () -> Unit,
     onNavigateToVideo: (VideoTarget) -> Unit,
+    onEnterStoryMode: (VideoTarget) -> Unit,
     onNavigateToSpace: (SpaceRoute) -> Unit,
     onNavigateToLive: (LiveRoute) -> Unit,
     onNavigateToArticle: (String, Int) -> Unit,
@@ -738,7 +788,8 @@ private fun MainTabsScaffold(
                         onOpenLive = onNavigateToLive,
                         onOpenDynamic = onNavigateToDynamicDetail,
                         onOpenArticle = onNavigateToArticle,
-                        onOpenListenItem = onNavigateToListenDetail
+                        onOpenListenItem = onNavigateToListenDetail,
+                        onEnterStoryMode = onEnterStoryMode
                     )
                     TopLevelRoute.DYNAMIC -> DynamicScreen(
                         onOpenVideo = onNavigateToVideo,

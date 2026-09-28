@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 详情页关闭时主页面回到前台：保持原位（静止 300ms，与 close_exit 同长）。
+     下层页面全程不参与动画，观感只有详情页一层在退场。 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="300">
+    <alpha
+        android:fromAlpha="1.0"
+        android:toAlpha="1.0" />
+</set>

@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.model.LivePlaybackViewState
 import com.naaammme.bbspace.core.model.LiveRoomMessage
 import com.naaammme.bbspace.core.model.LiveRoomSessionState
@@ -60,6 +62,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
+
+/**
+ * 弹幕消息卡 / 底部输入区容器形状：与播放器矩形同语言（[BiliRadius.card]=20）。
+ * 此前 `shapes.medium` 随 [CornerStyle] 档位在 16~24dp 漂移，展开态下与左边
+ * 20dp 的播放器矩形不齐。
+ */
+private val LivePanelShape = RoundedCornerShape(BiliRadius.card)
 
 @Composable
 internal fun LiveDetailPane(
@@ -192,7 +201,7 @@ private fun LiveMessageCard(
     }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.medium
+        shape = LivePanelShape
     ) {
         Column(
             modifier = Modifier
@@ -386,7 +395,7 @@ private fun LiveDanmakuInputBar(
             .fillMaxWidth()
             .background(
                 color = MaterialTheme.colorScheme.surfaceContainer,
-                shape = MaterialTheme.shapes.medium
+                shape = LivePanelShape
             )
             .padding(horizontal = 10.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)

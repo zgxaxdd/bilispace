@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 详情页窗口退出：淡出 + 缩回 96%（open_enter 的精确反向）。
+     与打开方向同族对称，替代系统默认关闭动画（用户反馈的"退出像缩放"来源）。 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/accelerate_quad"
+    android:duration="300">
+    <alpha
+        android:fromAlpha="1.0"
+        android:toAlpha="0.0" />
+    <scale
+        android:fromXScale="1.0"
+        android:toXScale="0.96"
+        android:fromYScale="1.0"
+        android:toYScale="0.96"
+        android:pivotX="50%"
+        android:pivotY="50%" />
+</set>

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ThumbUp
@@ -45,6 +46,7 @@ import com.naaammme.bbspace.core.designsystem.component.PreviewImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImageGrid
 import com.naaammme.bbspace.core.model.CommentReply
 import com.naaammme.bbspace.core.model.CommentUser
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 internal sealed interface CommentReplyAction {
@@ -114,7 +116,9 @@ internal fun ThreadReplyCard(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = MaterialTheme.shapes.large,
+        // 楼中楼回复卡：groupedList(16) 固定——卡中嵌卡用小一号的同族圆角，
+        // 不随 CornerStyle 漂移（iOS 档下与原 shapes.large 等值）
+        shape = RoundedCornerShape(BiliRadius.groupedList),
         modifier = modifier.fillMaxWidth()
     ) {
         ReplyBody(

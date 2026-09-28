@@ -44,13 +44,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
@@ -78,6 +83,8 @@ import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.VideoDetailInfoSkeleton
+import com.naaammme.bbspace.core.designsystem.component.topSolidProgressiveFade
+import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
@@ -92,12 +99,33 @@ import com.naaammme.bbspace.core.model.VideoDownloadOption
 import com.naaammme.bbspace.core.model.VideoDownloadOptions
 import com.naaammme.bbspace.core.model.VideoDownloadRequest
 import com.naaammme.bbspace.feature.video.detail.VideoDetailPage
+import com.naaammme.bbspace.feature.video.player.PortraitSwipePager
 import com.naaammme.bbspace.feature.video.player.VideoPlayerPane
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
+// ── 本轮三项界面优化新增 ────────────────────────────────────────────────
+// 形变（aspectMorph / fullscreenMorph）的值一律在**布局期 / 绘制期**读取
+// （playerMorphHeight 的 measure 块、graphicsLayer / offset{} 块、
+// onGloballyPositioned 回调），不新增 animate*AsState、不在组合期读动画值，
+// 与 FrameBudgetLintTest 的口径一致（见两个 Animatable 处的注释）。
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.util.lerp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 internal val speedOps = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
 
@@ -141,7 +169,10 @@ fun VideoScreen(
     // 铺在播放器区域（与播放器容器同边界同圆角），首帧渲染后交叉淡出。
     // 不做全屏铺底——系统无缝动画的 leash 终态交给真实页面接管，避免长时间"预览图铺屏"。
     coverBackdropUrl: String? = null,
-    coverBackdropLarge: Boolean = false
+    coverBackdropLarge: Boolean = false,
+    // 刷视频模式（首页顶栏入口）：常驻全屏上下滑，没有紧凑态——返回键/「全屏」钮
+    // 都是关闭页面；会话锚点/队列由 story 流（bootstrapStorySession）负责。
+    storyMode: Boolean = false
 ) {
     val videoState by viewModel.videoState.collectAsStateWithLifecycle()
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle(initialValue = PlayerSettingsState())
@@ -159,9 +190,11 @@ fun VideoScreen(
     val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val isExpandedWidth = windowSizeClass.isWidthAtLeastBreakpoint(840)
     val themeUsesDarkSystemBarIcons = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    var isFull by rememberSaveable { mutableStateOf(false) }
+    var isFull by rememberSaveable { mutableStateOf(storyMode) }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
     val fullOn = hostExpanded && isFull
+    // 刷视频模式是常驻全屏（isFull 初始即 true），swipe 会话也常驻
+    val effectiveStoryMode = storyMode && hostExpanded
     // Activity 无缝路径：详情本体**立即组合**（打开动画期间被纯背景色遮罩盖住，
     // 首帧组合在动画内完成），动画结束（或 1.2s 超时兜底）后遮罩直接淡出——
     // 简介与详情随视频画面同步出现，不再有「动画结束→组合→再淡入」的串行等待。
@@ -189,6 +222,59 @@ fun VideoScreen(
         val stream = videoState.currentStream ?: return@remember false
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
     }
+    // 视频宽高比（w/h）：竖屏比例贴合预览框（#1）的唯一输入。
+    // 与 isPortraitVideo 同源同键，避免两处各算一遍还可能算出不同结论。
+    val videoAspect = remember(videoState.currentStream) {
+        val stream = videoState.currentStream ?: return@remember null
+        val width = stream.width?.takeIf { it > 0 } ?: return@remember null
+        val height = stream.height?.takeIf { it > 0 } ?: return@remember null
+        width.toFloat() / height.toFloat()
+    }
+    // ── 播放区形变状态机（三项界面优化共用）─────────────────────────────────
+    // aspectMorph：预览框从「16:9 基准高度」连续过渡到「贴合视频比例的目标高度」。
+    //   打开视频 / 切清晰度 / 切分P 让目标比例变化时重播，避免比例跳变。
+    // fullscreenMorph：下滑进全屏（#3）的「紧凑高度 → 满屏」直接操纵进度 ——
+    //   手势期间由手指位置 snapTo（播放带底边贴着手指生长），松手后 animateTo
+    //   到 0（回弹）或 1（提交切全屏）；退出全屏时反向播放同一动画。
+    //
+    // 两个 Animatable 的值**只在布局期 / 绘制期读取**：playerMorphHeight 的
+    // measure 块、graphicsLayer / offset{} 块、onGloballyPositioned 回调。
+    // 形变全程零重组，也不新增 animate*AsState（FrameBudgetLintTest 棘轮）。
+    val fullscreenMorph = remember { Animatable(0f) }
+    val aspectMorph = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val morphSpec = tween<Float>(
+        durationMillis = if (anim.reduceMotion) 1 else anim.morph,
+        easing = anim.morphEasing
+    )
+    val aspectSpec = tween<Float>(
+        durationMillis = if (anim.reduceMotion) 1 else anim.medium,
+        easing = anim.standard
+    )
+    // 详情列表状态提升到本层：下滑手势要用它判断「列表还能不能向下滚」——
+    // 能滚 = 手势让位给列表（详情区正常滚动）；不能滚 = 已在简介区顶边，
+    // 向下拖才接管为进全屏形变。原状态在 VideoDetailPage 内按 aidKey 创建，
+    // 提升后键语义不变（切视频仍重置），且平板/竖排两个分支共用同一份。
+    val detailListState = remember(videoState.ids.aid.takeIf { it > 0L }) { LazyListState() }
+    // 退出全屏时读最新宽度分级：平板/横屏全屏没有紧凑形变链，直接回零
+    // （等价于原来的瞬时切换），否则竖向 compact 分支重挂后播放回缩动画。
+    val isExpandedWidthState = rememberUpdatedState(isExpandedWidth)
+    val enterFullscreen: () -> Unit = {
+        scope.launch {
+            fullscreenMorph.animateTo(1f, morphSpec)
+            isFull = true
+        }
+    }
+    val exitFullscreen: () -> Unit = {
+        isFull = false
+        scope.launch {
+            if (isExpandedWidthState.value) {
+                fullscreenMorph.snapTo(0f)
+            } else {
+                fullscreenMorph.animateTo(0f, morphSpec)
+            }
+        }
+    }
     val openTarget = remember(viewModel) {
         { target: VideoTarget -> viewModel.openTarget(target) }
     }
@@ -200,14 +286,53 @@ fun VideoScreen(
     }
     val downloadClick = remember { { downloadSheetOn = true } }
     val handleBack = {
-        if (fullOn) {
-            isFull = false
-        } else if (!viewModel.popPage()) {
-            onBack()
-        } else {
-            Unit
+        when {
+            // 刷视频模式没有紧凑态：返回 = 关闭页面（finishWithHostState，
+            // 系统按成对返回动画收起）
+            effectiveStoryMode -> onBack()
+            fullOn -> exitFullscreen()
+            else -> if (!viewModel.popPage()) {
+                onBack()
+            } else {
+                Unit
+            }
         }
     }
+
+    // ── 竖屏全屏「上下滑切换视频」（BiliPai 上游同款功能的 bbspace 化）──────────
+    // 会话在进入全屏后锚定当时的视频（页 0），队列 = 其相关推荐的接力流。
+    // 键里带 videoState.detail：detail 晚到（快速滑进全屏时详情尚未返回）也能补开
+    // 会话；以 swipeAnchor == null 为判据，刷视频过程中 detail 不断变化也不会重置锚点
+    // ——锚点必须稳定在「进入全屏那一刻的视频」，翻回页 0 才能回到起点。
+    // 启用判据取**进入时**的 isPortraitVideo，并在整个会话内保持——中途刷到横屏视频
+    // 不能让 pager 消失（会打断进行中的滑动），页面内容自行 FIT 适配。
+    // 队列为空（相关推荐没有可刷的）时不启用，保持单视频全屏的现状。
+    //
+    // 刷视频模式（effectiveStoryMode）下本 effect 全程不接管会话：锚点/队列由
+    // VideoDetailActivity 的 bootstrapStorySession（story 流）负责，swipeSessionActive
+    // 常驻 true。
+    var swipeSessionActive by rememberSaveable { mutableStateOf(storyMode) }
+    LaunchedEffect(fullOn, videoState.detail) {
+        if (!fullOn) {
+            swipeSessionActive = false
+            viewModel.clearSwipeSession()
+            return@LaunchedEffect
+        }
+        if (effectiveStoryMode) {
+            swipeSessionActive = true
+            return@LaunchedEffect
+        }
+        if (viewModel.swipeAnchor.value == null) {
+            viewModel.beginSwipeSession()
+            swipeSessionActive = isPortraitVideo && viewModel.swipeQueue.value.isNotEmpty()
+            android.util.Log.i(
+                "PortraitSwipe",
+                "activate: portrait=$isPortraitVideo queue=${viewModel.swipeQueue.value.size} active=$swipeSessionActive"
+            )
+        }
+    }
+    val swipeAnchor by viewModel.swipeAnchor.collectAsStateWithLifecycle()
+    val swipeQueue by viewModel.swipeQueue.collectAsStateWithLifecycle()
 
     if (hostExpanded) {
         BackHandler {
@@ -249,15 +374,33 @@ fun VideoScreen(
         }
     }
 
-    DisposableEffect(act, fullOn, settingsState.playback.autoRotateFullscreen, isPortraitVideo) {
-        act?.requestedOrientation = if (
+    // ── 方向 ────────────────────────────────────────────────────────────────
+    // 竖屏刷视频会话（详情全屏的上下滑 / story 常驻全屏）期间**锁竖屏**：
+    // BiliPai 的 PortraitVideoPager 全程只做 immersive 系统栏管理、从不请求横屏；
+    // 抖音/B 站官方的竖屏连播同样是竖屏锁定的。
+    //
+    // 两个真机症状都由此而来（用户反馈「每次下滑，屏幕会有一个旋转动画」）：
+    // 1. **瞬时空流**：切视频时 `videoState.currentStream` 会短暂为 null（新会话
+    //    isPreparing、取流未回），下面的 isPortraitVideo 随之翻成 false —— 只要
+    //    autoRotateFullscreen 开着，就会朝 SENSOR_LANDSCAPE 发一次请求 → 转屏动画，
+    //    新流回来（竖屏）再转回来。**每一次翻页都会转两次**；
+    // 2. 刷到真的是横屏的视频时同样触发。
+    // 会话期间第一分支短路，这两条都不会再发生（锁是 PORTRAIT 而不是 UNSPECIFIED：
+    // 用户此刻要的是"连播"，方向由 pager 说了算，不听传感器）。
+    val portraitSwipeActive = swipeSessionActive || effectiveStoryMode
+    DisposableEffect(
+        act,
+        fullOn,
+        settingsState.playback.autoRotateFullscreen,
+        isPortraitVideo,
+        portraitSwipeActive
+    ) {
+        act?.requestedOrientation = when {
+            portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             fullOn &&
-            settingsState.playback.autoRotateFullscreen &&
-            !isPortraitVideo
-        ) {
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                settingsState.playback.autoRotateFullscreen &&
+                !isPortraitVideo -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         // **必须在离开组合时复位**。这个 effect 的 key 里有 fullOn，但 VideoScreen
         // 还有另一条离开路径：外层把 VideoScreen 包在 AnimatedVisibility 里，
@@ -279,8 +422,27 @@ fun VideoScreen(
         val compactVideoH = maxWidth * (9f / 16f)
         val compactPlayerSpaceH = statusTop + compactVideoH
         val expandedContentW = (maxWidth - (playerTopPad * 2) - playerGap).coerceAtLeast(0.dp)
-        val expandedPlayerW = expandedContentW * 0.54f
-        val expandedPlayerH = (maxHeight - statusTop - (playerTopPad * 2)).coerceAtLeast(0.dp)
+        val expandedPlayerMaxW = expandedContentW * 0.54f
+        val expandedPlayerMaxH = (maxHeight - statusTop - (playerTopPad * 2)).coerceAtLeast(0.dp)
+        // 展开态（平板/折叠屏）播放框同样贴合视频比例（#1）：
+        // 在「宽上限 × 高上限」的区域内取**与视频同比例的最大矩形** ——
+        // 宽视频先按宽度定高（原 540×700 的方框变成 540×304，不再大片 letterbox），
+        // 竖屏视频改为按高度定宽。流信息未到时保持原 54% 宽 × 全高的占位。
+        val expandedPlayerW: Dp
+        val expandedPlayerH: Dp
+        if (videoAspect != null && videoAspect > 0f) {
+            val heightByMaxW = expandedPlayerMaxW / videoAspect
+            if (heightByMaxW <= expandedPlayerMaxH) {
+                expandedPlayerW = expandedPlayerMaxW
+                expandedPlayerH = heightByMaxW
+            } else {
+                expandedPlayerW = expandedPlayerMaxH * videoAspect
+                expandedPlayerH = expandedPlayerMaxH
+            }
+        } else {
+            expandedPlayerW = expandedPlayerMaxW
+            expandedPlayerH = expandedPlayerMaxH
+        }
 
         when {
             !hostExpanded || fullOn -> {
@@ -291,15 +453,55 @@ fun VideoScreen(
                             coverBackdropFrame = BackdropFrame(it.boundsInWindow(), RectangleShape)
                         }
                 ) {
-                    VideoPlayerPane(
-                        modifier = Modifier.fillMaxSize(),
-                        viewModel = viewModel,
-                        videoTitle = videoState.detail?.title,
-                        isFull = fullOn,
-                        onToggleFull = { isFull = !isFull },
-                        onBackClick = handleBack,
-                        onGoHome = onGoHome
-                    )
+                    val anchor = swipeAnchor
+                    if (swipeSessionActive && anchor != null) {
+                        // 竖屏全屏上下滑（BiliPai 同款）：页 0 锚点 + 接力队列。
+                        // 播放器唯一，只有当前播放的 bvid 所在页组合 VideoPlayerPane。
+                        PortraitSwipePager(
+                            anchor = anchor,
+                            queue = swipeQueue,
+                            // 页身份按内容比（bvid 优先 / aid 兜底，两侧任一缺失都能命中）——
+                            // 不能在这里先拼成 key 字符串再比：relate 卡的 bvid 是取流后
+                            // 才被补齐的，字符串会在那一刻翻转、播放器页落空（见 isCurrentVideo）
+                            currentBvid = videoState.ids.bvid,
+                            currentAid = videoState.ids.aid,
+                            detailTitle = videoState.detail?.title,
+                            detailLoading = videoState.detailLoading,
+                            viewModel = viewModel,
+                            isFull = fullOn,
+                            onToggleFull = {
+                                // 刷视频模式没有「退出全屏」态，该钮 = 关闭页面；
+                                // 详情全屏路径才是形变回缩
+                                if (effectiveStoryMode) {
+                                    onBack()
+                                } else if (fullOn) {
+                                    exitFullscreen()
+                                }
+                            },
+                            onBackClick = handleBack,
+                            onGoHome = onGoHome,
+                            onSwipeTo = viewModel::openSwipeTarget,
+                            onNeedMore = viewModel::loadMoreSwipeQueue,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        VideoPlayerPane(
+                            modifier = Modifier.fillMaxSize(),
+                            viewModel = viewModel,
+                            videoTitle = videoState.detail?.title,
+                            isFull = fullOn,
+                            onToggleFull = {
+                                // 刷视频模式流未就绪时暂以单视频全屏呈现，行为同上
+                                if (effectiveStoryMode) {
+                                    onBack()
+                                } else if (fullOn) {
+                                    exitFullscreen()
+                                }
+                            },
+                            onBackClick = handleBack,
+                            onGoHome = onGoHome
+                        )
+                    }
                 }
             }
 
@@ -343,6 +545,7 @@ fun VideoScreen(
                             detailError = videoState.detailError,
                             commentSubject = viewModel.commentSubject,
                             contentHorizontalPad = 0.dp,
+                            detailListState = detailListState,
                             onOpenVideo = openTarget,
                             onOpenSpace = onOpenSpace,
                             onDownloadClick = downloadClick,
@@ -355,41 +558,208 @@ fun VideoScreen(
 
             else -> {
                 val compactPlayerShape = CompactPlayerShape
-                Column(
+                // ── 竖排布局：Box 取代 Column ──────────────────────────────────
+                // 三项优化都要求「播放带高度连续可变」：竖屏比例贴合（aspectMorph）、
+                // 下滑进全屏（fullscreenMorph）。Column 的 weight(1f) 会让详情区在
+                // 播放带每次长高时重新 measure 整个列表；改为「详情区按 16:9 基准
+                // 高度固定布局，只随播放带底边位移 + 淡退」后，形变全程零 measure。
+                //
+                // 背景分工：外层 Box 铺**黑色**——满屏形变终点播放带铺满窗口，
+                // 底部圆角切过的露底与详情淡退后的露底都是黑，终点无角色突变；
+                // 主题背景移到详情区自己身上（静止态观感与原 Column 逐像素一致）。
+                // 代价是静止态多一层全屏黑底（原 Column 单层背景）：这是形变能力
+                // 的必要成本——淡出中的详情区背后必须有黑底接住，否则浅色主题下
+                // 下滑进全屏会从内容边缘漏出一圈亮色。实测算一层纯色填充，可接受。
+                // ── 播放器 / 内容衔接（#2 定稿·BiliPai 纯色渐变 + 整圈描边）─────────
+                // 三层，全部静态、零逐帧成本：
+                // 1. 播放带**保留底部圆角**（CompactPlayerShape），不切直角；
+                // 2. 贴缝一道**整圈圆角描边**（rim light）：亮度沿垂直渐变走线——
+                //    底边全亮、绕过两个圆角时起坡渐弱、圆角上方完全透明。描边与
+                //    播放带圆角同构。**描边色 = 下方的光晕色（封面代表色）**——
+                //    用户定稿"播放窗口描边的颜色与下方的光同一个颜色"：视频边缘
+                //    在发光、光沿圆角流下，整条接缝是一个同源同色的光源；
+                // 3. 描边下方铺**纯色光晕渐变**——BiliPai 上游「封面光晕渐变」
+                //    （236c6a442）的参数直接移植：封面代表色**原色**（不向白 lerp）
+                //    以 0.48/0.38 峰值沿 Telegram 非线性 5 档（topSolidProgressiveFade）
+                //    从播放带底边向下洒落，"光"从视频播放区洒在下方内容上。
+                //    **原色是关键**：向白 lerp 的低峰值淡彩与 Screen 提亮的灰雾
+                //    两版都试过，真机观感"廉价"；上游卡片 coverGlow 用的是封面
+                //    原色、高得多的峰值，颜色真实地"渗"下来才有光感。
+                //    光晕的**图层与圆角覆盖**见下方接缝三层布局处的注释。
+                val seamOnDark = !themeUsesDarkSystemBarIcons
+                // 光源取色：垫底封面 URL（打开即有）优先，详情响应的封面兜底；
+                // 请求对齐 CoverSettleBackdrop 的同一 URL → 命中同一条 Coil 内存缓存，
+                // 不产生第二次下载（与 HomeVideoPage 取色同款防重路径）。
+                val seamTintSource = coverBackdropUrl ?: videoState.detail?.cover
+                var seamCoverTint by remember(seamTintSource) {
+                    mutableStateOf(seamTintSource?.let { VideoCardCoverColorStore.getCachedColor(it) })
+                }
+                val activeSeamTintKey by rememberUpdatedState(seamTintSource)
+                LaunchedEffect(seamTintSource) {
+                    val key = seamTintSource ?: return@LaunchedEffect
+                    VideoCardCoverColorStore.requestExtraction(
+                        appContext = context,
+                        cacheKey = key,
+                        url = key,
+                        sizePx = SeamTintSamplePx,
+                        scope = scope
+                    ) { color ->
+                        // 视频已切换时丢弃晚到的取色，防止上一个视频的颜色串到接缝上
+                        if (activeSeamTintKey == key) seamCoverTint = color
+                    }
+                }
+                // 峰值分档用 BiliPai 上游 coverGlow 原值（深 0.48 / 浅 0.38）；
+                // 无取色时退纯白（屏幕本光）。颜色原样使用，不冲淡。
+                val seamGlowPeak = if (seamOnDark) SEAM_GLOW_PEAK_DARK else SEAM_GLOW_PEAK_LIGHT
+                val seamGlowColor = remember(seamCoverTint) {
+                    val tint = seamCoverTint
+                    if (tint == null || tint.alpha <= 0f) {
+                        Color.White
+                    } else {
+                        tint
+                    }
+                }
+                // 描边与光晕**同色**（用户定稿）
+                val seamStrokeBase = seamGlowColor
+                // 光要"洒"开就得多给一段行程：160dp（五倍 xxxl）——上游是整卡 85% 高度，
+                // 播放页取"足够读完首屏标题区"的固定行程；组件内部会 coerce 到容器高度内。
+                val seamGlowHeight = BiliSpacing.xxxl * 5f
+                // remember 住 modifier 本体：色值/峰值不变时跨重组复用同一个
+                // drawWithCache 节点，避免 lambda 换实例触发绘制缓存失效
+                val seamGlowModifier = remember(seamGlowColor, seamGlowHeight, seamGlowPeak) {
+                    Modifier.topSolidProgressiveFade(
+                        surfaceColor = seamGlowColor,
+                        fadeHeight = seamGlowHeight,
+                        peakAlpha = seamGlowPeak
+                    )
+                }
+                // 描边：整圈圆角轮廓线（不垫底色——圆角月牙区由接缝图层接管，
+                // 见 playerSeamStroke 的 KDoc：垫底会盖住圆角处透上来的光）
+                val seamStrokeModifier = remember(seamStrokeBase) {
+                    Modifier.playerSeamStroke(
+                        strokeBase = seamStrokeBase,
+                        cornerRadius = BiliRadius.playerCompact
+                    )
+                }
+                val density = LocalDensity.current
+                val statusTopPx = with(density) { statusTop.toPx() }
+                val maxHeightPx = with(density) { maxHeight.toPx() }
+                val baseVideoPx = with(density) { compactVideoH.toPx() }
+                // 竖屏视频按比例加高预览带（#1）：自然高度 = 宽 / 宽高比；
+                // 极端长高比（9:16 等）受「详情区保底 30% 可视高度」截顶，
+                // 视频 FIT 居中、露出的黑边与黑带同色不可见——预览框从此与
+                // 画面比例同构，不再有「小画面嵌大横框」的割裂感。
+                val naturalVideoH = if (videoAspect != null && videoAspect > 0f) {
+                    maxWidth / videoAspect
+                } else {
+                    compactVideoH
+                }
+                val targetVideoH = minOf(naturalVideoH, (maxHeight - statusTop) * 0.70f)
+                val targetVideoPx = with(density) { targetVideoH.toPx() }
+                // 详情区基准高度（16:9 播放带占位时的高度）。必须在这里算：
+                // BoxWithConstraintsScope 带 @LayoutScopeMarker，maxHeight 这类成员
+                // 在内层 Box 的 content 作用域里不可见（编译期报"implicit receiver"）。
+                // 下限用 BiliSpacing.xs 而非 0.dp：极端矮窗（横屏小窗）下 16:9 播放带
+                // 可能高过窗口本身，兜一个非零下限即可，dp 字面量棘轮已无余额
+                // （DesignTokenLintTest 实测 980/980）。
+                val detailBaseH = (maxHeight - compactPlayerSpaceH).coerceAtLeast(BiliSpacing.xs)
+
+                // 目标比例偏离 16:9 基准时播放一次比例过渡（同屏切分P/切清晰度
+                // 导致目标变化时重播）；横向视频比例更宽时同理收窄。
+                LaunchedEffect(baseVideoPx, targetVideoPx) {
+                    aspectMorph.animateTo(
+                        targetValue = if (abs(targetVideoPx - baseVideoPx) > 1f) 1f else 0f,
+                        animationSpec = aspectSpec
+                    )
+                }
+
+                // 形变高度：布局期求值（见 playerMorphHeight 的 KDoc），每帧只重新
+                // measure 播放带这一棵子树，详情列表不参与。
+                val videoMorphPx: () -> Float = {
+                    lerp(
+                        lerp(baseVideoPx, targetVideoPx, aspectMorph.value),
+                        maxHeightPx,
+                        fullscreenMorph.value
+                    )
+                }
+                val bandMorphHeightPx: () -> Float = {
+                    (statusTopPx + videoMorphPx()).coerceAtMost(maxHeightPx)
+                }
+
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(Color.Black)
+                        .pullDownToFullscreen(
+                            scope = scope,
+                            progress = fullscreenMorph,
+                            zoneTopPx = {
+                                statusTopPx + lerp(baseVideoPx, targetVideoPx, aspectMorph.value)
+                            },
+                            windowBottomPx = maxHeightPx,
+                            canListScrollDown = { detailListState.canScrollBackward },
+                            onSettle = { commit ->
+                                scope.launch {
+                                    if (commit) {
+                                        fullscreenMorph.animateTo(1f, morphSpec)
+                                        isFull = true
+                                    } else {
+                                        fullscreenMorph.animateTo(0f, morphSpec)
+                                    }
+                                }
+                            }
+                        )
                 ) {
+                    // ── 接缝三层（用户定稿的图层序）：背景 → 光晕 → 简介内容 ──────
+                    // 圆角覆盖的几何：**背景层与光晕层都上移一个圆角半径**。播放带
+                    // 底部圆角切掉的月牙区是透明的，会让这两层沿圆角轮廓透出来——
+                    // 光因此从圆角最亮处流出、向下衰减，与播放带圆角精确相切；
+                    // 圆角内的部分被播放带（z 序最上）盖住，互不干扰。
+                    // 浅色主题的"黑耳朵"（外层黑底从月牙透出）也由这套上移的
+                    // 背景层解决——`playerSeamStroke` 里那条会盖住光的垫底色因此删除。
+                    val seamGlowRadiusPx = with(density) { BiliRadius.playerCompact.toPx() }
+                    // 1. 详情区背景层（主题背景色，z 最低；上移 r 覆盖月牙区）
                     Box(
                         modifier = Modifier
+                            .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .height(compactPlayerSpaceH)
-                            // 先裁剪再画背景：底部圆角才能裁到黑色底块本身（垫底形变终点同此形状）
-                            .clip(compactPlayerShape)
-                            .background(Color.Black)
-                            .onGloballyPositioned {
-                                coverBackdropFrame = BackdropFrame(
-                                    it.boundsInWindow(),
-                                    compactPlayerShape
+                            .height(detailBaseH + BiliRadius.playerCompact)
+                            .offset {
+                                IntOffset(
+                                    0,
+                                    (bandMorphHeightPx() - seamGlowRadiusPx).roundToInt()
                                 )
                             }
-                    ) {
-                        VideoPlayerPane(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .height(compactVideoH),
-                            viewModel = viewModel,
-                            videoTitle = videoState.detail?.title,
-                            isFull = false,
-                            onToggleFull = { isFull = true },
-                            onBackClick = handleBack,
-                            onGoHome = onGoHome
-                        )
-                    }
-                    // 竖排布局背景由外层 Column 统一绘制，详情区不再重复铺一层（减一层全屏 overdraw）
+                            .graphicsLayer { alpha = 1f - fullscreenMorph.value }
+                            .background(MaterialTheme.colorScheme.background)
+                    )
+                    // 2. 接缝光晕层：封面代表色（原色）沿 Telegram 非线性 5 档向下洒落
+                    //    （BiliPai 上游 coverGlow 同款）。**图层在简介内容之下**——光
+                    //    洒在背景上、文字清晰浮在光上，不遮挡内容（用户定稿）。
+                    //    不随 fullscreenMorph 淡退：形变期它始终贴着播放带底边，
+                    //    全屏后整层被播放带盖住，无可见影响。
                     Box(
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .height(seamGlowHeight + BiliRadius.playerCompact)
+                            .offset {
+                                IntOffset(
+                                    0,
+                                    (bandMorphHeightPx() - seamGlowRadiusPx).roundToInt()
+                                )
+                            }
+                            .then(seamGlowModifier)
+                    )
+                    // 3. 简介 / 评论区：布局固定、形变期只做位移 + 淡退（绘制期读动画值）。
+                    //    **透明背景、z 在光晕之上**——简介内容是最上层内容图层。
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .height(detailBaseH)
+                            .offset { IntOffset(0, bandMorphHeightPx().roundToInt()) }
+                            .graphicsLayer { alpha = 1f - fullscreenMorph.value }
                     ) {
                         VideoDetailPage(
                             modifier = Modifier.fillMaxSize(),
@@ -401,11 +771,56 @@ fun VideoScreen(
                             detailError = videoState.detailError,
                             commentSubject = viewModel.commentSubject,
                             contentHorizontalPad = 16.dp,
+                            detailListState = detailListState,
                             onOpenVideo = openTarget,
                             onOpenSpace = onOpenSpace,
                             onDownloadClick = downloadClick,
                             onOpenEpisode = switchEpisode,
                             onSwitchPage = switchPage
+                        )
+                    }
+                    // 播放带：黑底 + 底部圆角，高度随形变插值；底边压一道高光描边
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .playerMorphHeight(bandMorphHeightPx)
+                            // 描边必须挂在 clip **之前**：整圈圆角描边要画在裁剪轮廓
+                            // 之外、压在接缝两侧（含圆角外的垫底色）；clip 之后的
+                            // background/画面仍被裁成圆角，两不干扰
+                            .then(seamStrokeModifier)
+                            // 先裁剪再画背景：底部圆角才能裁到黑色底块本身（垫底形变终点同此形状）
+                            .clip(compactPlayerShape)
+                            .background(Color.Black)
+                            .onGloballyPositioned {
+                                // 形变期间不上报垫底帧：终点矩形只在静止态有意义，
+                                // 且避免每帧新建 BackdropFrame 触发重组
+                                val p1 = aspectMorph.value
+                                val p2 = fullscreenMorph.value
+                                if (p2 == 0f && (p1 == 0f || p1 == 1f)) {
+                                    coverBackdropFrame = BackdropFrame(
+                                        it.boundsInWindow(),
+                                        compactPlayerShape
+                                    )
+                                }
+                            }
+                    ) {
+                        VideoPlayerPane(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .playerMorphHeight(videoMorphPx)
+                                // 满屏形变终点 = 全屏分支布局（铺满窗口、无状态栏内缩）：
+                                // 用位移抵消 statusBarsPadding，提交切换时零跳变
+                                .graphicsLayer {
+                                    translationY = -statusTopPx * fullscreenMorph.value
+                                },
+                            viewModel = viewModel,
+                            videoTitle = videoState.detail?.title,
+                            isFull = false,
+                            onToggleFull = enterFullscreen,
+                            onBackClick = handleBack,
+                            onGoHome = onGoHome
                         )
                     }
                 }
@@ -464,6 +879,199 @@ fun VideoScreen(
 
 /** 封面垫底形变的目标帧：播放器容器在窗口坐标系中的矩形与收尾圆角形状。 */
 private data class BackdropFrame(val rect: Rect, val endShape: Shape)
+
+/**
+ * 播放区「形变高度」：目标高度在**布局期**从 [heightPx] 求值。
+ *
+ * Animatable 的读取落在 `layout{}` 的 measure 块里 → 动画每帧只触发一次
+ * 重新 measure/place，不重组、不进入组合期（FrameBudgetLintTest 的
+ * 「组合期不读动画值」口径）。高度超过父约束是**刻意**的：满屏形变终点
+ * 播放带要超出窗口一个状态栏高度，由播放带自身的 clip 裁掉。
+ */
+private fun Modifier.playerMorphHeight(heightPx: () -> Float): Modifier =
+    layout { measurable, constraints ->
+        val height = heightPx().roundToInt().coerceAtLeast(1)
+        val placeable = measurable.measure(
+            constraints.copy(minHeight = height, maxHeight = height)
+        )
+        layout(constraints.maxWidth.coerceAtLeast(1), height) {
+            placeable.place(0, 0)
+        }
+    }
+
+/** 接缝高光描边的线宽（dp 倍数，乘 density 得 px；dp 字面量棘轮已满）。 */
+private const val SEAM_CORE_DP = 1.2f
+
+/** 描边 rim light 的**峰值 alpha**（底边全亮处；弧段按比例起坡，见 playerSeamStroke）。 */
+private const val SEAM_STROKE_PEAK = 0.90f
+
+/**
+ * 描边亮区的**起坡行程**（相对圆角半径 r 的倍数）：渐变从 `seamY − 1.6r` 处
+ * 从 0 起坡——1r 之外（圆角上方）完全透明，1r..0.5r 是弧段，0.5r..0 是底边。
+ * 取 1.6r 让弧段上下各留一段呼吸空间，弧中段落在峰值附近而不是坡底。
+ */
+private const val SEAM_STROKE_RISE = 1.6f
+
+/** 光源取色的解码档（palette 内部还会压到 48×48 采样，档位只影响解码内存）。 */
+private val SeamTintSamplePx = 480 to 360
+
+/**
+ * 接缝**高光描边**：整圈圆角矩形轮廓线（rim light）。
+ *
+ * 这是接缝处唯一的"实体"。上一版是"底边直线 + 两端横向淡出"，直线到圆角处
+ * 直接断掉、与播放带的圆角形状对不上（用户反馈的问题 1）；本版改成与
+ * `.clip(CompactPlayerShape)` 同构的 `drawRoundRect` 整圈描边，亮度沿**垂直
+ * 渐变**走线：底边全亮（[SEAM_STROKE_PEAK]）→ 圆角弧段起坡（弧起点
+ * ≈0.42·峰值、弧中段 ≈0.75·峰值）→ 圆角上方（[SEAM_STROKE_RISE]·r 之外）
+ * 完全透明。描边跟着圆角收边，两角处仍读得出一条连续的高光走线。
+ *
+ * **描边色 = 接缝光晕色（封面代表色）**（用户定稿"描边与下方光同一个颜色"）：
+ * 视频边缘发光、光从描边沿圆角流下、与下方光晕同源同色，是一个整体的"光源"。
+ *
+ * **本场地（圆角月牙区）由接缝层接管，这里刻意不垫底色**：早期为实现浅色主题
+ * 的"黑耳朵"垫过一整条底部 r 带的背景色矩形——但它把月牙区涂成不透明，
+ * 正好盖住了从下层透上来的光晕（真机症状："光色没有在圆角处显示"）。
+ * 现在月牙区由"上移一个圆角半径的接缝背景层 + 光晕层"提供底色与光，
+ * 浅色主题的黑耳朵与圆角处的光同时由那一套图层解决。
+ *
+ * 静态绘制、零逐帧成本。brush 在 drawWithCache 的 cache 块里按当前尺寸构建：
+ * 静止态零分配；形变期间 size 逐帧变化会逐帧重建（几个 Pair 的小分配，
+ * 动画结束即停）。**挂载点必须在 `.clip(CompactPlayerShape)` 之前**——
+ * 描边要画在裁剪轮廓之外。
+ */
+private fun Modifier.playerSeamStroke(
+    strokeBase: Color,
+    cornerRadius: Dp,
+): Modifier = drawWithCache {
+    val w = size.width
+    val seamY = size.height
+    if (w <= 0f || seamY <= 0f) {
+        onDrawWithContent { drawContent() }
+    } else {
+        val r = cornerRadius.toPx()
+        val corePx = SEAM_CORE_DP * density
+        // 亮区行程从 seamY − 1.6r 起坡（r 以上完全透明）；弧起点/弧中段按
+        // 「弧起点 ≈0.42·峰值、弧中段 ≈0.75·峰值」落在渐变的对应高度上。
+        val gradStart = (seamY - SEAM_STROKE_RISE * r).coerceAtLeast(0f)
+        val span = (seamY - gradStart).coerceAtLeast(1f)
+        val strokeBrush = Brush.verticalGradient(
+            0.00f to Color.Transparent,
+            ((r * 0.6f) / span).coerceIn(0f, 1f) to
+                strokeBase.copy(alpha = SEAM_STROKE_PEAK * 0.42f),
+            ((r * 1.1f) / span).coerceIn(0f, 1f) to
+                strokeBase.copy(alpha = SEAM_STROKE_PEAK * 0.75f),
+            1.00f to strokeBase.copy(alpha = SEAM_STROKE_PEAK),
+            startY = gradStart,
+            endY = seamY
+        )
+        onDrawWithContent {
+            drawContent()
+            drawRoundRect(
+                brush = strokeBrush,
+                topLeft = Offset.Zero,
+                size = Size(w, seamY),
+                cornerRadius = CornerRadius(r, r),
+                style = Stroke(width = corePx, join = StrokeJoin.Round)
+            )
+        }
+    }
+}
+
+/**
+ * 接缝光晕的峰值 alpha——**BiliPai 上游「封面光晕渐变」（236c6a442）的 coverGlow 原值**
+ * （深色 0.48 / 浅色 0.38），真机验证过的观感基准。
+ *
+ * 为什么不再压低：接缝光试过两轮"更微妙"的方案——(a) 向白 lerp 的低峰值淡彩
+ * （0.22/0.16）、(b) Screen 提亮的双层灰白光（halo+spill）——真机都被读作"廉价/
+ * 灰雾"。上游卡片 coverGlow 之所以好看，靠的就是**封面原色 + 高近一倍的峰值**：
+ * 颜色真实地"渗"下来才有光感，冲淡颜色只会得到一层脏雾。
+ */
+private const val SEAM_GLOW_PEAK_DARK = 0.48f
+private const val SEAM_GLOW_PEAK_LIGHT = 0.38f
+
+/**
+ * 下滑进入全屏的提交阈值（进度比例）。
+ *
+ * 进度是「手指 y」在「播放带底边 → 窗口底边」区间上的直接映射，0.5 即
+ * 拖过全程一半：播放带此时已盖住约半屏，继续拖完比回弹更符合预期。
+ */
+private const val PULL_FULLSCREEN_COMMIT = 0.5f
+
+
+/**
+ * 下滑进入全屏的手势（#3），挂在竖排外层 Box 上。
+ *
+ * ## 为什么走 Initial pass
+ * 详情列表（LazyColumn）在 API 31+ 默认带 overscroll stretch：在列表顶部继续
+ * 下拉时**列表自己会消费掉这些事件**驱动拉伸动画。若在 Main pass 里等
+ * 「子节点不消费」，这根手势在现代设备上永远等不到。Initial pass 是
+ * 「父先于子」的通道：在这里裁决——列表还能向下滚（[canListScrollDown]）
+ * 就一律放行；已在顶边才接管并 consume，子节点（列表 / 横向 Pager /
+ * 按钮）因此完全看不到这些事件，overscroll 也不会被触发。
+ *
+ * ## 直接操纵
+ * 进度不跟阈值阶梯走，而是把手指 y 线性映射到「播放带底边 → 窗口底边」
+ * 区间：播放带底边全程贴着手指生长（[progress] 由手指位置 snapTo），
+ * 松手才按 [onSettle] 提交（true）或回弹（false）。
+ *
+ * ## 触发区
+ * 只有按下点在播放带**下方**（简介区域）才接管；播放带上的手势归播放器
+ * 浮层（亮度/音量/进度），两者通过按下点分区，不互相抢。
+ */
+private fun Modifier.pullDownToFullscreen(
+    scope: CoroutineScope,
+    progress: Animatable<Float, *>,
+    zoneTopPx: () -> Float,
+    windowBottomPx: Float,
+    canListScrollDown: () -> Boolean,
+    onSettle: (Boolean) -> Unit,
+): Modifier = pointerInput(progress, windowBottomPx) {
+    val slop = viewConfiguration.touchSlop
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            ?: return@awaitEachGesture
+        // 按下点在播放带上 → 整体放行（播放器浮层的手势）
+        if (down.position.y <= zoneTopPx()) return@awaitEachGesture
+        var tracking = false
+        var lastX = down.position.x
+        var lastY = down.position.y
+        var baseY = down.position.y
+        var baseP = 0f
+        var accumDx = 0f
+        var accumDy = 0f
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (!change.pressed) {
+                if (tracking) onSettle(progress.value >= PULL_FULLSCREEN_COMMIT)
+                break
+            }
+            accumDx += change.position.x - lastX
+            accumDy += change.position.y - lastY
+            lastX = change.position.x
+            lastY = change.position.y
+            if (!tracking) {
+                // 起手条件：向下越过 touchSlop、纵向占优、列表已到顶
+                // （列表还能向下滚时让位，避免抢走详情区滚动）
+                if (accumDy > slop && abs(accumDy) > abs(accumDx) && !canListScrollDown()) {
+                    tracking = true
+                    baseY = lastY
+                    baseP = progress.value
+                }
+            }
+            if (tracking) {
+                val span = (windowBottomPx - zoneTopPx()).coerceAtLeast(1f)
+                val next = (baseP + (lastY - baseY) / span).coerceIn(0f, 1f)
+                // snapTo 是挂起函数，而 awaitEachGesture 的块运行在
+                // @RestrictsSuspension 的 AwaitPointerEventScope 里（只能调用
+                // 该 scope 的成员挂起函数）—— 经外部 scope 派发。Main 派发器
+                // FIFO，逐事件落定的顺序即手指顺序，settle 的 animateTo 排在其后。
+                scope.launch { progress.snapTo(next) }
+                change.consume()
+            }
+        }
+    }
+}
 
 /** [BackdropFrame.endShape] 的四角圆角半径（px），供形变插值。 */
 private data class BackdropCornerPx(

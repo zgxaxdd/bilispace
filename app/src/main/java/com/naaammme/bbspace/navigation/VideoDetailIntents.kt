@@ -17,6 +17,12 @@ const val EXTRA_COVER_LARGE = "bbspace.extra.VIDEO_DETAIL_COVER_LARGE"
 const val EXTRA_FROM_SEAMLESS = "bbspace.extra.VIDEO_DETAIL_FROM_SEAMLESS"
 
 /**
+ * Intent extra：「刷视频模式」标记（首页顶栏入口 → 直接进全屏上下滑）。
+ * story 模式下详情页没有紧凑态：isFull 常驻 true，返回键/「全屏」钮都是关闭页面。
+ */
+const val EXTRA_STORY_MODE = "bbspace.extra.VIDEO_DETAIL_STORY_MODE"
+
+/**
  * [VideoTarget] 与 Intent extra 的双向映射。
  *
  * VideoTarget 是纯值类型（sealed + data class），直接平铺进 extra：
@@ -120,16 +126,19 @@ object VideoTargetSerializer {
     }
 }
 
-/** 构造打开视频详情 Activity 的 Intent；无缝动画时同一 bundle 作为 options 传入。 */
+/** 构造打开视频详情 Activity 的 Intent；无缝动画时同一 bundle 作为 options 传入。
+ *  story 模式下详情直接以全屏上下滑呈现（首页顶栏「刷视频」入口）。 */
 fun videoDetailIntent(
     context: Context,
     target: VideoTarget,
     coverUrl: String?,
     coverLarge: Boolean = false,
-    fromSeamless: Boolean = false
+    fromSeamless: Boolean = false,
+    storyMode: Boolean = false
 ): Intent = Intent(context, VideoDetailActivity::class.java).apply {
     VideoTargetSerializer.putTarget(this, target)
     putExtra(EXTRA_COVER_URL, coverUrl)
     putExtra(EXTRA_COVER_LARGE, coverLarge)
     putExtra(EXTRA_FROM_SEAMLESS, fromSeamless)
+    putExtra(EXTRA_STORY_MODE, storyMode)
 }

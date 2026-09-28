@@ -137,6 +137,16 @@ object BiliRadius {
     val playerControl = 17.dp
 
     /**
+     * 封面角标（时长 / 人气 / 大会员标等）圆角——一个角色一个来源。
+     *
+     * 首页 `CoverBadgeShape`、排行 `RankCoverBadge`、直播 tab 的人气/分区标、
+     * 详情页「大会员」「当前播放」标此前各写各的（`8.dp` 字面量 / `shapes.extraSmall`
+     * 混用，后者随 [CornerStyle] 在 4~12dp 间漂移），同一视觉角色三种来源。
+     * 角标高度约 18~20dp，8dp 是「圆角可读但不圆到胶囊」的 iOS 徽章惯用值。
+     */
+    val badge = 8.dp
+
+    /**
      * 卡片**上**两角圆角（封面用）。
      *
      * 为什么卡片要拆成上下两半各自圆角：卡片是「封面 + 信息区」两块内容拼成的，

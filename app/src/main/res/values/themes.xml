@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 窗口层过渡：详情 Activity 打开/关闭的统一兜底动画。
+         根因：app 内一切"非 OplusViewSeamless"的打开/退出（无锚点深链、无缝注册
+         失败回退、finishWithDefaultTransition）此前都落在系统默认窗口动画——
+         ColorOS 默认"打开=水平滑动、关闭=缩放"，两个方向风格不一致，正是用户
+         反馈的"顽固过渡 bug"。统一成 96% 缩放 + 淡入淡出（与 ForegroundEnterBox
+         注明的 ColorOS 设计语言同源、与无缝 morph 的"从卡片尺度长出来"同族）。
+         无缝 morph 正常接管时由系统覆盖这套动画，互不干扰。
+         MainActivity 与 VideoDetailActivity 共用 Theme.Bbspace，天然两边一致。 -->
+    <style name="WindowAnimation.Bbspace" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/window_open_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/window_open_exit</item>
+        <item name="android:activityCloseEnterAnimation">@anim/window_close_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/window_close_exit</item>
+    </style>
+
     <style name="Theme.Bbspace" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@null</item>
+        <item name="android:windowAnimationStyle">@style/WindowAnimation.Bbspace</item>
     </style>
 </resources>

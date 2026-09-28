@@ -388,7 +388,12 @@ internal fun VideoPlayerPane(
     isFull: Boolean,
     onToggleFull: () -> Unit,
     onBackClick: () -> Unit,
-    onGoHome: () -> Unit
+    onGoHome: () -> Unit,
+    /**
+     * 上下滑翻页会话（全屏 pager）激活：垂直拖动让位给 pager 翻页，
+     * 亮度/音量手势禁用（水平 seek、单击/双击/长按不受影响）。
+     */
+    swipePagingActive: Boolean = false
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -587,7 +592,8 @@ internal fun VideoPlayerPane(
                 onToggleFull = {
                     showCtrl = true
                     onToggleFull()
-                }
+                },
+                swipePagingActive = swipePagingActive
             )
 
             // A5：控制层显隐动画（fadeIn + 4dp 轻位移 200ms Standard，退出 150ms fadeOut）
@@ -842,7 +848,9 @@ private fun VideoPlayerOverlay(
     onShowA: () -> Unit,
     onShowQ: () -> Unit,
     onShowSp: () -> Unit,
-    onToggleFull: () -> Unit
+    onToggleFull: () -> Unit,
+    // 上下滑翻页会话激活：垂直拖动让位给 pager（见 videoGestures 的参数注释）
+    swipePagingActive: Boolean = false
 ) {
     val context = LocalContext.current
     val gestureState = remember { VideoGestureState() }
@@ -962,7 +970,9 @@ private fun VideoPlayerOverlay(
                             ?: state.playbackSource?.durationMs?.coerceAtLeast(0L)
                             ?: 0L
                     },
-                    zoomActive = { zoomState.isZoomed }
+                    zoomActive = { zoomState.isZoomed },
+                    // pager 会话激活：垂直拖动让位翻页（修「上下滑被亮度/音量抢走」）
+                    verticalDragPassthrough = { swipePagingActive }
                 )
                 // 链内側：Main pass 先于 videoGestures；双指/已放大时接管，其余放行
                 .playerPinchZoom(enabled = isFull, state = zoomState)

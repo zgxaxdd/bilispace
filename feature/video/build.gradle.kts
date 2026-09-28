@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":core:auth"))
     implementation(project(":core:favorite"))
     implementation(project(":core:playback"))
+    implementation(project(":core:feed"))
     implementation(project(":core:model"))
     implementation(project(":core:common"))
     implementation(project(":core:designsystem"))

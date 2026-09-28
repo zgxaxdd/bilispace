@@ -58,6 +58,22 @@ import com.naaammme.bbspace.core.model.rank.RankType
 import com.naaammme.bbspace.core.model.rank.RankVideoItem
 
 /**
+ * 排行卡片容器形状：与推荐页 `FeedCardShape` 同源（[BiliRadius.card]），整卡大圆角。
+ *
+ * 此前是 `MaterialTheme.shapes.large`（ROUNDED 24 / iOS 16），随 [CornerStyle] 档位
+ * 漂移、且与封面自身的 [BiliRadius.card] 是两套来源；统一后卡片外壳与封面同一语言。
+ * 文件级常量：composable 体内就地构造 Shape 被 ListAllocationStructureTest 禁止。
+ */
+private val RankCardShape = RoundedCornerShape(BiliRadius.card)
+
+/**
+ * 类型/期数选择胶囊：与 [BiliRadius.groupedList] 同族（16dp）。
+ * chip 实测高 27~31dp，16dp 即全圆端胶囊；此前 `shapes.extraLarge` 随档位
+ * 在 20~32dp 间漂移，且 CIRCULAR 档下 28dp 会在矮 chip 上裁成方角。
+ */
+private val RankChipShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/**
  * 首页「排行」页：热门/分区排行榜（UGC rid）、PGC 季度排行、每周必看、入站必刷。
  * 分区表与接口对照 PiliPlus pages/rank 与 lib/http/video.dart。
  * 类型选择行作为网格 header 随内容滚动（与推荐页顶栏行为一致，不固定悬浮）。
@@ -164,7 +180,8 @@ fun RankScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(4f / 3f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                    // 骨架占位 = 卡片同形状（此前 12.dp 裸字面量，与卡片语言脱节）
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RankCardShape)
             )
         }
     ) { entry ->
@@ -202,7 +219,7 @@ private fun RankSelectors(
             RankType.entries.forEach { type ->
                 val selectedNow = type == state.type
                 Surface(
-                    shape = MaterialTheme.shapes.extraLarge,
+                    shape = RankChipShape,
                     color = if (selectedNow) {
                         MaterialTheme.colorScheme.primary
                     } else {
@@ -234,7 +251,7 @@ private fun RankSelectors(
                 state.seriesList.forEach { entry ->
                     val selectedNow = entry.number == state.seriesNumber
                     Surface(
-                        shape = MaterialTheme.shapes.extraLarge,
+                        shape = RankChipShape,
                         color = if (selectedNow) {
                             MaterialTheme.colorScheme.tertiaryContainer
                         } else {
@@ -306,7 +323,8 @@ private fun RankVideoCard(
             CoverExpandOrigin.record(target = target, coverUrl = item.cover, coverLarge = false)
             onOpenVideo(target)
         },
-        shape = MaterialTheme.shapes.large,
+        // 卡片外壳与封面同一语言（此前 shapes.large 与封面 card 是两套来源）
+        shape = RankCardShape,
         containerColor = Color.Transparent,
         // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
         modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
@@ -424,7 +442,7 @@ private fun RankPgcCard(
             onOpenVideo(currentTarget)
         },
         enabled = target != null,
-        shape = MaterialTheme.shapes.large,
+        shape = RankCardShape,
         containerColor = Color.Transparent,
         // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
         modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
@@ -481,7 +499,7 @@ private fun RankPgcCard(
 private fun RankCoverBadge(text: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(BiliRadius.badge),
         color = Color.Black.copy(alpha = 0.62f)
     ) {
         Text(

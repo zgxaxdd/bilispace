@@ -1041,7 +1041,7 @@ private val FeedCardCoverShape: Shape = BiliRadius.topRounded(BiliRadius.card)
 private val FeedCardInfoShape: Shape = BiliRadius.bottomRounded(BiliRadius.card)
 
 /** 封面角标（时长 / 播放量）形状。 */
-private val CoverBadgeShape = RoundedCornerShape(8.dp)
+private val CoverBadgeShape = RoundedCornerShape(BiliRadius.badge)
 
 // ── 封面预加载参数（见 HomeVideoPage 内 preload effect 的注释）────────────────
 /** 合并"手指停下/惯性将尽"后的抖动；滚动中不走这个值（见 preload effect 修正点 2）。 */

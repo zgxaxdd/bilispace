@@ -28,3 +28,4 @@ desktop.ini
 
 # 本地打包产物与真机走查截图（体积大、可重新生成，不入库）
 dist/
+docs/ai-loop/shots/

@@ -6,16 +6,17 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -24,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsCompat
@@ -33,11 +35,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.feature.live.component.LivePlaybackBody
 import com.naaammme.bbspace.feature.live.player.LivePlayerPane
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveScreen(
     onBack: () -> Unit,
@@ -149,24 +151,31 @@ fun LiveScreen(
             )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
-                TopAppBar(
-                    title = {
-                        TopBarPanel(
-                            popularCount = popularCount,
-                            watchedText = roomPanel.watchedText,
-                            onlineRankText = roomPanel.onlineRankText,
-                            rankChangedText = roomPanel.rankChangedText
+                // 顶栏：自绘行取代 M3 TopAppBar——去掉 M3 自带的 surface 底色与 64dp
+                // 高度，返回钮 + 房间数据直接铺在页面背景上，与首页/排行等吃页面
+                // 背景的页内 chrome 同一语言（直播间此前是全 app 唯一还在用旧
+                // TopAppBar 的页面，观感上"没适配"）。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = handleBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = MaterialTheme.colorScheme.onBackground
                         )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = handleBack) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回"
-                            )
-                        }
                     }
-                )
+                    TopBarPanel(
+                        popularCount = popularCount,
+                        watchedText = roomPanel.watchedText,
+                        onlineRankText = roomPanel.onlineRankText,
+                        rankChangedText = roomPanel.rankChangedText,
+                        modifier = Modifier.padding(end = BiliSpacing.lg)
+                    )
+                }
 
                 LivePlaybackBody(
                     route = route,
@@ -197,7 +206,8 @@ private fun TopBarPanel(
     popularCount: Long,
     watchedText: String?,
     onlineRankText: String?,
-    rankChangedText: String?
+    rankChangedText: String?,
+    modifier: Modifier = Modifier
 ) {
     val parts = listOfNotNull(
         popularCount.takeIf { it > 0L }?.let { "人气 $it" },
@@ -209,7 +219,9 @@ private fun TopBarPanel(
     Text(
         text = parts.joinToString(" · "),
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = modifier
     )
 }
 

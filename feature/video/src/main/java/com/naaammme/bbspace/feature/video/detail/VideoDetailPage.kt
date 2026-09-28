@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -84,6 +85,7 @@ import com.naaammme.bbspace.core.designsystem.component.VideoDetailInfoSkeleton
 import com.naaammme.bbspace.core.designsystem.component.VideoRelateCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
 import com.naaammme.bbspace.core.common.ShareUtils
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.model.CommentSubject
 import com.naaammme.bbspace.core.model.QualityOption
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
@@ -120,6 +122,9 @@ internal fun VideoDetailPage(
     detailError: String?,
     commentSubject: CommentSubject?,
     contentHorizontalPad: Dp,
+    // 简介区列表状态由 VideoScreen 提供（键仍是 aidKey）：下滑进全屏手势要用它
+    // 判断「列表还能不能向下滚」来决定放行还是接管（见 pullDownToFullscreen）。
+    detailListState: LazyListState,
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit,
     onDownloadClick: () -> Unit,
@@ -132,7 +137,6 @@ internal fun VideoDetailPage(
     var tagOn by rememberSaveable(aidKey) { mutableStateOf(false) }
     var sheet by remember(aidKey) { mutableStateOf<DetailSheet?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val detailListState = remember(aidKey) { LazyListState() }
     val commentListState = remember(aidKey) { LazyListState() }
     val commentThreadListState = remember(aidKey) { LazyListState() }
     val pagerState = rememberPagerState(pageCount = { 2 })
@@ -548,7 +552,7 @@ internal fun QualityOptionItem(
                     Spacer(modifier = Modifier.width(8.dp))
                     Surface(
                         color = MaterialTheme.colorScheme.primary,
-                        shape = MaterialTheme.shapes.extraSmall
+                        shape = RoundedCornerShape(BiliRadius.badge)
                     ) {
                         Text(
                             text = "大会员",

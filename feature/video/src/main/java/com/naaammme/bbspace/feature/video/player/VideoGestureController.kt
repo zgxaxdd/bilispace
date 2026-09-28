@@ -116,7 +116,13 @@ fun Modifier.videoGestures(
     isPlaying: () -> Boolean,
     positionMs: () -> Long,
     durationMs: () -> Long,
-    zoomActive: () -> Boolean = { false }
+    zoomActive: () -> Boolean = { false },
+    /**
+     * 上下滑翻页会话（全屏 pager）激活时置 true：**垂直拖动整体让位给 pager**
+     * （不判定亮度/音量、不消费事件，pager 从 down 起就能追踪翻页）。
+     * 水平拖动（进度 seek）、单击/双击/长按不受影响——与缩放平移的让位同款模式。
+     */
+    verticalDragPassthrough: () -> Boolean = { false }
 ): Modifier {
     val curToggleControls by rememberUpdatedState(onToggleControls)
     val curTogglePlay by rememberUpdatedState(onTogglePlay)
@@ -133,6 +139,7 @@ fun Modifier.videoGestures(
     val curPositionMs by rememberUpdatedState(positionMs)
     val curDurationMs by rememberUpdatedState(durationMs)
     val curZoomActive by rememberUpdatedState(zoomActive)
+    val curVerticalDragPassthrough by rememberUpdatedState(verticalDragPassthrough)
     val visibleStatusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val hiddenStatusBarHeight = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues()
         .calculateTopPadding()
@@ -244,6 +251,14 @@ fun Modifier.videoGestures(
                                     break
                                 }
                                 val isHorizontal = abs(totalDelta.x) > abs(totalDelta.y)
+                                // 上下滑翻页会话激活：垂直拖动整体让位给 pager（不判定
+                                // 亮度/音量、全程不消费，pager 从 down 起自行追踪翻页）。
+                                // 这是「全屏刷视频时上下滑被亮度/音量抢走」的修复点。
+                                if (!isHorizontal && curVerticalDragPassthrough()) {
+                                    state.resetDrag()
+                                    waitForAllUp()
+                                    break
+                                }
                                 phase = Phase.Drag
                                 val dragType = when {
                                     isHorizontal -> DragType.Seek

@@ -359,7 +359,13 @@ class VideoDetailRepository @Inject constructor(
             val ids = ResolvedVideoIds(
                 aid = aid,
                 cid = cid,
-                bvid = VideoTargetTool.bvid(basic.uri)
+                // relate 卡的 basic.uri 是 **aid 格式**（`bilibili://video/{aid}`），
+                // bvid(uri) 解析为空 —— 而下游（竖屏上下滑的页身份、历史、弹幕、
+                // 上报、分享）都以 bvid 为主键，裸 aid 会一路走兜底分支。
+                // **BiliPai 的关联推荐是独立接口、JSON 直接带 bvid，所以上游没有这个问题**；
+                // bbspace 用同一份 gRPC 响应对齐：本地换算补齐（BiliPai IdUtils 同款算法）。
+                // 只在解析不到时兜底，且 avToBv 对超范围 aid 返回 null（宁可不给也不给错的）。
+                bvid = VideoTargetTool.bvid(basic.uri) ?: VideoTargetTool.avToBv(aid)
             )
             val title = basic.title.ifBlank { return@mapNotNull null }
             val viewText = card.av.stat.vt.text.ifBlank {

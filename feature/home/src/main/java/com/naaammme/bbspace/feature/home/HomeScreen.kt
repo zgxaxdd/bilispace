@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
@@ -66,6 +67,12 @@ import com.naaammme.bbspace.core.designsystem.glass.LocalLiquidBackdrop
 import com.naaammme.bbspace.core.designsystem.glass.glassEffect
 import com.naaammme.bbspace.core.designsystem.glass.glassFrameRefresh
 import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import com.naaammme.bbspace.core.designsystem.seamless.LocalStoryCardOpener
+import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
+import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchorState
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
+import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
@@ -104,6 +111,7 @@ fun HomeScreen(
     onOpenDynamic: (String) -> Unit = {},
     onOpenArticle: (String, Int) -> Unit = { _, _ -> },
     onOpenListenItem: (Long, Int, Long, String, String, String) -> Unit = { _, _, _, _, _, _ -> },
+    onEnterStoryMode: (VideoTarget) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
@@ -314,18 +322,54 @@ fun HomeScreen(
         val topBarScrolling by remember {
             derivedStateOf { topBarOffsetProvider() > 0f }
         }
+        // ── 刷视频模式入口（顶栏按钮）────────────────────────────────────────
+        // 锚点 = 按钮自身上的零绘制 View（SeamlessAnchor），OPPO 无缝 morph 把按钮
+        // 位置长成全屏刷视频页；decorateAnchor=false + fallbackColor=按钮底色，
+        // 两方向都是体面的纯色 morph（封面拉伸失真在 48dp 锚点上不可读，弃用）。
+        // 无缝不可用时回退 onEnterStoryMode（普通 startActivity，走统一窗口动画）。
+        val storyOpener = LocalStoryCardOpener.current
+        val storyAnchorState = rememberSeamlessAnchorState()
+        val storySpec = rememberSeamlessCardSpec(
+            shape = RoundedCornerShape(BiliRadius.dockChip),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+        val canStorySeamless = storyOpener != null &&
+            OplusViewSeamlessCompat.isVersionSupported()
+        val enterStoryMode: () -> Unit = {
+            // 流第一条 = 刷视频的起点（页 0）；无视频卡（全直播/空流）时无操作
+            val first = state.items.firstOrNull { it.target != null && it.liveRoute == null }
+            val target = first?.target
+            if (target != null) {
+                val opened = if (canStorySeamless && storyOpener != null && storyAnchorState.anchor != null) {
+                    storyOpener.tryOpen(
+                        anchor = storyAnchorState.anchor,
+                        target = target,
+                        coverUrl = first.cover,
+                        coverLarge = false,
+                        anchorRadiusPx = storySpec.radiusPx,
+                        fallbackColor = storySpec.fallbackColor,
+                        decorateAnchor = false
+                    )
+                } else {
+                    false
+                }
+                if (!opened) {
+                    onEnterStoryMode(target)
+                }
+            }
+        }
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
-            singleColumn = singleColumn,
             topBarOffsetPxProvider = topBarOffsetProvider,
             isScrolling = topBarScrolling,
-            onToggleSingleColumn = viewModel::toggleHomeSingleColumn,
+            onEnterStoryMode = enterStoryMode,
             onNavigateToSearch = onNavigateToSearch,
             onNavigateToProfile = onNavigateToProfile,
             profileAvatar = profileAvatar,
             onSelectTab = { page ->
                 scope.launch { pagerState.animateScrollToPage(page) }
             },
+            storyAnchorState = storyAnchorState,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .onSizeChanged { size ->
@@ -343,17 +387,17 @@ fun HomeScreen(
 @Composable
 private fun HomeTopBar(
     selectedIndex: Int,
-    singleColumn: Boolean,
     // 偏移量延迟读取：offset 块内取值，滚动时只重布局顶栏、不重组上游 scope
     topBarOffsetPxProvider: () -> Float,
     // 是否正在滚动。由调用方用 derivedStateOf 收成布尔后传入 —— 不要在组合期直接读
     // 像素级 offset state（详见调用点注释）。
     isScrolling: Boolean,
-    onToggleSingleColumn: () -> Unit,
+    onEnterStoryMode: () -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToProfile: () -> Unit,
     profileAvatar: String?,
     onSelectTab: (Int) -> Unit,
+    storyAnchorState: SeamlessAnchorState,
     modifier: Modifier = Modifier
 ) {
     val isIOS = LocalUiStyle.current == UiStyle.IOS
@@ -452,16 +496,18 @@ private fun HomeTopBar(
                     )
                 }
             }
-            IconButton(onClick = onToggleSingleColumn) {
-                Icon(
-                    imageVector = if (singleColumn) {
-                        Icons.Filled.Menu
-                    } else {
-                        Icons.AutoMirrored.Filled.List
-                    },
-                    contentDescription = if (singleColumn) "切换为双列布局" else "切换为单列大图",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // 刷视频模式入口（原「单/双列布局切换」按钮）：OPPO 无缝 morph 从按钮
+            // 长成全屏刷视频页； SeamlessAnchor 是铺在按钮上的零绘制锚点 View
+            // （must 在内容 z 序之下，与首页卡片的锚点同款）。
+            Box {
+                IconButton(onClick = onEnterStoryMode) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "进入刷视频模式",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                SeamlessAnchor(storyAnchorState, Modifier.matchParentSize())
             }
             IconButton(onClick = onNavigateToProfile) {
                 AvatarImage(

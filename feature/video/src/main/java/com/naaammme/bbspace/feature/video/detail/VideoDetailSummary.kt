@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
@@ -63,6 +65,13 @@ import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoDetail
 import com.naaammme.bbspace.core.model.VideoOwner
 import com.naaammme.bbspace.feature.video.VideoInteractionState
+
+/**
+ * 详情页简介内容卡（[CapsuleCard]）形状：与全 app 卡片同一来源（[BiliRadius.card]），
+ * 不随 CornerStyle 档位漂移。iOS 档下与原 extraLarge 等值（20dp），MATERIAL 档从
+ * 32dp 收敛进统一的大圆角语言。
+ */
+private val DetailContentCardShape = RoundedCornerShape(BiliRadius.card)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -394,7 +403,9 @@ internal fun CapsuleCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
+        // 简介内容卡与全 app 卡片同一语言（BiliRadius.card=20）；此前
+        // shapes.extraLarge 随 CornerStyle 档位在 20~32dp 漂移
+        shape = DetailContentCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )

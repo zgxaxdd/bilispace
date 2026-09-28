@@ -16,14 +16,20 @@ import java.io.File
  * 当下行为也一模一样，只在"转屏后/进程被杀后回来"那一刻才发现位置没了。
  * 这类缺陷没有任何静态报错，所以它需要一个测试。
  *
- * ## 为什么 VideoDetailPage 的三处直接构造是**允许**的
+ * ## 为什么详情页这几处直接构造是**允许**的
  *
- * 它落在 `remember(aidKey) { ... }` 里：换一条视频就必须重置位置，这是需求而不是疏忽；
+ * 它们落在 `remember(aidKey) { ... }` 里：换一条视频就必须重置位置，这是需求而不是疏忽；
  * 而 `VideoDetailActivity` 在 manifest 里声明了
  * `configChanges="orientation|screenSize|screenLayout|keyboardHidden"`，
  * 转屏不会重建 Activity，所以这里拿不到"saveable"也不是缺陷。
- * 本测试把它钉成**恰好三处、且必须带 aidKey**：多一处、或脱离 aidKey 用在别处，
+ * 本测试把它们钉成**恰好三处、且必须带 aidKey**：多一处、或脱离 aidKey 用在别处，
  * 就是在别的地方重新引入那个静默缺陷。
+ *
+ * 2026-09-27 变更记录：详情列表状态从 `VideoDetailPage` **提升到 VideoScreen**
+ * （下滑进全屏手势要在父层查询「列表还能不能向下滚」，见
+ * `VideoScreen.pullDownToFullscreen` 的 canListScrollDown）。豁免随之拆成两半：
+ * VideoScreen 1 处（详情）+ VideoDetailPage 2 处（评论 / 楼中评论），合计仍是 3 处、
+ * 仍全部按 aid 归键 —— 不变式（换视频即重置位置）原样保留，只是搬了家。
  */
 class ScrollStatePersistenceStructureTest {
 
@@ -58,34 +64,46 @@ class ScrollStatePersistenceStructureTest {
      */
     @Test
     fun rawListStateConstructionIsContained() {
-        val offenders = mainSources.filter { it.name != "VideoDetailPage.kt" }.flatMap { file ->
-            codeLines(file).mapIndexedNotNull { index, line ->
-                if (RAW_LIST_STATE.containsMatchIn(line)) "${file.name}:${index + 1}" else null
+        val offenders = mainSources
+            .filter { it.name != "VideoDetailPage.kt" && it.name != "VideoScreen.kt" }
+            .flatMap { file ->
+                codeLines(file).mapIndexedNotNull { index, line ->
+                    if (RAW_LIST_STATE.containsMatchIn(line)) "${file.name}:${index + 1}" else null
+                }
             }
-        }
         assertTrue(
             "以下位置直接构造了列表状态，绕过了 rememberLazyListState()/rememberLazyStaggeredGridState()：" +
                 "${offenders.joinToString()}。这些工厂内部带 Saver，直接构造的没有 —— " +
                 "差别只在转屏/进程重启后才显现，所以既不报错也难在走查里被发现。" +
-                "（唯一豁免：VideoDetailPage 里按 aidKey 重置的那几处，见本类注释。）",
+                "（唯一豁免：VideoDetailPage 与 VideoScreen 里按 aid 归键的那几处，见下条断言。）",
             offenders.isEmpty()
         )
     }
 
-    /** 豁免清单本身也要被钉住：恰好三处，且都在 `remember(aidKey)` 里。 */
+    /**
+     * 豁免清单本身也要被钉住：恰好三处，且都在 `remember(aidKey)` 里。
+     *
+     * 三处的分布（2026-09-27 起）：VideoScreen 1 处（详情列表，供下滑进全屏手势
+     * 查询可滚状态）+ VideoDetailPage 2 处（评论 / 楼中评论）。提升前后合计不变，
+     * 都必须按 aid 归键 —— 换视频即重置位置。
+     */
     @Test
     fun videoDetailExemptionStaysNarrow() {
-        val lines = sourceOf("detail${FS}VideoDetailPage.kt")
-        val raw = countMatching(lines, RAW_LIST_STATE.pattern)
-        val keyed = countMatching(lines, """remember\(aidKey\)\s*\{\s*Lazy(StaggeredGrid|List)?State\(\s*\)""")
+        val screen = sourceOf("VideoScreen.kt")
+        val page = sourceOf("detail${FS}VideoDetailPage.kt")
+        val raw = countMatching(screen, RAW_LIST_STATE.pattern) +
+            countMatching(page, RAW_LIST_STATE.pattern)
+        val keyed = countMatching(
+            screen,
+            """remember\(videoState\.ids\.aid\.takeIf\s*\{\s*it\s*>\s*0L\s*\}\s*\)\s*\{\s*LazyListState\(\s*\)"""
+        ) + countMatching(page, """remember\(aidKey\)\s*\{\s*LazyListState\(\s*\)""")
         assertTrue(
-            "VideoDetailPage 的直接构造应为 3 处（详情/评论/楼中评论列表），实际 $raw 处。" +
-                "多了要说清楚为什么，少了要同步这条断言。",
+            "详情/评论列表的直接构造应为 3 处（VideoScreen 详情 1 + VideoDetailPage 评论/楼中评论 2），" +
+                "实际 $raw 处。多了要说清楚为什么，少了要同步这条断言。",
             raw == 3
         )
         assertTrue(
-            "VideoDetailPage 的三处直接构造都必须包在 remember(aidKey) 里" +
-                "（换视频即重置位置），实际带 key 的只有 $keyed 处。",
+            "三处直接构造都必须按 aid 归键（换视频即重置位置），实际带 key 的只有 $keyed 处。",
             keyed == 3
         )
     }

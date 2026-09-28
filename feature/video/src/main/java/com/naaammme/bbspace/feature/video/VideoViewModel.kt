@@ -6,6 +6,8 @@ import androidx.media3.common.Player
 import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.feed.FeedRepository
+import com.naaammme.bbspace.core.feed.StoryFeedRepository
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
@@ -31,6 +33,11 @@ import com.naaammme.bbspace.core.sponsorblock.SbSegment
 import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import com.naaammme.bbspace.core.video.VideoActionRepository
+import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
+import com.naaammme.bbspace.feature.video.swipe.appendSwipeEntries
+import com.naaammme.bbspace.feature.video.swipe.swipeEntriesFromRelates
+import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromFeedItem
+import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromStory
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -110,10 +117,20 @@ class VideoViewModel @Inject constructor(
     private val sponsorBlockClient: SponsorBlockClient,
     private val actionRepository: VideoActionRepository,
     private val favoriteRepository: FavoriteRepository,
-    private val authStore: AuthStore
+    private val authStore: AuthStore,
+    private val storyFeedRepository: StoryFeedRepository,
+    private val feedRepository: FeedRepository
 ) : ViewModel() {
 
     private val _targetStack = MutableStateFlow<List<VideoTarget>>(emptyList())
+
+    // ===== 竖屏全屏「上下滑切换视频」（BiliPai 上游同款功能的 bbspace 化）=====
+    // 锚点（页 0）= 进入全屏那一刻的视频；队列（页 1..n）= 各视频相关推荐的接力流，
+    // 每切到一个新视频，其详情自带的 relates 经去重后追加进队列（见 init 的监听）。
+    private val _swipeAnchor = MutableStateFlow<SwipeEntry?>(null)
+    val swipeAnchor: StateFlow<SwipeEntry?> = _swipeAnchor.asStateFlow()
+    private val _swipeQueue = MutableStateFlow<List<SwipeEntry>>(emptyList())
+    val swipeQueue: StateFlow<List<SwipeEntry>> = _swipeQueue.asStateFlow()
 
     val player: StateFlow<Player?> = playbackController.player
     val videoState: StateFlow<VideoPlaybackState> = playbackController.videoState
@@ -168,6 +185,26 @@ class VideoViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { key ->
                     _interaction.value = VideoInteractionState(stat = key.stat, userState = key.userState)
+                }
+        }
+    }
+
+    init {
+        // 滑动队列接力：每切到一个视频，其详情自带的 relevant 推荐经去重/多样性
+        // 过滤后追加进队列（appendSwipeEntries 幂等，同一批 relates 重复到达无害）。
+        // 会话未开启（_swipeAnchor == null）时不动队列。
+        viewModelScope.launch {
+            videoState
+                .map { it.detail }
+                .distinctUntilChanged()
+                .collect { detail ->
+                    val anchor = _swipeAnchor.value ?: return@collect
+                    detail ?: return@collect
+                    _swipeQueue.value = appendSwipeEntries(
+                        existing = _swipeQueue.value,
+                        incoming = swipeEntriesFromRelates(detail.relates),
+                        anchorKey = anchor.key
+                    )
                 }
         }
     }
@@ -362,6 +399,156 @@ class VideoViewModel @Inject constructor(
         _targetStack.value = nextStack
         playbackController.openVideo(nextTarget)
         return true
+    }
+
+    /**
+     * 进入全屏时开启一个滑动会话：页 0 锚定当前视频，队列从其相关推荐起步。
+     * 之后每次切视频，新详情的 relates 由 init 的监听接力并入。
+     *
+     * 锚点 target **取栈顶的 activeTarget**（带完整 aid/cid/src），只有栈顶缺失时
+     * 才用 ids 兜底构造——翻回页 0 会经 [openSwipeTarget] 重新 openVideo，bvid-only
+     * 的裸 target 会让详情解析多走一次兜底（实测语义不变但链路变长）。
+     * 快速开退全屏时重复调用是幂等的（anchor/queue 整体重置）。
+     */
+    fun beginSwipeSession() {
+        val detail = videoState.value.detail ?: return
+        val ids = videoState.value.ids
+        val bvid = ids.bvid.orEmpty().trim()
+        if (bvid.isEmpty()) return
+        val anchorTarget = activeTarget as? VideoTarget.Ugc
+            ?: VideoTarget.Ugc(aid = ids.aid, cid = ids.cid, bvid = bvid)
+        _swipeAnchor.value = SwipeEntry(
+            target = anchorTarget,
+            bvid = bvid,
+            title = detail.title,
+            cover = detail.cover.orEmpty(),
+            author = detail.owner?.name,
+            durationText = null
+        )
+        _swipeQueue.value = appendSwipeEntries(
+            existing = emptyList(),
+            incoming = swipeEntriesFromRelates(detail.relates),
+            anchorKey = anchorTarget.bvid.orEmpty().ifEmpty { "aid:${anchorTarget.aid}" }
+        )
+        android.util.Log.i(
+            "PortraitSwipe",
+            "session: anchor=$bvid relates=${detail.relates.size} queue=${_swipeQueue.value.size} " +
+                "bvidFilled=${_swipeQueue.value.count { it.bvid.isNotEmpty() }}"
+        )
+    }
+
+    /** 退出全屏时清会话：下次进入全屏重新锚定当时的视频（见 VideoScreen 的接线的判据）。 */
+    fun clearSwipeSession() {
+        _swipeAnchor.value = null
+        _swipeQueue.value = emptyList()
+    }
+
+    // ===== 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）=====
+
+    private var storyBootstrapStarted = false
+    private var storyFeedCursor = 0L
+    private var loadingMoreSwipe = false
+
+    /**
+     * 刷视频模式（story）会话的启动：以入口视频为页 0 锚点，竖屏故事流
+     * （`x/v2/feed/index/story`，BiliPai 上游同款接口）作为后续队列。
+     * 与详情全屏路径的 [beginSwipeSession]（relates 接力起步）互斥——story 模式下
+     * VideoScreen 的会话接线会跳过 beginSwipeSession，锚点全权由本方法负责；
+     * 流到达后**强制覆盖**队列（story 流优先），之后的翻页接力回到统一的
+     * relates merge + [loadMoreSwipeQueue] 补货。
+     * 流失败时锚点仍设为入口视频（降级为"单视频全屏"，返回可重进）。
+     */
+    fun bootstrapStorySession(seed: VideoTarget) {
+        if (storyBootstrapStarted) return
+        storyBootstrapStarted = true
+        val seedUgc = seed as? VideoTarget.Ugc ?: return
+        val seedBvid = seedUgc.bvid.orEmpty().trim()
+        if (seedBvid.isEmpty() && seedUgc.aid <= 0L) return
+        viewModelScope.launch {
+            val items = runCatchingCancellable {
+                storyFeedRepository.fetchStoryFeed(aid = seedUgc.aid, bvid = seedBvid)
+            }.getOrDefault(emptyList())
+            // 锚点信息（标题/封面）优先取流内同 bvid 条目，取不到就留空（页 0 是
+            // 播放器，不消费这两个字段；只有 SwipeCoverPage 用它们）。
+            val seedItem = items.firstOrNull { it.bvid == seedBvid }
+            _swipeAnchor.value = SwipeEntry(
+                target = seedUgc,
+                bvid = seedBvid,
+                title = seedItem?.title.orEmpty(),
+                cover = seedItem?.cover.orEmpty(),
+                author = seedItem?.author,
+                durationText = null
+            )
+            _swipeQueue.value = appendSwipeEntries(
+                existing = emptyList(),
+                incoming = items.mapNotNull(::swipeEntryFromStory),
+                anchorKey = seedUgc.bvid.orEmpty().ifEmpty { "aid:${seedUgc.aid}" }
+            )
+        }
+    }
+
+    /**
+     * 队列补货：翻到倒数第 [com.naaammme.bbspace.feature.video.swipe.SWIPE_EXTEND_THRESHOLD]
+     * 页时由 pager 触发，接力首页推荐流（`fetchFeed(idx)` 分页，BiliPai StoryViewModel
+     * 的 loadMoreStories 同款数据源）。详情全屏与 story 两种会话共用同一队列。
+     * 防抖：进行中忽略；失败允许下一次触发重试（游标不前进）。
+     */
+    fun loadMoreSwipeQueue() {
+        if (loadingMoreSwipe) return
+        loadingMoreSwipe = true
+        viewModelScope.launch {
+            val page = storyFeedCursor
+            runCatchingCancellable {
+                feedRepository.fetchFeed(idx = page, pull = false, flush = 0)
+            }.onSuccess { result ->
+                if (result.items.isNotEmpty()) {
+                    storyFeedCursor = page + 1
+                    val anchorKey = _swipeAnchor.value?.key.orEmpty()
+                    val incoming = result.items.mapNotNull(::swipeEntryFromFeedItem)
+                    _swipeQueue.value = appendSwipeEntries(
+                        existing = _swipeQueue.value,
+                        incoming = incoming,
+                        anchorKey = anchorKey
+                    )
+                    android.util.Log.i(
+                        "PortraitSwipe",
+                        "more: page=$page items=${result.items.size} mapped=${incoming.size} " +
+                            "bvidFilled=${incoming.count { it.bvid.isNotEmpty() }} " +
+                            "queue=${_swipeQueue.value.size}"
+                    )
+                }
+            }
+            loadingMoreSwipe = false
+        }
+    }
+
+    /**
+     * 上下滑切换：**替换栈顶**而不是压栈（openTarget 的语义）——刷视频是同一
+     * 浏览会话内的连续浏览，返回键应当退出详情而不是逐个回放刷过的视频
+     * （与 B 站官方/BiliPai 的行为一致）。同 bvid 重复调用直接忽略。
+     */
+    fun openSwipeTarget(entry: SwipeEntry) {
+        val stack = _targetStack.value
+        if (stack.isEmpty()) return
+        val current = stack.last()
+        // 同条目短路：**aid 优先、bvid 兜底**（与 SwipeEntry.isCurrentVideo 同一判据）。
+        // relate 卡的 bvid 是取流后才在 ids 里被补齐的，纯 bvid 字符串比较会把
+        // "同一视频"误判成不同目标 → 白白重开一次播放（画面从头发起、进度丢失）。
+        if (current is VideoTarget.Ugc) {
+            val same = if (current.aid > 0L && entry.target.aid > 0L) {
+                current.aid == entry.target.aid
+            } else {
+                entry.bvid.isNotEmpty() && current.bvid == entry.bvid
+            }
+            if (same) return
+        }
+        android.util.Log.i(
+            "PortraitSwipe",
+            "open: key=${entry.key} aid=${entry.target.aid} cid=${entry.target.cid} " +
+                "bvid=${entry.bvid} from=${(current as? VideoTarget.Ugc)?.aid}"
+        )
+        _targetStack.value = stack.dropLast(1) + entry.target
+        playbackController.openVideo(entry.target)
     }
 
     fun togglePlayPause() {

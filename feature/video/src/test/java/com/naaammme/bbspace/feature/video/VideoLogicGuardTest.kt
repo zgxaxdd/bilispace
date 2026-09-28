@@ -283,6 +283,260 @@ class VideoLogicGuardTest {
         )
     }
 
+    // ── 接缝：整圈描边 + 纯色光晕 + 渐进模糊（2026-09-28 定稿·BiliPai 语言版）──
+
+    /**
+     * 接缝结构的写法不变式（用户两轮真机反馈后的定稿）：
+     * 1. 描边核心色必须按内容底明暗分档（深色底→白 / 浅色底→灰）；
+     * 2. 描边必须是**整圈圆角矩形轮廓**（drawRoundRect + Stroke，rim light）；
+     * 3. 描边下方的光必须是 **BiliPai 上游语言的纯色渐晕**
+     *    （topSolidProgressiveFade + 封面**原色** + 0.48/0.38 峰值）——
+     *    试过并被用户否掉的两版：向白 lerp 的低峰值淡彩（"廉价"）、
+     *    BlendMode.Screen 双层提亮（"太丑/灰雾"）。**不许再回退到 Screen 方案**；
+     * 4. 光晕下方/同域必须有**渐进模糊**（seamProgressiveBlur，AGSL 自写，
+     *    参数对齐 BiliPai 顶部渐进模糊）——"光从视频播放区洒在下方内容上"
+     *    的光感主体；
+     * 5. 光源必须来自 VideoCardCoverColorStore（封面代表色，防重缓存路径）。
+     */
+    @Test
+    fun playerSeamUsesThemeStrokeAndCoverLightSpill() {
+        val lines = codeOf("VideoScreen.kt")
+        assertTrue(
+            "描边色必须 = 下方光晕色（封面代表色，用户定稿「描边与光同一个颜色」），" +
+                "深/浅色底分档（白/SeamStrokeGray）已废弃。",
+            countMatching(lines, """val\s+seamStrokeBase\s*=\s*seamGlowColor""") == 1 &&
+                countMatching(lines, """SeamStrokeGray""") == 0
+        )
+        assertTrue(
+            "描边必须是整圈圆角轮廓（drawRoundRect + Stroke 走线），" +
+                "不许回退成底边直线描边——直线到圆角处会断掉，盖不住播放带圆角。" +
+                "且不许再垫底色（垫底矩形会盖住圆角月牙处透上来的光，" +
+                "真机症状「光色没有在圆角处显示」）。",
+            countMatching(lines, """drawRoundRect\(""") == 1 &&
+                countMatching(lines, """style\s*=\s*Stroke\(""") == 1 &&
+                countMatching(lines, """backingColor""") == 0
+        )
+        assertTrue(
+            "接缝光必须是 BiliPai 上游 coverGlow 的纯色渐晕（topSolidProgressiveFade + " +
+                "封面原色 + SEAM_GLOW_PEAK 分档），且不许回退到被否掉的 Screen 双层方案" +
+                "（BlendMode.Screen / seamLightSpill 计数必须为 0）。",
+            countMatching(lines, """topSolidProgressiveFade\(""") == 1 &&
+                countMatching(lines, """surfaceColor\s*=\s*seamGlowColor""") == 1 &&
+                countMatching(lines, """peakAlpha\s*=\s*seamGlowPeak""") == 1 &&
+                countMatching(lines, """BlendMode\.Screen""") == 0 &&
+                countMatching(lines, """seamLightSpill""") == 0
+        )
+        assertTrue(
+            "接缝层必须是**独立背景层与光晕层、都上移一个圆角半径**：圆角月牙区" +
+                "（播放带 clip 透明处）透出它们——光沿圆角轮廓显示、与弧线相切；" +
+                "被否掉的 AGSL 邻域采样方案（seamProgressiveBlur）不得回退。",
+            countMatching(lines, """seamGlowRadiusPx""") >= 3 &&
+                countMatching(lines, """height\(detailBaseH \+ BiliRadius\.playerCompact\)""") == 1 &&
+                countMatching(lines, """height\(seamGlowHeight \+ BiliRadius\.playerCompact\)""") == 1 &&
+                countMatching(lines, """bandMorphHeightPx\(\) - seamGlowRadiusPx""") == 2 &&
+                countMatching(lines, """seamProgressiveBlur""") == 0
+        )
+        run {
+            // 图层序（用户定稿）：简介内容必须声明在光晕层**之后**（z 序在上）——
+            // 光洒在背景上、文字清晰浮在光上，不遮挡内容。
+            val glowLayerAt = lines.indexOfFirst {
+                it.contains("height(seamGlowHeight + BiliRadius.playerCompact)")
+            }
+            val contentAboveGlow = glowLayerAt >= 0 && lines.withIndex().any { (index, line) ->
+                index > glowLayerAt && line.contains("VideoDetailPage(")
+            }
+            assertTrue(
+                "简介内容图层必须排在光晕层之后（在光晕之上）——用户定稿的图层序，" +
+                    "光不能遮挡内容的显示效果。",
+                contentAboveGlow
+            )
+        }
+        assertTrue(
+            "光源必须来自 VideoCardCoverColorStore（封面代表色），" +
+                "光晕峰值必须按主题分档（BiliPai coverGlow 原值 0.48/0.38）。",
+            countMatching(lines, """VideoCardCoverColorStore\.requestExtraction""") == 1 &&
+                countMatching(lines, """SEAM_GLOW_PEAK_DARK""") >= 1 &&
+                countMatching(
+                    codeOf("VideoScreen.kt"),
+                    """SEAM_GLOW_PEAK_DARK = 0\.48f"""
+                ) == 1 &&
+                countMatching(lines, """surfaceColor\s*=\s*Color\.Black""") == 0
+        )
+    }
+
+    // ── 竖屏全屏上下滑（BiliPai 上游 PortraitVideoPager 的 bbspace 化）─────────
+
+    /**
+     * 上下滑功能的写法不变式：
+     * 1. pager 只在全屏（fullOn）且进入会话时启用（swipeSessionActive）——
+     *    紧凑态/平板分支不能出现 VerticalPager；
+     * 2. **播放器唯一**：pager 内只有一处 VideoPlayerPane（当前播放的 bvid 所在页），
+     *    其余页渲染封面——多份 PlayerView 会互抢 surface；
+     * 3. 切换必须走 openSwipeTarget（替换栈顶），不许改回 openTarget（压栈语义
+     *    会让返回键逐个回放刷过的视频）；
+     * 4. 会话锚点与队列由 beginSwipeSession 在进入全屏时建立。
+     */
+    @Test
+    fun portraitSwipePagerStaysSinglePlayerAndStackTopReplace() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val screen = codeOf("VideoScreen.kt")
+        val vm = codeOf("VideoViewModel.kt")
+        assertTrue(
+            "上下滑必须是 VerticalPager（foundation pager，页数随接力队列增长实现\"无限刷\"），" +
+                "且 pager 内只允许一处 VideoPlayerPane（播放器唯一，其余页是封面）。",
+            countMatching(pager, """VerticalPager\(""") == 1 &&
+                countMatching(pager, """VideoPlayerPane\(""") == 1
+        )
+        assertTrue(
+            "翻页监听必须经 requestedKey（SwipeEntry.key，bvid 优先 / aid 兜底）防目标震荡" +
+                "（直接比 currentKey 会在取流完成前被快速往返翻页打转），" +
+                "翻页与迟到结果对齐各走一处 onSwipeTo。",
+            countMatching(pager, """requestedKey""") >= 3 &&
+                countMatching(pager, """onSwipeTo\(entry\)""") == 2
+        )
+        assertTrue(
+            "「哪一页归播放器」必须按**内容身份**判断（isCurrentVideo），不许拿 entry.key " +
+                "和 currentKey 比字符串——队列条目的 key 是建队时算的（relate 卡没有 bvid " +
+                "→ `aid:…`），而 videoState.ids 在取流/详情返回后会被服务端补齐的 bvid " +
+                "整体覆盖，字符串会在「取流完成」的一瞬间翻转 → 播放器页落空、翻页后新视频" +
+                "永不起播（真机阻塞问题的根因）。",
+            countMatching(pager, """isCurrentVideo\(""") >= 3 &&
+                countMatching(pager, """entry\.key == currentKey""") == 0
+        )
+        assertTrue(
+            "pager 必须从调用方拿到当前播放的 ids（currentBvid / currentAid）——" +
+                "只传一个已经拼好的字符串，等于把「取流前算的 key」和「取流后算的 key」" +
+                "又混成同一个东西，本 bug 会原样复发。",
+            countMatching(pager, """currentBvid:\s*String\?""") == 1 &&
+                countMatching(pager, """currentAid:\s*Long""") == 1 &&
+                countMatching(screen, """currentAid\s*=\s*videoState\.ids\.aid""") == 1
+        )
+        assertTrue(
+            "同条目短路也必须 aid 优先（与 isCurrentVideo 同一判据），否则「同一个视频的 " +
+                "aid-only 目标 vs 已补齐 bvid 的栈顶」会被判成不同目标 → 白白从重开播一次。",
+            countMatching(vm, """current\.aid\s*==\s*entry\.target\.aid""") == 1
+        )
+        assertTrue(
+            "全屏分支必须用 swipeSessionActive + 锚点判据启用 pager；会话开启必须调 " +
+                "beginSwipeSession；切换必须接 viewModel::openSwipeTarget。",
+            countMatching(screen, """swipeSessionActive""") >= 2 &&
+                countMatching(screen, """beginSwipeSession\(""") == 1 &&
+                countMatching(screen, """viewModel::openSwipeTarget""") == 1 &&
+                countMatching(screen, """PortraitSwipePager\(""") == 1
+        )
+        assertTrue(
+            "上下滑切换必须替换栈顶（dropLast(1) + target）而不是压栈，" +
+                "且队列接力必须走 appendSwipeEntries（去重 + UP 主多样性）。",
+            countMatching(vm, """fun\s+openSwipeTarget\(entry:\s*SwipeEntry\)""") == 1 &&
+                countMatching(vm, """dropLast\(1\)\s*\+\s*entry\.target""") == 1 &&
+                countMatching(vm, """appendSwipeEntries\(""") >= 2
+        )
+    }
+
+    // ── 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）────────
+
+    /**
+     * 刷视频模式接线的写法不变式：
+     * 1. 入口：HomeScreen 顶栏用 LocalStoryCardOpener（story 专用 route）做 OPPO
+     *    无缝 morph（锚点 = 按钮上的 SeamlessAnchor，decorateAnchor=false 纯色 morph），
+     *    失败回退 onEnterStoryMode（普通 startActivity，走统一窗口动画）；
+     * 2. story intent：EXTRA_STORY_MODE 必须由 videoDetailIntent 写入；
+     * 3. 会话：story 模式的锚点/队列由 bootstrapStorySession（story 流）负责，
+     *    VideoScreen 的 beginSwipeSession 在 story 模式下必须跳过（两条数据链不竞争）；
+     * 4. 无紧凑态：story 模式 isFull 初始即 true，返回键 = 关闭页面；
+     * 5. 补货：pager 触发 loadMoreSwipeQueue（推荐流分页接力），与 VideoScreen 的
+     *    onNeedMore 接线。
+     */
+    @Test
+    fun homeStoryEntryWiring() {
+        val home = codeOf("HomeScreen.kt")
+        assertTrue(
+            "顶栏入口必须用 LocalStoryCardOpener（story 专用 route）+ SeamlessAnchor 锚点" +
+                "做无缝 morph，并保留 onEnterStoryMode 回退链路。",
+            countMatching(home, """LocalStoryCardOpener\.current""") == 1 &&
+                countMatching(home, """SeamlessAnchor\(storyAnchorState""") == 1 &&
+                countMatching(home, """decorateAnchor = false""") == 1 &&
+                countMatching(home, """onEnterStoryMode\(target\)""") == 1
+        )
+        val intents = codeOf("navigation/VideoDetailIntents.kt")
+        assertTrue(
+            "story 标记必须经 EXTRA_STORY_MODE 由 videoDetailIntent 统一写入。",
+            countMatching(intents, """EXTRA_STORY_MODE""") >= 2 &&
+                countMatching(intents, """storyMode: Boolean = false""") == 1
+        )
+        val vm = codeOf("VideoViewModel.kt")
+        assertTrue(
+            "story 会话必须由 bootstrapStorySession 负责（story 流优先），补货必须走 " +
+                "loadMoreSwipeQueue（推荐流分页接力，与详情全屏共用队列）。",
+            countMatching(vm, """fun\s+bootstrapStorySession\(seed:\s*VideoTarget\)""") == 1 &&
+                countMatching(vm, """fun\s+loadMoreSwipeQueue\(""") == 1 &&
+                countMatching(vm, """swipeEntryFromStory""") >= 1 &&
+                countMatching(vm, """swipeEntryFromFeedItem""") >= 1
+        )
+        val screen = codeOf("VideoScreen.kt")
+        assertTrue(
+            "story 模式必须常驻全屏（isFull 与 swipeSessionActive 初始即 storyMode），" +
+                "且「全屏」钮与 swipe 分支共三处 effectiveStoryMode 分叉 = 关闭页面/接管会话。",
+            countMatching(screen, """mutableStateOf\(storyMode\)""") == 2 &&
+                countMatching(screen, """swipeSessionActive = true""") == 1 &&
+                countMatching(screen, """if \(effectiveStoryMode\) \{""") == 3
+        )
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "补货判据必须经 shouldExtendSwipeQueue 由 pager 触发 onNeedMore。",
+            countMatching(pager, """onNeedMore""") >= 2 &&
+                countMatching(pager, """shouldExtendSwipeQueue\(""") == 1
+        )
+    }
+
+    // ── 方向：竖屏刷视频会话期间锁竖屏（真机反馈"每次下滑都有旋转动画"）────────────
+
+    /**
+     * 用户反馈②：「每次下滑，屏幕会有一个**旋转动画**」。
+     *
+     * `isPortraitVideo` 的 remember key 是 `videoState.currentStream`：切换视频的那一刻
+     * 它是 null → 翻成 false → 只要 `autoRotateFullscreen` 开着，这个 effect 就会朝
+     * SENSOR_LANDSCAPE 写一次（转屏动画），新流回来（竖屏）再写回 UNSPECIFIED ——
+     * **一次翻页转两圈**。刷到真的是横屏的视频时同理。
+     *
+     * 对齐 BiliPai：它的竖屏连播态**完全不写 requestedOrientation**
+     * （`VideoDetailPlatformPolicy.resolvePhoneVideoRequestedOrientation` 在
+     * `isPortraitFullscreen` 时 `return null`，调用方 `?: return@LaunchedEffect`），
+     * 传感器自动旋转也被 `shouldObservePhoneAutoRotate` 关掉。
+     * bbspace 走"会话期间锁竖屏"这一侧（与抖音/B 站官方的竖屏连播一致）。
+     */
+    @Test
+    fun portraitSwipeSessionLocksOrientation() {
+        val screen = codeOf("VideoScreen.kt")
+        assertTrue(
+            "刷视频会话期间必须锁竖屏（而不是让 isPortraitVideo 的瞬时值决定方向）：" +
+                "一次翻页会转两圈，用户看到的就是「每次下滑都有旋转动画」。",
+            countMatching(screen, """val\s+portraitSwipeActive\s*=""") == 1 &&
+                countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_PORTRAIT""") == 1 &&
+                countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_SENSOR_LANDSCAPE""") == 1
+        )
+        assertTrue(
+            "竖屏锁判据必须同时覆盖「详情全屏的滑动会话」与「story 常驻全屏」两条入口。",
+            countMatching(
+                screen,
+                """portraitSwipeActive\s*=\s*swipeSessionActive\s*\|\|\s*effectiveStoryMode"""
+            ) == 1
+        )
+        val lockAt = screen.indexOfFirst { it.contains("portraitSwipeActive ->") }
+        val landscapeAt = screen.indexOfFirst {
+            it.contains("ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE")
+        }
+        assertTrue(
+            "锁竖屏分支必须排在横屏分支**之前**（when 取首个命中分支）——写在后面等于没写。",
+            lockAt in 0 until landscapeAt
+        )
+        assertTrue(
+            "会话结束（effect 重跑/退出组合）必须把方向复位成 UNSPECIFIED：" +
+                "留在竖屏锁里会让后续页面出不去横屏（与原先 SENSOR_LANDSCAPE 泄漏同理）。",
+            countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_UNSPECIFIED""") == 2
+        )
+    }
+
     // ── 工具 ─────────────────────────────────────────────────────────────────
 
     private val FS: String get() = File.separator

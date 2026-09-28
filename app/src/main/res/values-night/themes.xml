@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 与 values 版完全同源（见其注释）：夜间只换父主题底色，窗口动画不分昼夜。 -->
+    <style name="WindowAnimation.Bbspace" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/window_open_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/window_open_exit</item>
+        <item name="android:activityCloseEnterAnimation">@anim/window_close_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/window_close_exit</item>
+    </style>
+
     <style name="Theme.Bbspace" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@null</item>
+        <item name="android:windowAnimationStyle">@style/WindowAnimation.Bbspace</item>
     </style>
 </resources>

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,12 +19,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.model.LivePlaybackViewState
 import com.naaammme.bbspace.core.model.LiveRoomSessionState
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.feature.live.player.LivePlayerPane
 import kotlinx.coroutines.flow.StateFlow
+
+private val PlayerSurfaceShape = RoundedCornerShape(BiliRadius.card)
 
 @Composable
 internal fun LivePlaybackBody(
@@ -52,7 +56,9 @@ internal fun LivePlaybackBody(
                 modifier = Modifier
                     .width(playerSpaceWidth)
                     .height(playerSpaceHeight)
-                    .clip(MaterialTheme.shapes.extraLarge)
+                    // 播放器矩形圆角与视频播放器同语言（BiliRadius.card=20，此前
+                    // shapes.extraLarge 随档位在 20~32dp 漂移）
+                    .clip(PlayerSurfaceShape)
                     .background(Color.Black)
             ) {
                 LivePlayerPane(

@@ -620,3 +620,10 @@ class SeamlessCardOpener(
 
 /** App 层在根组合提供；null 表示当前环境未接线（页面点击直接走普通打开）。 */
 val LocalSeamlessCardOpener = staticCompositionLocalOf<SeamlessCardOpener?> { null }
+
+/**
+ * 「刷视频模式」专用的无缝执行器（与 [LocalSeamlessCardOpener] 同类，route 不同）：
+ * 打开的是带 story 标记的视频详情 Activity（直接进全屏上下滑），与卡片点击的
+ * 普通详情路径共用同一套 OPPO 无缝时序（锚点装饰 / PixelCopy / bundle 契约）。
+ */
+val LocalStoryCardOpener = staticCompositionLocalOf<SeamlessCardOpener?> { null }

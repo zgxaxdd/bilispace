@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 详情页窗口进入：内容自 96% 缩放 + 淡入（ColorOS 设计语言，与 ForegroundEnterBox 同源）。
+     只有无缝 morph 未接管（注册失败 / 无锚点深链）时才会看到这套动画；
+     无缝成功时系统窗口层 morph 覆盖它，互不干扰。 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/decelerate_quad"
+    android:duration="300">
+    <alpha
+        android:fromAlpha="0.0"
+        android:toAlpha="1.0" />
+    <scale
+        android:fromXScale="0.96"
+        android:toXScale="1.0"
+        android:fromYScale="0.96"
+        android:toYScale="1.0"
+        android:pivotX="50%"
+        android:pivotY="50%" />
+</set>

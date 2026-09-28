@@ -261,6 +261,63 @@ object VideoTargetTool {
         return bv.blankToNull()
     }
 
+    /**
+     * aid → bvid 本地换算（纯计算，无网络）。**移植自 BiliPai `core/util/IdUtils.kt`
+     * 的 `av2bv`**（同一套常量与两次交换）。
+     *
+     * ## 为什么需要它
+     * relate 卡（详情响应的相关推荐模块）的 `basic.uri` 是 **aid 格式**
+     * （`bilibili://video/{aid}`），[bvid] 解析为空；而播放链路的下游几乎都以 bvid
+     * 为主键（页身份、历史、弹幕（bvid+cid）、分享、上报）。BiliPai 在"接口只给 aid"
+     * 时同样用本地换算补齐（`BangumiRepository` / `LikedVideosRepository`）。
+     *
+     * ## 不要改回网上流传的旧版算法
+     * 旧版是「固定模板 `BV1__4_1_7__` + 58 进制 6 位（SALT 表 `fZodR9…`）」，
+     * 只对老 aid 成立：实测 **aid=117339261503379 旧算法得 BV1d54t1F77p，真值
+     * BV1Kyas6wEuz**（live API 核对）——即新版长 aid 会算出**错误的 bvid**，
+     * 比留空更有害（页身份、历史全部串到另一个视频上）。
+     * 现在这一版（bit51 掩码 + 交换 3↔9、4↔7）对新老 aid 都成立，
+     * 真值见 `VideoTargetToolIdTest`。
+     *
+     * @return 12 位 bvid；aid 非法或超出该编码可表示的范围时返回 null
+     *   （**宁可不给，也不给错的**）。
+     */
+    fun avToBv(aid: Long): String? {
+        if (aid <= 0L) return null
+        val chars = CharArray(BV_LENGTH) { '0' }
+        chars[0] = 'B'
+        chars[1] = 'V'
+        chars[2] = '1'
+        var index = chars.lastIndex
+        var value = (BV_MAX_AID or aid) xor BV_XOR_CODE
+        while (value > 0L && index >= 3) {
+            chars[index--] = BV_DATA[(value % BV_BASE).toInt()]
+            value /= BV_BASE
+        }
+        // bit51 恒为 1 → value ∈ [2^51, 2^52) ⊂ [58^8, 58^9)：正常恰好写满 9 位
+        // （index 停在 2）。位数不对说明 aid 超出编码范围，不猜。
+        if (value > 0L || index != 2) return null
+        swap(chars, 3, 9)
+        swap(chars, 4, 7)
+        return String(chars)
+    }
+
+    /** [avToBv] 的逆运算：bvid → aid。非 12 位 BV 号 / 含表外字符时返回 null。 */
+    fun bvToAv(bvid: String): Long? {
+        val ids = bvid.trim()
+        if (ids.length != BV_LENGTH || !ids.startsWith("BV1", ignoreCase = true)) return null
+        val chars = ids.toCharArray()
+        swap(chars, 3, 9)
+        swap(chars, 4, 7)
+        var value = 0L
+        for (i in 3 until chars.size) {
+            val digit = BV_DATA.indexOf(chars[i])
+            if (digit < 0) return null
+            value = value * BV_BASE + digit
+        }
+        return (value and BV_MASK_CODE) xor BV_XOR_CODE
+    }
+
     fun cid(uri: String): Long? {
         return arg(uri, "cid")?.toLongOrNull()
     }
@@ -301,6 +358,20 @@ object VideoTargetTool {
         return this?.takeIf { it.isNotBlank() }
     }
 
+    private fun swap(chars: CharArray, left: Int, right: Int) {
+        val tmp = chars[left]
+        chars[left] = chars[right]
+        chars[right] = tmp
+    }
+
     private const val UTF_8 = "UTF-8"
     private val BV_REGEX = Regex("BV[0-9A-Za-z]+")
+
+    // ── aid ⇄ bvid 编码常量（BiliPai `core/util/IdUtils.kt` 原值，勿改）──────────
+    private const val BV_LENGTH = 12
+    private const val BV_BASE = 58L
+    private const val BV_XOR_CODE = 23442827791579L
+    private const val BV_MASK_CODE = 2251799813685247L // 2^51 - 1
+    private const val BV_MAX_AID = 1L shl 51
+    private const val BV_DATA = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
 }
