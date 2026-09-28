@@ -790,6 +790,18 @@ internal fun VideoPlayerPane(
                     owner = viewModel.videoState.collectAsStateWithLifecycle().value.detail?.owner?.name,
                     modifier = Modifier.align(Alignment.BottomStart)
                 )
+                // 会话内点赞（信息层第三阶段第一步）：竖屏连播时双击点赞是"隐式"的，
+                // 而用户想确认"这支我赞过没有"时没有任何可见状态 —— BiliPai 的竖屏页右侧
+                // 常驻互动栏（PortraitFullscreenOverlay.kt:194-394）。这里先落**点赞**一个，
+                // 因为它有完整闭环（状态 + 计数 + 动作都在 ViewModel 里，无新依赖）。
+                SwipeSessionLikeButton(
+                    liked = viewModel.videoState.collectAsStateWithLifecycle()
+                        .value.detail?.userState?.liked == true,
+                    likeText = viewModel.videoState.collectAsStateWithLifecycle()
+                        .value.detail?.stat?.like,
+                    onToggle = viewModel::toggleLike,
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
             }
 
             // 上下滑的「等首帧」加载层。
@@ -978,6 +990,47 @@ private fun SwipeProgressLine(
                 .fillMaxHeight()
                 .background(SwipeProgressBarColor)
         )
+    }
+}
+
+/**
+ * 会话内点赞按钮（右侧中部）：心形 + 计数，已赞时用主题粉色高亮。
+ *
+ * 为什么只做点赞：它是**唯一有完整闭环**的互动（状态 `userState.liked` / 计数
+ * `stat.like` / 动作 `toggleLike` 都在 ViewModel 里现成）。收藏要先选文件夹、
+ * 投币有自己的二次确认、评论面板的开关状态在 VideoScreen 层 —— 那几个都属于
+ * 后续批次，不在这里半成品化。
+ *
+ * 触摸：这是会话覆盖层里唯一的可点区域（除了失败态的重试按钮），位置固定在右侧中部，
+ * 不挡上下滑的起手区（pager 的手势从屏幕中部起）。
+ */
+@Composable
+private fun SwipeSessionLikeButton(
+    liked: Boolean,
+    likeText: String?,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(end = BiliSpacing.md),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+    ) {
+        IconButton(onClick = onToggle) {
+            Icon(
+                imageVector = Icons.Filled.Favorite,
+                contentDescription = if (liked) "取消点赞" else "点赞",
+                tint = if (liked) LikeHeartColor else Color.White.copy(alpha = 0.92f)
+            )
+        }
+        likeText?.takeIf(String::isNotBlank)?.let { count ->
+            Text(
+                text = count,
+                color = Color.White.copy(alpha = 0.86f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        }
     }
 }
 

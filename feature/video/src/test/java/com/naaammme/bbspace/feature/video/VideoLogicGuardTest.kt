@@ -892,6 +892,39 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 会话内点赞按钮（信息层第三阶段第一步）。
+     *
+     * 竖屏连播时双击点赞是"隐式"的：用户想确认"这支我赞过没有"看不到任何状态。
+     * BiliPai 的竖屏页右侧常驻互动栏（`PortraitFullscreenOverlay.kt:194-394`）；
+     * 这里先落点赞一个（状态/计数/动作三者都在 ViewModel 里现成，闭环最完整）。
+     */
+    @Test
+    fun swipeSessionShowsPersistentLikeButton() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "点赞按钮必须接上真实状态与计数（userState.liked / stat.like），" +
+                "并且动作走 viewModel.toggleLike —— 不许自己造一份本地状态。",
+            countMatching(pane, """private fun SwipeSessionLikeButton\(""") == 1 &&
+                countMatching(pane, """value\.detail\?\.userState\?\.liked == true""") == 1 &&
+                countMatching(pane, """value\.detail\?\.stat\?\.like""") == 1 &&
+                countMatching(pane, """onToggle = viewModel::toggleLike""") == 1 &&
+                countMatching(pane, """contentDescription = if \(liked\) "取消点赞" else "点赞"""") == 1
+        )
+        assertTrue(
+            "点赞按钮必须排在加载层之前（加载层是 Box 最后一个子节点），" +
+                "且尺寸/间距走 token（不新增 dp 字面量）。",
+            blockBody(pane, "private fun SwipeSessionLikeButton(").let { body ->
+                body.none { it.contains(".dp") }
+            } &&
+                run {
+                    val likeAt = pane.indexOfFirst { it.contains("SwipeSessionLikeButton(") && !it.contains("private fun") }
+                    val veilAt = pane.indexOfFirst { it.trimStart().startsWith("SwipeWaitVeil(") }
+                    likeAt >= 0 && veilAt >= 0 && likeAt < veilAt
+                }
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
