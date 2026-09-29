@@ -491,24 +491,52 @@ class VideoViewModel @Inject constructor(
         val seedBvid = seedUgc.bvid.orEmpty().trim()
         if (seedBvid.isEmpty() && seedUgc.aid <= 0L) return
         viewModelScope.launch {
-            val items = runCatchingCancellable {
-                storyFeedRepository.fetchStoryFeed(aid = seedUgc.aid, bvid = seedBvid)
-            }.getOrDefault(emptyList())
+            // ── 起步批次的数据源：**对齐 BiliPai** ──────────────────────────────
+            // BiliPai 的竖屏流（`StoryViewModel.kt:23/42`）注释原文：「数据源与**首页推荐
+            // 一致**（`VideoRepository.getHomeVideos`），内容更元化」；
+            // 而 bbspace 之前用 `x/v2/feed/index/story`（以种子视频为锚的竖屏流）——
+            // 真机反馈「点刷视频模式，先推送的是差不多类型的视频」，正是这个锚造成的。
+            // 现在：首页推荐流起步（与推荐页同源、更个性化/更多元），
+            // story 竖屏流只在首页流拿不到时兜底（保证"点进去一定有内容"）。
+            val feedEntries = runCatchingCancellable {
+                feedRepository.fetchFeed(idx = 0, pull = false, flush = 0)
+            }.getOrNull()?.items.orEmpty().mapNotNull(::swipeEntryFromFeedItem)
+            val useHomeFeed = feedEntries.isNotEmpty()
+            if (useHomeFeed) {
+                storyFeedCursor = 1L
+            }
+            val items = if (useHomeFeed) {
+                emptyList()
+            } else {
+                runCatchingCancellable {
+                    storyFeedRepository.fetchStoryFeed(aid = seedUgc.aid, bvid = seedBvid)
+                }.getOrDefault(emptyList())
+            }
             // 锚点信息（标题/封面）优先取流内同 bvid 条目，取不到就留空（页 0 是
             // 播放器，不消费这两个字段；只有 SwipeCoverPage 用它们）。
+            val anchorEntry = if (useHomeFeed) {
+                feedEntries.firstOrNull { it.isCurrentVideo(seedBvid, seedUgc.aid) }
+            } else {
+                null
+            }
             val seedItem = items.firstOrNull { it.bvid == seedBvid }
             _swipeAnchor.value = SwipeEntry(
                 target = seedUgc,
                 bvid = seedBvid,
-                title = seedItem?.title.orEmpty(),
-                cover = seedItem?.cover.orEmpty(),
-                author = seedItem?.author,
+                title = anchorEntry?.title ?: seedItem?.title.orEmpty(),
+                cover = anchorEntry?.cover ?: seedItem?.cover.orEmpty(),
+                author = anchorEntry?.author ?: seedItem?.author,
                 durationText = null
             )
             _swipeQueue.value = appendSwipeEntries(
                 existing = emptyList(),
-                incoming = items.mapNotNull(::swipeEntryFromStory),
+                incoming = if (useHomeFeed) feedEntries else items.mapNotNull(::swipeEntryFromStory),
                 anchorKey = seedUgc.bvid.orEmpty().ifEmpty { "aid:${seedUgc.aid}" }
+            )
+            android.util.Log.i(
+                "PortraitSwipe",
+                "bootstrap: source=${if (useHomeFeed) "home" else "story"} " +
+                    "seeded=${_swipeQueue.value.size}"
             )
         }
     }

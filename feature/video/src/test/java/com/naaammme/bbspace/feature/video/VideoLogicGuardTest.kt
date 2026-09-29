@@ -632,11 +632,24 @@ class VideoLogicGuardTest {
             }
         )
         assertTrue(
-            "加载层**不许再铺封面**（上滑时封面页已经把那张图给用户看过了，再铺一次就是" +
-                "「还是有预览图」），也不许让整层可点 —— 它要盖住控件，但不能把上下滑翻页的" +
-                "手势一起吃掉（失败态里那个「重试」按钮是唯一的例外，且只在失败分支里）。",
-            countMatching(pane, """coverUrl: String\?""") == 0 &&
-                countMatching(pane, """BiliAsyncImage\(""") == 0 &&
+            "加载层**不许再盖不透明深色**：真机反馈「感觉就是盖了一层遮罩」—— " +
+                "原来换页时是「封面 → 一块黑布 → 视频」，现在必须用**同款封面铺底**" +
+                "（不裁切的 PlayerPreview + Fit 居中，与 SwipeCoverPage 同一 URL/取景）" +
+                "+ 轻遮罩 + 小粒子，过渡才是「图 → 图+暗+粒子 → 视频」。" +
+                "没有封面时才允许退化成深色底。整层仍不许带 pointerInput。" +
+                "（用户原话：要么把预览图优化好、完美显示在视频中间——封面页现在就是这么做的。）",
+            countMatching(pane, """swipeCoverUrl: String\? = null""") == 1 &&
+                countMatching(pane, """^\s*coverUrl: String\? = null""") == 1 &&
+                countMatching(pane, """variant = BiliImageVariant\.PlayerPreview""") == 1 &&
+                countMatching(pane, """contentScale = ContentScale\.Fit""") == 1 &&
+                // 封面页（pager 里）必须用**同一个**变体与取景，否则"封面页一张、加载底另一张"
+                countMatching(
+                    codeOf("player/PortraitSwipePager.kt"),
+                    """variant = BiliImageVariant\.PlayerPreview"""
+                ) == 1 &&
+                countMatching(pane, """WaitVeilScrimTopColor""") >= 2 &&
+                countMatching(pane, """VEIL_COVER_LOADER_WIDTH_FRACTION""") >= 2 &&
+                countMatching(codeOf("player/PortraitSwipePager.kt"), """swipeCoverUrl = entry\.cover""") == 1 &&
                 blockBody(pane, "private fun SwipeWaitVeil(")
                     .none { it.contains("pointerInput") }
         )
@@ -948,6 +961,28 @@ class VideoLogicGuardTest {
             countMatching(vm, """playbackVideoRepository\.preloadPlayUrl\(params\.getResolveParams\(\)\)""") == 1 &&
                 countMatching(vm, """detailRepository\.fetchVideoDetail\(ids = params\.ids, src = params\.src\)""") >= 1 &&
                 countMatching(vm, """val params = target\.toPlayableParams\(\)""") == 1
+        )
+    }
+
+    /**
+     * 顶栏「刷视频模式」的**起步数据源**必须与 BiliPai 一致（首页推荐流）。
+     *
+     * BiliPai `StoryViewModel.kt:23` 的注释原文：「数据源与**首页推荐一致**
+     * （`VideoRepository.getHomeVideos`），内容更元化」；
+     * bbspace 之前用 `x/v2/feed/index/story`（以种子视频为锚的竖屏流）——
+     * 真机反馈「点刷视频模式，先推送的是差不多类型的视频」，正是那个锚造成的。
+     */
+    @Test
+    fun storyBootstrapSeedsFromHomeFeed() {
+        val vm = codeOf("VideoViewModel.kt")
+        assertTrue(
+            "起步批次必须先用首页推荐流（feedRepository.fetchFeed(idx = 0)），" +
+                "story 竖屏流只能作为拿不到内容时的兜底；并且要打印用了哪条源便于真机核对。",
+            countMatching(vm, """feedRepository\.fetchFeed\(idx = 0, pull = false, flush = 0\)""") == 1 &&
+                countMatching(vm, """feedRepository\.fetchFeed\(idx = page, pull = false, flush = 0\)""") == 1 &&
+                countMatching(vm, """storyFeedRepository\.fetchStoryFeed\(""") == 1 &&
+                countMatching(vm, """bootstrap: source=""") == 1 &&
+                countMatching(vm, """storyFeedCursor = 1L""") == 1
         )
     }
 

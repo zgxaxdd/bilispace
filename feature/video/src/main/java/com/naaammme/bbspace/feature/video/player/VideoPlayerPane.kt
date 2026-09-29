@@ -86,6 +86,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -123,6 +124,8 @@ import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
 import com.naaammme.bbspace.core.common.ShareUtils
+import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
+import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
@@ -422,6 +425,15 @@ internal fun VideoPlayerPane(
     swipeFailed: Boolean = false,
     /** 失败态的重试回调（`null` = 不给重试入口，只显示错误）。 */
     onRetrySwipe: (() -> Unit)? = null,
+    /**
+     * 这一页的封面 URL（等首帧时的加载层用它铺底）。
+     *
+     * 真机反馈「感觉就是盖了一层遮罩」：原来加载层是**不透明深色渐变**，
+     * 于是观感是"封面 → 一块黑布 → 视频"。现在用同款封面（`PlayerPreview` + `Fit`）
+     * 铺底 + 轻遮罩 + 小粒子，过渡变成"图 → 图+暗+粒子 → 视频"。
+     * 传 `null` 时退化回纯深色底（封面缺失的老行为）。
+     */
+    swipeCoverUrl: String? = null,
     /**
      * 手动横屏开关（`null` = 不显示该入口）。
      *
@@ -822,6 +834,7 @@ internal fun VideoPlayerPane(
             // 其余情况自身不带 pointerInput，上下滑翻页照常。
             SwipeWaitVeil(
                 visible = swipeWaitingFirstFrame,
+                coverUrl = swipeCoverUrl,
                 failed = swipeFailed,
                 onRetry = onRetrySwipe
             )
@@ -901,6 +914,19 @@ internal fun VideoPlayerPane(
 @Composable
 private fun SwipeWaitVeil(
     visible: Boolean,
+    /**
+     * 这一页的封面（`null` = 没有，退化成纯深色底）。
+     *
+     * 真机反馈「感觉就是在向下刷视频的时候加了一层遮罩」——原因是换页瞬间封面页被换成
+     * 播放器页，播放器页此时盖的是**不透明深色渐变**：用户看到的是"图 → 一块黑布 → 视频"。
+     * 现在改成：**先用这一页的封面铺底（与封面页同款 `PlayerPreview` + `Fit` 居中，
+     * 取景完全一致）+ 一层轻遮罩 + 粒子**，于是"图 → 图+暗+粒子 → 视频"，
+     * 遮罩不再是"另一层东西"。
+     *
+     * 注意封面用的是**不裁切**的 `PlayerPreview` 变体 + `ContentScale.Fit`：
+     * 与 `SwipeCoverPage` 同一个 URL、同一种取景，才不会出现"封面页一张、加载底另一张"的闪。
+     */
+    coverUrl: String? = null,
     /** 这一支取流/解码失败了：加载层留着，改成"错误 + 重试"，而不是撤掉露出一片黑。 */
     failed: Boolean = false,
     onRetry: (() -> Unit)? = null,
@@ -926,13 +952,37 @@ private fun SwipeWaitVeil(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .graphicsLayer { this.alpha = alpha.value }
-            .background(
-                // 深色纵向渐变而不是纯黑：纯黑读作"没画面了"，渐变读作"在加载"
-                Brush.verticalGradient(listOf(WaitVeilTopColor, WaitVeilBottomColor))
-            ),
+            .graphicsLayer { this.alpha = alpha.value },
         contentAlignment = Alignment.Center
     ) {
+        if (!failed && !coverUrl.isNullOrBlank()) {
+            // 封面铺底：与封面页同款（不裁切 + Fit 居中），整段过渡里"看到的是同一张图"
+            BiliAsyncImage(
+                url = coverUrl,
+                contentDescription = null,
+                variant = BiliImageVariant.PlayerPreview,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    // 轻遮罩：比原来的不透明渐变浅得多 —— 有封面时它只负责"压暗 + 提示在加载"；
+                    // 没有封面时（封面缺失/失败）自动退化成深色底（下面的兜底色）。
+                    if (failed || coverUrl.isNullOrBlank()) {
+                        Brush.verticalGradient(listOf(WaitVeilTopColor, WaitVeilBottomColor))
+                    } else {
+                        Brush.verticalGradient(
+                            listOf(
+                                WaitVeilScrimTopColor,
+                                WaitVeilScrimBottomColor
+                            )
+                        )
+                    }
+                )
+        )
         if (failed) {
             // 失败态：图标 + 文案 + 重试。整层只有按钮可点，其余区域不消费触摸
             // （刷视频的上下滑与返回手势照常可用）。
@@ -958,8 +1008,11 @@ private fun SwipeWaitVeil(
         } else {
             BiliParticleLoader(
                 modifier = Modifier
-                    // 大尺寸：占屏宽 34% 的正方形（不写 dp 字面量，跟着屏幕走）
-                    .fillMaxWidth(LOADER_WIDTH_FRACTION)
+                    // 有封面时用**小一档**的粒子（封面是主角，粒子只是"在加载"的提示）；
+                    // 没有封面时保持原来的大尺寸（它是唯一内容）。
+                    .fillMaxWidth(
+                        if (coverUrl.isNullOrBlank()) LOADER_WIDTH_FRACTION else VEIL_COVER_LOADER_WIDTH_FRACTION
+                    )
                     .aspectRatio(1f)
             )
         }
@@ -1119,8 +1172,20 @@ private val VeilErrorSpacing = 12.dp
 private val WaitVeilTopColor = Color(0xFF14161A)
 private val WaitVeilBottomColor = Color(0xFF08090B)
 
+/**
+ * 有封面铺底时的**轻遮罩**：压暗但不"糊黑"。
+ *
+ * 为什么要区分两套底色：没有封面时这一层就是唯一内容（需要够暗才不像"没画面"）；
+ * 有封面时它只是给"在加载"做提示，太暗就又会变成用户说的"一层遮罩"。
+ */
+private val WaitVeilScrimTopColor = Color(0x7314161A)
+private val WaitVeilScrimBottomColor = Color(0x8C08090B)
+
 /** 加载动画边长占屏宽的比例。0.34 在 1272px 屏上约 433px（≈155dp）—— 是"主角"不是"小转圈"。 */
 private const val LOADER_WIDTH_FRACTION = 0.34f
+
+/** 有封面铺底时粒子缩小一档（封面是主角，粒子只是"在加载"的提示）。 */
+private const val VEIL_COVER_LOADER_WIDTH_FRACTION = 0.20f
 
 /** 双击点赞爱心动效：在点击位置放大、上浮并淡出 */
 

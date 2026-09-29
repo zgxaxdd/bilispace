@@ -260,6 +260,17 @@ internal fun PortraitSwipePager(
         if (firstFrameRendered) waitingKey = null
     }
     val waitingFirstFrame = waitingKey != null
+    // 遮掩时间线（真机反馈「感觉就是盖了一层遮罩」）：必须能量出
+    // 「换页 → 遮罩出现 → 首帧到达 → 遮罩撤掉」四点的间隔，否则只能靠观感猜。
+    // 只在状态翻转时各打一行，不进重组刷屏。
+    LaunchedEffect(waitingFirstFrame, currentKey, playbackState.hasRenderedFirstFrame) {
+        Log.i(
+            TAG,
+            "veil: waiting=$waitingFirstFrame key=$currentKey " +
+                "firstFrame=${playbackState.hasRenderedFirstFrame} " +
+                "error=${playbackState.error != null} state=${playbackState.playbackState}"
+        )
+    }
     // 当前视频是不是横屏：决定要不要给"手动横屏"入口（竖屏视频转横屏只会更小）。
     // 与 VideoScreen 的 isPortraitVideo 同源同键（currentStream），不会两处算出不同结论。
     val isPortraitVideo = remember(playbackState.currentStream) {
@@ -285,6 +296,9 @@ internal fun PortraitSwipePager(
                     // 失败态：加载层留着并切成"错误 + 重试"（见 VideoPlayerPane 的 KDoc）
                     swipeFailed = playbackFailed,
                     onRetrySwipe = onRetryPlayback,
+                    // 加载层用它铺底（与 SwipeCoverPage 同一个封面、同一种取景），
+                    // 消灭"封面 → 一块黑布 → 视频"的遮罩观感
+                    swipeCoverUrl = entry.cover,
                     // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
                     landscapeForced = landscapeForced,
                     onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }
