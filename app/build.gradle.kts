@@ -8,14 +8,20 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// 签名凭据：Gradle 属性优先，其次**环境变量**。
+//
+// ⚠️ 必须走 `providers.environmentVariable(...)` 而**不能**用 `System.getenv(...)`：
+// 后者在配置阶段读值、不会被配置缓存跟踪 —— 开了配置缓存之后环境变量就传不进构建，
+// 症状是打包时报 `KeytoolException: keystore password was incorrect`
+// （密码实际为 null）。真机打包时踩过这个坑（见 report-2026-09-28-C10.md §8.3）。
 val signingStoreFile: String? = providers.gradleProperty("SIGNING_STORE_FILE").orNull
-    ?: System.getenv("SIGNING_STORE_FILE")
+    ?: providers.environmentVariable("SIGNING_STORE_FILE").orNull
 val signingStorePassword: String? = providers.gradleProperty("SIGNING_STORE_PASSWORD").orNull
-    ?: System.getenv("SIGNING_STORE_PASSWORD")
+    ?: providers.environmentVariable("SIGNING_STORE_PASSWORD").orNull
 val signingKeyAlias: String? = providers.gradleProperty("SIGNING_KEY_ALIAS").orNull
-    ?: System.getenv("SIGNING_KEY_ALIAS")
+    ?: providers.environmentVariable("SIGNING_KEY_ALIAS").orNull
 val signingKeyPassword: String? = providers.gradleProperty("SIGNING_KEY_PASSWORD").orNull
-    ?: System.getenv("SIGNING_KEY_PASSWORD")
+    ?: providers.environmentVariable("SIGNING_KEY_PASSWORD").orNull
     ?: signingStorePassword
 val hasReleaseSigning: Boolean =
     !signingStoreFile.isNullOrBlank() &&

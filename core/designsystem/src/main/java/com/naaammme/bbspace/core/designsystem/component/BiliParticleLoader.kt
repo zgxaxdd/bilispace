@@ -16,27 +16,27 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * 加载指示器（刷视频模式等取流时用）——「光尘轨道」式。
+ * 加载指示器（刷视频取流时用）——**一枚彗尾弧**。
  *
- * ## 观感
- * 三层叠出来的现代感（全部相对 `size` 计算，放到任意尺寸都成立）：
- * 1. **核心光球**：径向渐变柔光 + 中心亮点，两拍一次呼吸；
- * 2. **外圈扫光弧**：240° 渐变弧（两端透明）每周期转一圈，像在"扫描"；
- * 3. **两层轨道粒子**：内圈 8 颗反向快转、外圈 14 颗正向慢转，每颗带 4 段拖尾
- *    （位置回退采样 + alpha 递减），读起来是两股反向流动的光尘。
+ * ## 观感（做减法之后的形态）
+ * 整个动画只有一个元素：一枚 **278° 的细弧**，头部亮、尾部渐隐（扫光渐变），
+ * 恒速旋转 + 极缓的整体呼吸。没有粒子、没有内圈、没有实心光球 ——
+ * 粒子与多层叠光在 155dp 的尺寸里读起来是"噪"，而单弧的**方向感**才是"在加载"。
  *
- * 不用 Material 转圈：那是"系统忙"的语义，这里要的是"内容马上来"的等待感。
+ * 为什么这样更"现代"：
+ * - 单一主体 = 视觉噪音低，符合当前系统级加载指示（iOS / Material 3 expressive）的取法；
+ * - 头部亮尾部透明 = 有方向、有速度感，不需要靠"转得快"表达"在动"；
+ * - 恒速 + 呼吸（而不是缓入缓出） = 长时间盯着也不会觉得"一卡一卡"。
  *
  * ## 性能约定（与 `FrameBudgetLintTest` 同一口径）
  * - 相位**只经绘制期读取**：`mutableFloatStateOf` 在 `Canvas` 的 draw lambda 里读，
- *   失效只落到绘制阶段、**不触发重组**；因此既不用 `rememberInfiniteTransition`
- *   （棘轮上限 2），也不用 `animate*AsState`（组合期读值 = 每帧重组宿主）；
- * - 粒子参数在 `remember` 里一次性算进 `FloatArray`（确定性 LCG，无 `Random`、
- *   无 List、无逐帧分配），绘制循环里只有算术与 `drawCircle` / `drawArc`；
+ *   失效只落到绘制阶段、**不触发重组**；既不用 `rememberInfiniteTransition`（棘轮上限 2），
+ *   也不用 `animate*AsState`（组合期读值 = 每帧重组宿主）；
+ * - 每帧只有一次 `drawArc`（单元素，比之前的"核心 + 双弧 + 22 颗粒子 × 4 段拖尾"
+ *   少了约 90 次 draw 调用）；
  * - 尺寸全部取 `size.minDimension` 的比例，**不引入任何 dp/sp 字面量**
  *   （DesignTokenLintTest 的棘轮不为本组件让路）。
  *
@@ -48,7 +48,6 @@ fun BiliParticleLoader(
     color: Color = Color.White,
 ) {
     val phase = remember { mutableFloatStateOf(0f) }
-    val field = remember { ParticleField() }
     LaunchedEffect(Unit) {
         while (true) {
             // 与系统动画时长缩放联动：无障碍设置里关掉动画时不会空转刷帧
@@ -58,169 +57,79 @@ fun BiliParticleLoader(
         }
     }
     Canvas(modifier = modifier) {
-        drawOrbitLoader(field = field, phase = phase.value, color = color)
+        drawCometArc(phase = phase.value, color = color)
     }
 }
 
-/** 一颗粒子的静态参数；全部在 `remember` 里算好，绘制期只读。 */
-private class ParticleField {
-    val baseAngle = FloatArray(PARTICLE_COUNT)
-    val radius = FloatArray(PARTICLE_COUNT)
-    val turns = FloatArray(PARTICLE_COUNT)
-    val delay = FloatArray(PARTICLE_COUNT)
-    val sizeFactor = FloatArray(PARTICLE_COUNT)
-
-    init {
-        // 确定性 LCG：同一版本下粒子排布稳定（不用 Random，避免每次组合都不一样）
-        var seed = 0x2F6E2B1
-        fun next(): Float {
-            seed = seed * 1_664_525 + 1_013_904_223
-            return ((seed ushr 8) and 0xFFFF) / 65_535f
-        }
-        for (i in 0 until PARTICLE_COUNT) {
-            val outer = i % 5 < 3 // 3:2 分布到外/内两层，避免两层数量一样显得呆板
-            baseAngle[i] = (i.toFloat() / PARTICLE_COUNT) * TWO_PI * 1.7f + next() * 0.6f
-            radius[i] = (if (outer) OUTER_RING else INNER_RING) * (0.94f + 0.12f * next())
-            // 内圈反向且更快：两股光尘交错，视觉上"活"
-            val speed = if (outer) OUTER_TURNS else -INNER_TURNS
-            turns[i] = speed * (0.9f + 0.2f * next())
-            delay[i] = next()
-            sizeFactor[i] = DOT_BASE * (0.55f + 0.9f * next())
-        }
-    }
-}
-
-private fun DrawScope.drawOrbitLoader(field: ParticleField, phase: Float, color: Color) {
+/**
+ * 单弧绘制：先按"轨道槽"画一圈极淡的底环（告诉眼睛这是一枚环，不是一段飘着的线），
+ * 再叠主体彗尾弧。
+ *
+ * 弧的几何：角 0（3 点钟）起、顺时针 [ARC_SPAN]，所以渐变也按同方向铺，
+ * 头部落在 `ARC_SPAN / 360` 处 —— 这是"渐变要与弧对齐"的关键，写错就会变成
+ * "亮点在中间、两头一样暗"。
+ */
+private fun DrawScope.drawCometArc(phase: Float, color: Color) {
     val minDim = size.minDimension
     if (minDim <= 0f) return
     val center = Offset(size.width / 2f, size.height / 2f)
+    val radius = minDim * ARC_R
+    val stroke = minDim * ARC_STROKE
 
-    // ── 1) 核心光球：径向渐变 + 呼吸（外圈透明 → 中心亮）
-    val pulse = 0.5f + 0.5f * sin(phase * TWO_PI * 2f)
-    val glowRadius = minDim * (CORE_FRAC + CORE_PULSE_FRAC * pulse) * CORE_GLOW_MULT
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                color.copy(alpha = CORE_ALPHA_MIN + CORE_ALPHA_SPAN * pulse),
-                color.copy(alpha = 0f)
-            ),
-            center = center,
-            radius = glowRadius
-        ),
-        radius = glowRadius,
-        center = center
-    )
-    drawCircle(
-        color = color.copy(alpha = 0.72f),
-        radius = minDim * CORE_FRAC * 0.20f,
-        center = center
+    // 极淡底环：全周 8% 白，给"环"一个参照物（也避免深色底上只有一段线显得碎）
+    drawArc(
+        color = color.copy(alpha = TRACK_ALPHA),
+        startAngle = 0f,
+        sweepAngle = 360f,
+        useCenter = false,
+        topLeft = Offset(center.x - radius, center.y - radius),
+        size = Size(radius * 2f, radius * 2f),
+        style = Stroke(width = stroke, cap = StrokeCap.Round)
     )
 
-    // ── 2) 外圈扫光弧：渐变两端透明，每周期整圈（连同下面 rotate 一起读相位）
-    val arcRadius = minDim * ARC_R
-    val arcStroke = minDim * ARC_STROKE
+    // 呼吸：整体透明度在两拍之间缓慢起伏（不是尺寸抖动 —— 尺寸变化会读成"闪"）
+    val breath = BREATH_MIN + BREATH_SPAN * (0.5f + 0.5f * sin(phase * TWO_PI * BREATH_CYCLES))
+    val headStop = ARC_SPAN / 360f
+
     rotate(degrees = phase * 360f, pivot = center) {
         drawArc(
             brush = Brush.sweepGradient(
-                colors = listOf(
-                    color.copy(alpha = 0f),
-                    color.copy(alpha = 0.85f),
-                    color.copy(alpha = 0f)
-                ),
+                // 与弧同向：尾部几乎透明 → 中段渐亮 → 头部最亮 → 收尾归零。
+                // 用 `vararg Pair<Float, Color>` 这个重载（带 stops 的那个签名在 sweepGradient 上
+                // 不存在，写错会直接报"没有候选重载"）。
+                0f to color.copy(alpha = 0f),
+                headStop * 0.45f to color.copy(alpha = 0.30f * breath),
+                headStop * 0.92f to color.copy(alpha = 0.95f * breath),
+                headStop to color.copy(alpha = 1f * breath),
+                1f to color.copy(alpha = 0f),
                 center = center
             ),
             startAngle = 0f,
             sweepAngle = ARC_SPAN,
             useCenter = false,
-            topLeft = Offset(center.x - arcRadius, center.y - arcRadius),
-            size = Size(arcRadius * 2f, arcRadius * 2f),
-            style = Stroke(width = arcStroke, cap = StrokeCap.Round)
+            topLeft = Offset(center.x - radius, center.y - radius),
+            size = Size(radius * 2f, radius * 2f),
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
-    }
-    // 内圈细弧反向转：与外圈形成"对切"，比单弧更像仪表盘
-    val innerArcRadius = minDim * INNER_ARC_R
-    rotate(degrees = -phase * 360f * INNER_ARC_TURNS, pivot = center) {
-        drawArc(
-            color = color.copy(alpha = 0.14f),
-            startAngle = 40f,
-            sweepAngle = INNER_ARC_SPAN,
-            useCenter = false,
-            topLeft = Offset(center.x - innerArcRadius, center.y - innerArcRadius),
-            size = Size(innerArcRadius * 2f, innerArcRadius * 2f),
-            style = Stroke(width = minDim * INNER_ARC_STROKE, cap = StrokeCap.Round)
-        )
-    }
-
-    // ── 3) 两层轨道粒子 + 拖尾（每颗回退采样 TRAIL_SAMPLES 个位置，alpha/尺寸递减）
-    for (i in field.baseAngle.indices) {
-        val cycles = phase * field.turns[i] * TWO_PI
-        val angle = field.baseAngle[i] + cycles
-        val radius = minDim * field.radius[i]
-        val dot = minDim * field.sizeFactor[i]
-        // 相位错开的闪烁：同一颗粒子也有明暗呼吸，避免"整圈同时亮"
-        val blink = 0.65f + 0.35f * sin((phase + field.delay[i]) * TWO_PI)
-        for (sample in 0 until TRAIL_SAMPLES) {
-            val back = sample * TRAIL_STEP_RAD * (if (field.turns[i] >= 0f) 1f else -1f)
-            val fade = 1f - sample.toFloat() / TRAIL_SAMPLES
-            val alpha = PARTICLE_ALPHA * blink * fade * fade
-            if (alpha <= 0.02f) continue
-            val a = angle - back
-            drawCircle(
-                color = color.copy(alpha = alpha),
-                radius = dot * (1f - 0.45f * (1f - fade)),
-                center = Offset(
-                    x = center.x + cos(a) * radius,
-                    y = center.y + sin(a) * radius
-                )
-            )
-        }
     }
 }
 
-/** 一个完整周期（毫秒）。3.0s：更慢更"稳"，快节奏的转圈会读成"卡住了"。 */
-private const val LOOP_MS = 3_000L
-
-/** 粒子总数：3:2 分到外/内两层。12 颗的"轨道感"足够，22 颗在 155dp 里会显得杂乱。 */
-private const val PARTICLE_COUNT = 12
+/** 一个完整周期（毫秒）。2.6s：恒速转一圈，慢到不焦虑、快到看得出在动。 */
+private const val LOOP_MS = 2_600L
 
 private const val TWO_PI = (2.0 * PI).toFloat()
 
-/** 外/内轨道半径（占 `minDimension` 的比例）。 */
-private const val OUTER_RING = 0.34f
-private const val INNER_RING = 0.21f
+/** 弧半径与线宽（占 `minDimension` 的比例）。 */
+private const val ARC_R = 0.44f
+private const val ARC_STROKE = 0.013f
 
-/** 每周期转的圈数（内圈为负 = 反向）。 */
-private const val OUTER_TURNS = 1.0f
-private const val INNER_TURNS = 1.4f
+/** 主体弧的张角：278° 留出 82° 缺口 —— 缺口是方向感的来源，别再加大。 */
+private const val ARC_SPAN = 278f
 
-/** 单颗粒子基准半径（占 `minDimension` 的比例，带抖动）。 */
-private const val DOT_BASE = 0.011f
+/** 底环透明度：够看出"是一枚环"，又不与主体抢。 */
+private const val TRACK_ALPHA = 0.08f
 
-/** 拖尾：采样段数与每段回退弧度（3 段足够读出方向，4 段会糊成一条线）。 */
-private const val TRAIL_SAMPLES = 3
-private const val TRAIL_STEP_RAD = 0.075f
-
-private const val PARTICLE_ALPHA = 0.82f
-
-/**
- * 核心光球：基准半径、呼吸幅度与光晕倍数。
- *
- * 现代审美取向：**只留一层柔和光晕，不要"实心球"** —— 所以核心点更小、更淡，
- * 呼吸幅度收敛（原来的 0.16~0.38 alpha + 2.8 倍光晕偏"霓虹"）。
- */
-private const val CORE_FRAC = 0.075f
-private const val CORE_PULSE_FRAC = 0.016f
-private const val CORE_GLOW_MULT = 3.2f
-private const val CORE_ALPHA_MIN = 0.10f
-private const val CORE_ALPHA_SPAN = 0.14f
-
-/** 外圈扫光弧：半径、线宽、弧长（更细、更长的弧 = 更"轻"的现代感）。 */
-private const val ARC_R = 0.455f
-private const val ARC_STROKE = 0.012f
-private const val ARC_SPAN = 268f
-
-/** 内圈细弧：半径、线宽、弧长、每周期圈数（反向）。 */
-private const val INNER_ARC_R = 0.295f
-private const val INNER_ARC_STROKE = 0.006f
-private const val INNER_ARC_SPAN = 110f
-private const val INNER_ARC_TURNS = 1.4f
+/** 呼吸：两拍一次、幅度 12%（只改透明度）。 */
+private const val BREATH_CYCLES = 2f
+private const val BREATH_MIN = 0.86f
+private const val BREATH_SPAN = 0.14f
