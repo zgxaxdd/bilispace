@@ -111,8 +111,8 @@ private fun DrawScope.drawOrbitLoader(field: ParticleField, phase: Float, color:
         center = center
     )
     drawCircle(
-        color = color.copy(alpha = 0.9f),
-        radius = minDim * CORE_FRAC * 0.26f,
+        color = color.copy(alpha = 0.72f),
+        radius = minDim * CORE_FRAC * 0.20f,
         center = center
     )
 
@@ -141,7 +141,7 @@ private fun DrawScope.drawOrbitLoader(field: ParticleField, phase: Float, color:
     val innerArcRadius = minDim * INNER_ARC_R
     rotate(degrees = -phase * 360f * INNER_ARC_TURNS, pivot = center) {
         drawArc(
-            color = color.copy(alpha = 0.22f),
+            color = color.copy(alpha = 0.14f),
             startAngle = 40f,
             sweepAngle = INNER_ARC_SPAN,
             useCenter = false,
@@ -177,45 +177,50 @@ private fun DrawScope.drawOrbitLoader(field: ParticleField, phase: Float, color:
     }
 }
 
-/** 一个完整周期（毫秒）。2.4s：慢到看得清轨道、快到不像卡住。 */
-private const val LOOP_MS = 2_400L
+/** 一个完整周期（毫秒）。3.0s：更慢更"稳"，快节奏的转圈会读成"卡住了"。 */
+private const val LOOP_MS = 3_000L
 
-/** 粒子总数：3:2 分到外/内两层。 */
-private const val PARTICLE_COUNT = 22
+/** 粒子总数：3:2 分到外/内两层。12 颗的"轨道感"足够，22 颗在 155dp 里会显得杂乱。 */
+private const val PARTICLE_COUNT = 12
 
 private const val TWO_PI = (2.0 * PI).toFloat()
 
 /** 外/内轨道半径（占 `minDimension` 的比例）。 */
-private const val OUTER_RING = 0.355f
-private const val INNER_RING = 0.225f
+private const val OUTER_RING = 0.34f
+private const val INNER_RING = 0.21f
 
 /** 每周期转的圈数（内圈为负 = 反向）。 */
 private const val OUTER_TURNS = 1.0f
-private const val INNER_TURNS = 1.6f
+private const val INNER_TURNS = 1.4f
 
-/** 单颗粒子基准半径（占 `minDimension` 的比例，带 0.55~1.45 倍抖动）。 */
-private const val DOT_BASE = 0.013f
+/** 单颗粒子基准半径（占 `minDimension` 的比例，带抖动）。 */
+private const val DOT_BASE = 0.011f
 
-/** 拖尾：采样段数与每段回退弧度。 */
-private const val TRAIL_SAMPLES = 4
-private const val TRAIL_STEP_RAD = 0.085f
+/** 拖尾：采样段数与每段回退弧度（3 段足够读出方向，4 段会糊成一条线）。 */
+private const val TRAIL_SAMPLES = 3
+private const val TRAIL_STEP_RAD = 0.075f
 
-private const val PARTICLE_ALPHA = 0.9f
+private const val PARTICLE_ALPHA = 0.82f
 
-/** 核心光球：基准半径、呼吸幅度与光晕倍数。 */
-private const val CORE_FRAC = 0.085f
-private const val CORE_PULSE_FRAC = 0.022f
-private const val CORE_GLOW_MULT = 2.8f
-private const val CORE_ALPHA_MIN = 0.16f
-private const val CORE_ALPHA_SPAN = 0.22f
+/**
+ * 核心光球：基准半径、呼吸幅度与光晕倍数。
+ *
+ * 现代审美取向：**只留一层柔和光晕，不要"实心球"** —— 所以核心点更小、更淡，
+ * 呼吸幅度收敛（原来的 0.16~0.38 alpha + 2.8 倍光晕偏"霓虹"）。
+ */
+private const val CORE_FRAC = 0.075f
+private const val CORE_PULSE_FRAC = 0.016f
+private const val CORE_GLOW_MULT = 3.2f
+private const val CORE_ALPHA_MIN = 0.10f
+private const val CORE_ALPHA_SPAN = 0.14f
 
-/** 外圈扫光弧：半径、线宽、弧长。 */
+/** 外圈扫光弧：半径、线宽、弧长（更细、更长的弧 = 更"轻"的现代感）。 */
 private const val ARC_R = 0.455f
-private const val ARC_STROKE = 0.018f
-private const val ARC_SPAN = 250f
+private const val ARC_STROKE = 0.012f
+private const val ARC_SPAN = 268f
 
 /** 内圈细弧：半径、线宽、弧长、每周期圈数（反向）。 */
-private const val INNER_ARC_R = 0.30f
-private const val INNER_ARC_STROKE = 0.008f
-private const val INNER_ARC_SPAN = 130f
-private const val INNER_ARC_TURNS = 1.6f
+private const val INNER_ARC_R = 0.295f
+private const val INNER_ARC_STROKE = 0.006f
+private const val INNER_ARC_SPAN = 110f
+private const val INNER_ARC_TURNS = 1.4f
