@@ -141,15 +141,28 @@ internal fun PortraitSwipePager(
     // 拖动中就预取（而不是等停稳）：用户"明确要往那一页去"时，playurl 请求已经飞出去了，
     // 停稳后通常只等解码 —— 这是"上滑之后画面来得快不快"的关键一步。
     // 用一个页面级的去重（lastPrefetchPage）压住每帧都会变化的 offsetFraction。
+    // 独立的「队列变化 / 换页」触发：**不依赖 offset**。
+    //
+    // 真机实测：进场那一刻队列还是空的（`available = 0`，预取空转），
+    // 而停稳时的 `currentPageOffsetFraction` 又未必落在 [SETTLED_OFFSET_EPSILON] 内 ——
+    // 只靠 offset 判"停稳"会出现"进场后完全没有预取，等用户先滑一次才预取"。
+    // 所以只要**页数或当前页**变了就补一次（VM 侧按 aid#cid 去重，重复调用无副作用）。
+    LaunchedEffect(pages.size, pagerState.currentPage) {
+        onPrefetch(pagerState.currentPage)
+    }
     var lastPrefetchPage by remember { mutableStateOf(-1) }
-    LaunchedEffect(pagerState) {
+    // key 里必须带 `pages`：进场那一刻队列还是空的（`available = 0`），第一轮预取会空转；
+    // 等详情/补货把队列填上后，只有随 `pages` 重启这个 effect 才会补上"第 0 页的邻居"。
+    // 真机实测踩过：不带 `pages` 时，第 0 页的预取要等用户先滑一次才发生（等于没预取）。
+    LaunchedEffect(pagerState, pages) {
         snapshotFlow { pagerState.currentPage to pagerState.currentPageOffsetFraction }
             .collect { (page, offset) ->
                 val target = SwipePrefetchPolicy.dragTargetPage(
                     currentPage = page,
                     offsetFraction = offset,
                     lastPageIndex = pageCountState.value - 1
-                ) ?: page.takeIf { offset == 0f } ?: return@collect
+                ) ?: page.takeIf { kotlin.math.abs(offset) <= SETTLED_OFFSET_EPSILON }
+                    ?: return@collect
                 if (target == lastPrefetchPage) return@collect
                 lastPrefetchPage = target
                 onPrefetch(target)
@@ -331,6 +344,15 @@ private fun SwipeQueueTailHint(
 
 /** 封面页加载动画的边长（占屏宽比例）。比播放器页的加载层小一档：它压在封面之上。 */
 private const val COVER_LOADER_WIDTH_FRACTION = 0.26f
+
+/**
+ * "停稳"判定用的偏移容差。
+ *
+ * **不能判 `offset == 0f`**：真机上停稳时 `currentPageOffsetFraction` 往往不是精确的 0
+ * （浮点残差 / pager 的 settle 收敛），等于 0 的判据会让"停稳预取"这一支永远不触发 ——
+ * 实测症状就是"进场后完全没有预取日志，等用户滑一次才预取"。
+ */
+private const val SETTLED_OFFSET_EPSILON = 0.02f
 
 /** 非当前页：封面铺满 + 底部标题/UP 渐变信息条 + 当前页取流中的加载指示。 */
 @Composable

@@ -630,6 +630,10 @@ class VideoViewModel @Inject constructor(
                 available = pages.size - page - 1
             )
             if (count <= 0) return@launch
+            android.util.Log.i(
+                "PortraitSwipe",
+                "prefetch want=$count page=$page pages=${pages.size} prefetchEnabled=$prefetchEnabled"
+            )
             SwipePrefetchPolicy.targetPages(page, pages.size, count).forEach { index ->
                 val entry = pages.getOrNull(index) ?: return@forEach
                 prefetchEntry(entry)
@@ -654,7 +658,7 @@ class VideoViewModel @Inject constructor(
             runCatchingCancellable {
                 detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
             }
-            android.util.Log.i("PortraitSwipe", "prefetch: key=$key count=${prefetchedKeys.size}")
+            android.util.Log.i("PortraitSwipe", "prefetched: key=$key total=${prefetchedKeys.size}")
         }
     }
 
