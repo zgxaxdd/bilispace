@@ -324,10 +324,15 @@ fun VideoScreen(
         }
         if (viewModel.swipeAnchor.value == null) {
             viewModel.beginSwipeSession()
-            swipeSessionActive = isPortraitVideo && viewModel.swipeQueue.value.isNotEmpty()
+            // 启用判据：**不再限制竖屏**（用户需求 4：横屏视频也要能进刷视频模式）。
+            // 会话内仍然锁竖屏，于是横屏视频在竖屏全屏里以 letterbox 呈现 —— 与"以竖屏
+            // 全屏方式显示播放内容"的要求一致；需要满屏时顶栏还有手动「横屏」胶囊。
+            // 队列为空（相关推荐没有可刷的）时仍不启用，保持单视频全屏的现状。
+            swipeSessionActive = viewModel.swipeQueue.value.isNotEmpty()
             android.util.Log.i(
                 "PortraitSwipe",
-                "activate: portrait=$isPortraitVideo queue=${viewModel.swipeQueue.value.size} active=$swipeSessionActive"
+                "activate: portrait=$isPortraitVideo queue=${viewModel.swipeQueue.value.size} " +
+                    "active=$swipeSessionActive"
             )
         }
     }

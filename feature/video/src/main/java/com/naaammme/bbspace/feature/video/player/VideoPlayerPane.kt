@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -435,6 +436,15 @@ internal fun VideoPlayerPane(
      */
     swipeCoverUrl: String? = null,
     /**
+     * 打开评论（刷视频会话里由 pager 提供宿主）。
+     *
+     * bbspace 的 `CommentPanel` 是**详情 pager 的一页**（`VideoDetailPage.kt:238`），
+     * 不是弹层 —— 所以连播里要用它，必须由上层（`PortraitSwipePager`）另起一个
+     * `ModalBottomSheet` 宿主，并把 `commentSubject` 与两个 `LazyListState` 一起传进去。
+     * 传 `null` 时不显示评论按钮（宁可少一个入口，也不做点了没反应的假按钮）。
+     */
+    onOpenComments: (() -> Unit)? = null,
+    /**
      * 手动横屏开关（`null` = 不显示该入口）。
      *
      * 为什么需要：上下滑会话期间 VideoScreen **锁死竖屏**（否则切视频时会因
@@ -789,9 +799,12 @@ internal fun VideoPlayerPane(
             // 只在"会话内 + 不在等首帧"时出现：等首帧时整屏是加载层，进度条会浮在它上面；
             // 非会话（详情页）有完整控制条，不需要这条。
             if (swipePagingActive && !swipeWaitingFirstFrame) {
+                // 进度条**上移**到导航条之上：原来贴屏幕最底，被手势条压着、也显得"贴边"。
                 SwipeProgressLine(
                     viewModel = viewModel,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = SwipeProgressBottomInset)
                 )
                 // 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
                 //
@@ -814,6 +827,9 @@ internal fun VideoPlayerPane(
                     likeText = viewModel.videoState.collectAsStateWithLifecycle()
                         .value.detail?.stat?.like,
                     onToggleLike = viewModel::toggleLike,
+                    replyText = viewModel.videoState.collectAsStateWithLifecycle()
+                        .value.detail?.stat?.reply,
+                    onOpenComments = onOpenComments,
                     shareBvid = viewModel.videoState.collectAsStateWithLifecycle().value.ids.bvid,
                     shareAid = viewModel.videoState.collectAsStateWithLifecycle().value.ids.aid,
                     shareTitle = viewModel.videoState.collectAsStateWithLifecycle()
@@ -1070,6 +1086,9 @@ private fun SwipeSessionActionRail(
     liked: Boolean,
     likeText: String?,
     onToggleLike: () -> Unit,
+    replyText: String?,
+    /** 打开评论（`null` = 当前场景还没有评论宿主，不显示评论按钮，避免假按钮）。 */
+    onOpenComments: (() -> Unit)?,
     shareBvid: String?,
     shareAid: Long,
     shareTitle: String?,
@@ -1079,38 +1098,78 @@ private fun SwipeSessionActionRail(
     Column(
         modifier = modifier.padding(end = BiliSpacing.md),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
-        IconButton(onClick = onToggleLike) {
-            Icon(
-                imageVector = Icons.Filled.Favorite,
-                contentDescription = if (liked) "取消点赞" else "点赞",
-                tint = if (liked) LikeHeartColor else Color.White.copy(alpha = 0.92f)
+        // 现代短视频的互动栏：图标大、计数在图标**下方**、层间距均匀（抖音/B 站竖屏同款）
+        SwipeRailAction(
+            icon = Icons.Filled.Favorite,
+            contentDescription = if (liked) "取消点赞" else "点赞",
+            label = likeText,
+            tint = if (liked) LikeHeartColor else Color.White,
+            onClick = onToggleLike
+        )
+        if (onOpenComments != null) {
+            SwipeRailAction(
+                icon = Icons.AutoMirrored.Filled.Comment,
+                contentDescription = "评论",
+                label = replyText,
+                tint = Color.White,
+                onClick = onOpenComments
             )
         }
-        likeText?.takeIf(String::isNotBlank)?.let { count ->
-            Text(
-                text = count,
-                color = Color.White.copy(alpha = 0.86f),
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1
-            )
-        }
-        IconButton(
+        SwipeRailAction(
+            icon = Icons.Filled.Share,
+            contentDescription = "分享",
+            label = null,
+            tint = Color.White,
             onClick = {
                 // 与详情页共用同一套链接构造（BV 优先、av 兜底）
                 val url = ShareUtils.videoUrl(shareBvid, shareAid, page = 0)
                 ShareUtils.shareText(context, shareTitle, url)
             }
-        ) {
+        )
+    }
+}
+
+/**
+ * 互动栏里的单个动作：圆形图标 + 下方计数。
+ *
+ * 视觉约定（对齐现代短视频）：图标 28dp 视觉尺寸、白色 + 8% 投影保证任何画面上都可读；
+ * 计数用 `labelSmall`、86% 白。整块用 `IconButton` 保证 ≥48dp 触摸目标（无障碍下限）。
+ */
+@Composable
+private fun SwipeRailAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    label: String?,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = onClick) {
             Icon(
-                imageVector = Icons.Filled.Share,
-                contentDescription = "分享",
-                tint = Color.White.copy(alpha = 0.92f)
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier.size(SwipeRailIconSize)
+            )
+        }
+        label?.takeIf(String::isNotBlank)?.let { count ->
+            Text(
+                text = count,
+                color = Color.White.copy(alpha = 0.88f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
             )
         }
     }
 }
+
+/** 互动栏图标视觉尺寸（触摸目标由 IconButton 的 48dp 保证）。走 spacing token，不新增 dp 字面量。 */
+private val SwipeRailIconSize = BiliSpacing.xxl
+
+/** 会话内进度条的底部内边距：抬到手势导航条之上。 */
+private val SwipeProgressBottomInset = BiliSpacing.xxxl
 
 /** 轨道高度占屏高比例（≈3dp）：够看清、又不抢画面。 */
 private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f

@@ -5,6 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import com.naaammme.bbspace.feature.comment.CommentPanel
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -75,6 +79,7 @@ import kotlinx.coroutines.launch
  * B 站官方上下滑语义一致。队列耗尽（推荐为空）自然到头，不循环。
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun PortraitSwipePager(
     anchor: SwipeEntry,
@@ -277,6 +282,10 @@ internal fun PortraitSwipePager(
         val stream = playbackState.currentStream ?: return@remember true
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
     }
+    // ── 会话内评论（用户需求 1：刷视频模式要能看评论）──────────────────────────────
+    // bbspace 的 `CommentPanel` 本来是**详情 pager 的一页**（不是弹层），所以这里另起一个
+    // `ModalBottomSheet` 宿主：单实例挂在 pager 上（不是每页一个），交互栏的评论按钮把它打开。
+    var showComments by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val entry = pages.getOrNull(page) ?: return@VerticalPager
@@ -289,6 +298,7 @@ internal fun PortraitSwipePager(
                     onToggleFull = onToggleFull,
                     onBackClick = onBackClick,
                     onGoHome = onGoHome,
+                    onOpenComments = { showComments = true },
                     // 翻页会话激活：垂直拖动让位给 pager（否则亮度/音量手势抢走上下滑）
                     swipePagingActive = true,
                     // 等首帧加载层：深色底 + 大尺寸粒子，首帧到达后淡出
@@ -320,7 +330,27 @@ internal fun PortraitSwipePager(
             )
         }
     }
+
+    // 评论弹层：宿主在这里（**单实例**），`CommentPanel` 复用详情页那一份实现。
+    // 高度给 85% 屏高：列表要能滚，同时留出上方可点区域便于关闭。
+    if (showComments) {
+        ModalBottomSheet(
+            onDismissRequest = { showComments = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            CommentPanel(
+                subject = viewModel.commentSubject,
+                isActive = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(COMMENT_SHEET_HEIGHT_FRACTION)
+            )
+        }
+    }
 }
+
+/** 评论弹层高度占屏比。 */
+private const val COMMENT_SHEET_HEIGHT_FRACTION = 0.85f
 
 private const val TAG = "PortraitSwipe"
 
