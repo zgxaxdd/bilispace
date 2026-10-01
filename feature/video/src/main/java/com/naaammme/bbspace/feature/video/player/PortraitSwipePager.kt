@@ -141,6 +141,8 @@ internal fun PortraitSwipePager(
             .distinctUntilChanged()
             .collect { page ->
                 val entry = pages.getOrNull(page) ?: return@collect
+                // 状态机记账（SW-02）：Ready.page 跟随落定页，供恢复/快照与后续派生 UI 用。
+                viewModel.onSwipePageChanged(page)
                 if (entry.key != requestedKey) {
                     requestedKey = entry.key
                     Log.i(
@@ -213,7 +215,7 @@ internal fun PortraitSwipePager(
     // **幂等键**（对照 BiliPai `lastAutoAdvancedBvid`，PortraitVideoPager.kt:902-905）：
     // 某些机型/解码器会在同一次播完里连发两次 STATE_ENDED（或与引擎重建叠加），
     // 没有去重就会**一次翻两页**（用户看到"跳过了一支"）。同一支视频只自动翻一次。
-    var lastAutoAdvancedKey by remember { mutableStateOf<String?>(null) }
+    // 键存在会话状态机里（SW-02 从 remember 提升）：随会话 exit 清空、进程重建归零。
     val player by viewModel.player.collectAsStateWithLifecycle()
     // 初值给默认设置：DataStore 的 Flow 没有同步初值，而默认值就是"自动翻页开"，
     // 第一帧判据与落地后的真实值一致（不会出现"先不翻、过一帧才开始翻"的抖动）。
@@ -231,10 +233,11 @@ internal fun PortraitSwipePager(
                     autoAdvanceEnabled = playerSettings.playback.swipeAutoAdvance,
                     repeatOne = playerSettings.playback.repeatMode != PlayerRepeatMode.Off,
                     isLastPage = next > pages.lastIndex,
-                    alreadyAdvancedForThisVideo = key.isNotEmpty() && key == lastAutoAdvancedKey
+                    alreadyAdvancedForThisVideo =
+                        key.isNotEmpty() && key == viewModel.swipeLastAutoAdvancedKey.value
                 )
                 if (!shouldAdvance) return
-                lastAutoAdvancedKey = key
+                viewModel.noteSwipeAutoAdvanced(key)
                 Log.i(TAG, "autoAdvance: page=${pagerState.currentPage} -> $next key=$key")
                 scope.launch { pagerState.animateScrollToPage(next) }
             }

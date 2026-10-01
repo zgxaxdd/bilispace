@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.feature.video
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
@@ -41,10 +42,15 @@ import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
-import com.naaammme.bbspace.core.swipe.resolveSwipeQueueTail
+import com.naaammme.bbspace.core.swipe.session.SwipeEntryVia
+import com.naaammme.bbspace.core.swipe.session.SwipeSessionController
+import com.naaammme.bbspace.core.swipe.session.SwipeSessionState
+import com.naaammme.bbspace.core.swipe.session.isSnapshotWorthy
+import com.naaammme.bbspace.core.swipe.session.parseSwipeSessionSnapshot
+import com.naaammme.bbspace.core.swipe.session.swipeSessionSnapshotJson
+import com.naaammme.bbspace.core.swipe.selectSwipeRefillFallbackTarget
 import com.naaammme.bbspace.core.swipe.shouldFetchNextRefillPage
 import com.naaammme.bbspace.core.swipe.shouldRunSwipeRefillFallback
-import com.naaammme.bbspace.core.swipe.selectSwipeRefillFallbackTarget
 import com.naaammme.bbspace.core.swipe.swipeEntriesFromRelates
 import com.naaammme.bbspace.core.swipe.swipeEntryFromFeedItem
 import com.naaammme.bbspace.core.swipe.swipeEntryFromStory
@@ -123,6 +129,8 @@ private data class InteractionResetKey(
 
 @HiltViewModel
 class VideoViewModel @Inject constructor(
+    /** 会话快照的持久化（进程重建恢复，SW-02 不变式 4）。 */
+    private val savedStateHandle: SavedStateHandle,
     private val playbackController: VideoPlaybackController,
     private val playerSettings: AppSettings,
     private val sponsorBlockClient: SponsorBlockClient,
@@ -142,16 +150,18 @@ class VideoViewModel @Inject constructor(
     private val _targetStack = MutableStateFlow<List<VideoTarget>>(emptyList())
 
     // ===== 竖屏全屏「上下滑切换视频」（BiliPai 上游同款功能的 bbspace 化）=====
-    // 锚点（页 0）= 进入全屏那一刻的视频；队列（页 1..n）= 各视频相关推荐的接力流，
-    // 每切到一个新视频，其详情自带的 relates 经去重后追加进队列（见 init 的监听）。
-    private val _swipeAnchor = MutableStateFlow<SwipeEntry?>(null)
-    val swipeAnchor: StateFlow<SwipeEntry?> = _swipeAnchor.asStateFlow()
-    private val _swipeQueue = MutableStateFlow<List<SwipeEntry>>(emptyList())
-    val swipeQueue: StateFlow<List<SwipeEntry>> = _swipeQueue.asStateFlow()
+    // 会话状态的**单一真值源**是 [SwipeSessionController]（core:swipe，SW-02）：
+    // 锚点/队列/补货尾态/两个幂等键（自动翻页、预取去重）全部归它管，exit 一并清空。
+    // 本 VM 只负责"何时喂数据"（网络、取流、翻页回调）与"把状态暴露给 UI"。
+    private val swipeSession = SwipeSessionController()
+    val swipeAnchor: StateFlow<SwipeEntry?> = swipeSession.anchor
+    val swipeQueue: StateFlow<List<SwipeEntry>> = swipeSession.queue
 
     /** 队列尾部状态（补货中 / 到尽头）：驱动连播页底部的提示。 */
-    private val _swipeTail = MutableStateFlow(SwipeQueueTail.Idle)
-    val swipeTail: StateFlow<SwipeQueueTail> = _swipeTail.asStateFlow()
+    val swipeTail: StateFlow<SwipeQueueTail> = swipeSession.tail
+
+    /** 播完自动翻页的幂等键（SW-02 从 pager 的 remember 提升到会话状态机，随 exit 清空）。 */
+    val swipeLastAutoAdvancedKey: StateFlow<String?> = swipeSession.lastAutoAdvancedKey
 
     val player: StateFlow<Player?> = playbackController.player
     val videoState: StateFlow<VideoPlaybackState> = playbackController.videoState
@@ -213,20 +223,38 @@ class VideoViewModel @Inject constructor(
     init {
         // 滑动队列接力：每切到一个视频，其详情自带的 relevant 推荐经去重/多样性
         // 过滤后追加进队列（appendSwipeEntries 幂等，同一批 relates 重复到达无害）。
-        // 会话未开启（_swipeAnchor == null）时不动队列。
+        // 合并统一走会话状态机（会话未开启 / story 流在途时锚点未发布 → 状态机内部 no-op）。
         viewModelScope.launch {
             videoState
                 .map { it.detail }
                 .distinctUntilChanged()
                 .collect { detail ->
-                    val anchor = _swipeAnchor.value ?: return@collect
                     detail ?: return@collect
-                    _swipeQueue.value = appendSwipeEntries(
-                        existing = _swipeQueue.value,
-                        incoming = swipeEntriesFromRelates(detail.relates),
-                        anchorKey = anchor.key
-                    )
+                    swipeSession.mergeRelates(swipeEntriesFromRelates(detail.relates))
                 }
+        }
+    }
+
+    init {
+        // 会话快照落盘（进程重建恢复用）：只在可恢复状态（Ready/粘滞补货态）写，
+        // 会话退出（Idle）即清除。单一写入点，避免各处"忘了更新快照"。
+        // Bootstrapping / PlaybackFailed 不动既有快照：前者无可恢复队列，
+        // 后者用户重试或退出前快照仍有效。
+        viewModelScope.launch {
+            swipeSession.state.collect { state ->
+                when {
+                    state is SwipeSessionState.Idle ->
+                        savedStateHandle.remove<String>(KEY_SWIPE_SESSION_SNAPSHOT)
+                    state.isSnapshotWorthy() -> {
+                        val json = swipeSession.snapshot()?.let(::swipeSessionSnapshotJson)
+                        if (json != null) {
+                            savedStateHandle[KEY_SWIPE_SESSION_SNAPSHOT] = json
+                        } else {
+                            savedStateHandle.remove<String>(KEY_SWIPE_SESSION_SNAPSHOT)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -438,7 +466,7 @@ class VideoViewModel @Inject constructor(
         if (bvid.isEmpty()) return
         val anchorTarget = activeTarget as? VideoTarget.Ugc
             ?: VideoTarget.Ugc(aid = ids.aid, cid = ids.cid, bvid = bvid)
-        _swipeAnchor.value = SwipeEntry(
+        val seed = SwipeEntry(
             target = anchorTarget,
             bvid = bvid,
             title = detail.title,
@@ -446,24 +474,26 @@ class VideoViewModel @Inject constructor(
             author = detail.owner?.name,
             durationText = null
         )
-        _swipeQueue.value = appendSwipeEntries(
+        val seedQueue = appendSwipeEntries(
             existing = emptyList(),
             incoming = swipeEntriesFromRelates(detail.relates),
             anchorKey = anchorTarget.bvid.orEmpty().ifEmpty { "aid:${anchorTarget.aid}" }
         )
+        swipeSession.enterReady(
+            seed = seed,
+            via = SwipeEntryVia.DetailPullDown,
+            seedQueue = seedQueue
+        )
         android.util.Log.i(
             "PortraitSwipe",
-            "session: anchor=$bvid relates=${detail.relates.size} queue=${_swipeQueue.value.size} " +
-                "bvidFilled=${_swipeQueue.value.count { it.bvid.isNotEmpty() }}"
+            "session: anchor=$bvid relates=${detail.relates.size} queue=${seedQueue.size} " +
+                "bvidFilled=${seedQueue.count { it.bvid.isNotEmpty() }}"
         )
     }
 
     /** 退出全屏时清会话：下次进入全屏重新锚定当时的视频（见 VideoScreen 的接线的判据）。 */
     fun clearSwipeSession() {
-        _swipeAnchor.value = null
-        _swipeQueue.value = emptyList()
-        _swipeTail.value = SwipeQueueTail.Idle
-        resetSwipePrefetchState()
+        swipeSession.exit()
     }
 
     // ===== 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）=====
@@ -472,8 +502,25 @@ class VideoViewModel @Inject constructor(
     private var storyFeedCursor = 0L
     private var loadingMoreSwipe = false
 
-    /** 本次刷视频会话已预取过的 `aid#cid`：同一支只预取一次（反复刷同一页不重复请求）。 */
-    private val prefetchedKeys: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    init {
+        // 进程重建恢复（SW-02 不变式 4）：SavedStateHandle 里有会话快照 → 只灌状态。
+        // 不重放任何起步网络（fetchFeed / story / relates 都不跑；storyBootstrapStarted
+        // 一并置位，Activity 重建时重入的 bootstrapStorySession 因此成为 no-op）。
+        // 当前这支的取流由 Activity 的 openRoot 正常发起——与"点开任何一支视频"同一条
+        // 请求，不在"不重放网络"的口径内（播放器没有流就没有画面）。
+        savedStateHandle.get<String>(KEY_SWIPE_SESSION_SNAPSHOT)
+            ?.let(::parseSwipeSessionSnapshot)
+            ?.let { snap ->
+                swipeSession.restore(page = snap.page, anchor = snap.anchor, queue = snap.queue)
+                if (snap.via == SwipeEntryVia.StoryFeed) {
+                    storyBootstrapStarted = true
+                }
+                android.util.Log.i(
+                    "PortraitSwipe",
+                    "restore: page=${snap.page} queue=${snap.queue.size} via=${snap.via}"
+                )
+            }
+    }
 
     /**
      * 刷视频模式（story）会话的启动：以入口视频为页 0 锚点，竖屏故事流
@@ -490,6 +537,20 @@ class VideoViewModel @Inject constructor(
         val seedUgc = seed as? VideoTarget.Ugc ?: return
         val seedBvid = seedUgc.bvid.orEmpty().trim()
         if (seedBvid.isEmpty() && seedUgc.aid <= 0L) return
+        // 先进 Bootstrapping：种子随身记入状态机，但锚点流**不发布**（保持 null）——
+        // VideoScreen 的 pager 启用判据依赖"锚点非空"，流在途期间加载层照旧盖住首屏
+        // （行为零变化红线；SW-13 之后由状态派生 UI）。
+        swipeSession.enterBootstrapping(
+            seed = SwipeEntry(
+                target = seedUgc,
+                bvid = seedBvid,
+                title = "",
+                cover = "",
+                author = null,
+                durationText = null
+            ),
+            via = SwipeEntryVia.StoryFeed
+        )
         viewModelScope.launch {
             // ── 起步批次的数据源：**对齐 BiliPai** ──────────────────────────────
             // BiliPai 的竖屏流（`StoryViewModel.kt:23/42`）注释原文：「数据源与**首页推荐
@@ -512,31 +573,14 @@ class VideoViewModel @Inject constructor(
                     storyFeedRepository.fetchStoryFeed(aid = seedUgc.aid, bvid = seedBvid)
                 }.getOrDefault(emptyList())
             }
-            // 锚点信息（标题/封面）优先取流内同 bvid 条目，取不到就留空（页 0 是
-            // 播放器，不消费这两个字段；只有 SwipeCoverPage 用它们）。
-            val anchorEntry = if (useHomeFeed) {
-                feedEntries.firstOrNull { it.isCurrentVideo(seedBvid, seedUgc.aid) }
-            } else {
-                null
-            }
-            val seedItem = items.firstOrNull { it.bvid == seedBvid }
-            _swipeAnchor.value = SwipeEntry(
-                target = seedUgc,
-                bvid = seedBvid,
-                title = anchorEntry?.title ?: seedItem?.title.orEmpty(),
-                cover = anchorEntry?.cover ?: seedItem?.cover.orEmpty(),
-                author = anchorEntry?.author ?: seedItem?.author,
-                durationText = null
-            )
-            _swipeQueue.value = appendSwipeEntries(
-                existing = emptyList(),
-                incoming = if (useHomeFeed) feedEntries else items.mapNotNull(::swipeEntryFromStory),
-                anchorKey = seedUgc.bvid.orEmpty().ifEmpty { "aid:${seedUgc.aid}" }
-            )
+            val incoming = if (useHomeFeed) feedEntries else items.mapNotNull(::swipeEntryFromStory)
+            // 流到达（含失败传空 → Ready(0,0) 降级单视频）。锚点的标题/封面查找
+            // （流内同视频条目优先）在状态机 seedArrived 内做，语义与旧版一致。
+            swipeSession.seedArrived(incoming)
             android.util.Log.i(
                 "PortraitSwipe",
                 "bootstrap: source=${if (useHomeFeed) "home" else "story"} " +
-                    "seeded=${_swipeQueue.value.size}"
+                    "seeded=${swipeSession.queue.value.size}"
             )
         }
     }
@@ -558,7 +602,7 @@ class VideoViewModel @Inject constructor(
     fun loadMoreSwipeQueue() {
         if (loadingMoreSwipe) return
         loadingMoreSwipe = true
-        _swipeTail.value = SwipeQueueTail.Extending
+        swipeSession.refillStarted()
         viewModelScope.launch {
             var attempts = 0
             var appended = 0
@@ -570,42 +614,37 @@ class VideoViewModel @Inject constructor(
                 if (result.items.isEmpty()) break
                 storyFeedCursor = page + 1
                 attempts += 1
-                val anchorKey = _swipeAnchor.value?.key.orEmpty()
-                val before = _swipeQueue.value.size
+                val before = swipeSession.queue.value.size
                 val incoming = result.items.mapNotNull(::swipeEntryFromFeedItem)
-                _swipeQueue.value = appendSwipeEntries(
-                    existing = _swipeQueue.value,
-                    incoming = incoming,
-                    anchorKey = anchorKey
-                )
-                val added = _swipeQueue.value.size - before
+                swipeSession.mergeRelates(incoming)
+                val added = swipeSession.queue.value.size - before
                 appended += added
                 android.util.Log.i(
                     "PortraitSwipe",
                     "more: page=$page items=${result.items.size} mapped=${incoming.size} " +
-                        "added=$added attempts=$attempts queue=${_swipeQueue.value.size}"
+                        "added=$added attempts=$attempts queue=${swipeSession.queue.value.size}"
                 )
             }
             // 兜底（BiliPai 用 getRelatedVideos 补，这里零新接口）：
             // 推荐流拉满 3 页仍凑不满时，取队尾那一支的详情 relates 再补一轮 ——
             // 队尾正是用户下一个会滑到的位置，把它后面补厚才不会"滑到最后一条就没了"。
             if (shouldRunSwipeRefillFallback(appended = appended)) {
-                val tail = selectSwipeRefillFallbackTarget(_swipeQueue.value)
+                val tail = selectSwipeRefillFallbackTarget(swipeSession.queue.value)
                 if (tail != null) {
                     val added = appendSwipeRefillFallback(tail)
                     appended += added
                     android.util.Log.i(
                         "PortraitSwipe",
-                        "more fallback: tail=${tail.key} added=$added queue=${_swipeQueue.value.size}"
+                        "more fallback: tail=${tail.key} added=$added queue=${swipeSession.queue.value.size}"
                     )
                 }
             }
             android.util.Log.i(
                 "PortraitSwipe",
-                "more done: attempts=$attempts appended=$appended queue=${_swipeQueue.value.size}"
+                "more done: attempts=$attempts appended=$appended queue=${swipeSession.queue.value.size}"
             )
-            // 提示状态：补到东西就回到 Idle（不打扰），一条没补到就是"到尽头了"
-            _swipeTail.value = resolveSwipeQueueTail(appended = appended)
+            // 提示状态：补到东西就回到 Ready（不打扰），一条没补到就是"到尽头了"
+            swipeSession.refillResult(appended = appended)
             loadingMoreSwipe = false
         }
     }
@@ -625,13 +664,9 @@ class VideoViewModel @Inject constructor(
         }.getOrNull() ?: return 0
         val incoming = swipeEntriesFromRelates(result.detail.relates)
         if (incoming.isEmpty()) return 0
-        val before = _swipeQueue.value.size
-        _swipeQueue.value = appendSwipeEntries(
-            existing = _swipeQueue.value,
-            incoming = incoming,
-            anchorKey = _swipeAnchor.value?.key.orEmpty()
-        )
-        return _swipeQueue.value.size - before
+        val before = swipeSession.queue.value.size
+        swipeSession.mergeRelates(incoming)
+        return swipeSession.queue.value.size - before
     }
 
     /**
@@ -644,12 +679,13 @@ class VideoViewModel @Inject constructor(
      *
      * - 条数由 [SwipePrefetchPolicy.prefetchCount] 决定（WiFi+开关 3 / WiFi 2 /
      *   蜂窝+开关 1 / 否则 0）；
-     * - 同一支视频在一次会话里只预取一次（[prefetchedKeys]），避免反复刷同一页时重复请求；
+     * - 同一支视频在一次会话里只预取一次（会话状态机的预取去重表，随 exit 清空），
+     *   避免反复刷同一页时重复请求；
      * - 失败静默（预取是尽力而为）。
      */
     fun prefetchSwipeQueue(page: Int) {
-        val anchor = _swipeAnchor.value ?: return
-        val pages = listOf(anchor) + _swipeQueue.value
+        val anchor = swipeSession.anchor.value ?: return
+        val pages = listOf(anchor) + swipeSession.queue.value
         viewModelScope.launch {
             val prefetchEnabled = playerSettings.state.first().playback.prefetchVideo
             val isUnmetered = networkTypeProvider.isUnmetered()
@@ -678,7 +714,7 @@ class VideoViewModel @Inject constructor(
         val target = entry.target
         if (target.aid <= 0L || target.cid <= 0L) return
         val key = "${target.aid}#${target.cid}"
-        if (!prefetchedKeys.add(key)) return
+        if (!swipeSession.markPrefetched(key)) return
         viewModelScope.launch {
             val params = target.toPlayableParams()
             runCatchingCancellable {
@@ -696,13 +732,8 @@ class VideoViewModel @Inject constructor(
                     detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
                 }
             }
-            android.util.Log.i("PortraitSwipe", "prefetched: key=$key total=${prefetchedKeys.size}")
+            android.util.Log.i("PortraitSwipe", "prefetched: key=$key")
         }
-    }
-
-    /** 退出刷视频会话时清预取去重表：下次会话重新预取（缓存本身由仓库层管 TTL）。 */
-    private fun resetSwipePrefetchState() {
-        prefetchedKeys.clear()
     }
 
     /**
@@ -744,7 +775,18 @@ class VideoViewModel @Inject constructor(
     fun retryCurrentPlayback() {
         val target = _targetStack.value.lastOrNull() ?: return
         android.util.Log.i("PortraitSwipe", "retry: target=$target")
+        swipeSession.retry() // PlaybackFailed → Ready（状态机不变式 2；SW-13 起接 UI）
         playbackController.openVideo(target)
+    }
+
+    /** 翻页落定回执（pager 的 currentPage collect 调用）：状态机记账 Ready.page。 */
+    fun onSwipePageChanged(page: Int) {
+        swipeSession.pageChanged(page)
+    }
+
+    /** 播完自动翻页回执（幂等键记账，随会话 exit 清空）。 */
+    fun noteSwipeAutoAdvanced(key: String) {
+        swipeSession.noteAutoAdvanced(key)
     }
 
     fun togglePlayPause() {
@@ -1281,5 +1323,10 @@ class VideoViewModel @Inject constructor(
 
     private fun currentTarget(): VideoTarget? {
         return _targetStack.value.lastOrNull()
+    }
+
+    private companion object {
+        /** 会话快照在 SavedStateHandle 里的键（进程重建恢复，SW-02）。 */
+        const val KEY_SWIPE_SESSION_SNAPSHOT = "swipe.session.snapshot"
     }
 }

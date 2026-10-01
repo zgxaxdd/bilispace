@@ -424,12 +424,28 @@ class VideoLogicGuardTest {
                 countMatching(screen, """viewModel::openSwipeTarget""") == 1 &&
                 countMatching(screen, """PortraitSwipePager\(""") == 1
         )
+        val controller = codeOf("SwipeSessionController.kt")
         assertTrue(
             "上下滑切换必须替换栈顶（dropLast(1) + target）而不是压栈，" +
-                "且队列接力必须走 appendSwipeEntries（去重 + UP 主多样性）。",
+                "且队列接力必须走 appendSwipeEntries（去重 + UP 主多样性）。\n" +
+                "SW-02 起 merge 归口到 core:swipe 的 SwipeSessionController：VM 只留" +
+                "beginSwipeSession 的种子队列一处理地（此处原来 >= 2 是因为接力/补货/" +
+                "兜底三处都在 VM 里拼队列，现统一进控制器的 mergeRelates/seedArrived）。",
             countMatching(vm, """fun\s+openSwipeTarget\(entry:\s*SwipeEntry\)""") == 1 &&
                 countMatching(vm, """dropLast\(1\)\s*\+\s*entry\.target""") == 1 &&
-                countMatching(vm, """appendSwipeEntries\(""") >= 2
+                countMatching(vm, """appendSwipeEntries\(""") == 1 &&
+                countMatching(controller, """appendSwipeEntries\(""") >= 2
+        )
+        assertTrue(
+            "会话状态必须收敛到 SwipeSessionController（单一真值源，SW-02）：\n" +
+                "VM 不得再私设锚点/队列/尾态的 MutableStateFlow，也不得保留预取去重表\n" +
+                "（挪进控制器后随 exit() 一并清空——历史 bug 的预防性清理）。",
+            countMatching(vm, """private val swipeSession = SwipeSessionController\(\)""") == 1 &&
+                countMatching(vm, """_swipeAnchor|_swipeQueue|_swipeTail|prefetchedKeys""") == 0 &&
+                countMatching(
+                    controller,
+                    """fun exit\(\)"""
+                ) == 1
         )
     }
 
@@ -1160,14 +1176,18 @@ class VideoLogicGuardTest {
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
             "自动翻页必须走 shouldAutoAdvanceToNextSwipePage，并把「开关 / 单曲循环 / 最后一页 / " +
-                "本支是否已翻过」四个判据都传进去 —— 少任何一个都会退化成旧行为。",
+                "本支是否已翻过」四个判据都传进去 —— 少任何一个都会退化成旧行为。\n" +
+                "SW-02 起幂等键不在 pager 局部 remember 里（旧断言 lastAutoAdvancedKey）：" +
+                "键提升到会话状态机 SwipeSessionController，随会话 exit() 清空、进程重建归零，" +
+                "pager 改读 viewModel.swipeLastAutoAdvancedKey。四判据契约本身不变。",
             countMatching(pager, """shouldAutoAdvanceToNextSwipePage\(""") == 1 &&
                 countMatching(pager, """autoAdvanceEnabled = playerSettings\.playback\.swipeAutoAdvance""") == 1 &&
                 countMatching(pager, """repeatOne = playerSettings\.playback\.repeatMode != PlayerRepeatMode\.Off""") == 1 &&
                 countMatching(pager, """isLastPage = next > pages\.lastIndex""") == 1 &&
+                countMatching(pager, """alreadyAdvancedForThisVideo\s*=""") == 1 &&
                 countMatching(
                     pager,
-                    """alreadyAdvancedForThisVideo = key\.isNotEmpty\(\) && key == lastAutoAdvancedKey"""
+                    """key\.isNotEmpty\(\) && key == viewModel\.swipeLastAutoAdvancedKey\.value"""
                 ) == 1 &&
                 countMatching(pager, """if \(!shouldAdvance\) return""") == 1 &&
                 countMatching(codeOf("player/VideoPlaybackSheet.kt"), """title = "播完自动下一个"""") == 1
