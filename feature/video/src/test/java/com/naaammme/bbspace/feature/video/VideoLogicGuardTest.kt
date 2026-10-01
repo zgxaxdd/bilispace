@@ -525,13 +525,18 @@ class VideoLogicGuardTest {
                 countMatching(intents, """storyMode: Boolean = false""") == 1
         )
         val vm = codeOf("VideoViewModel.kt")
+        val sources = codeOf("swipesource/SwipeSources.kt")
         assertTrue(
             "story 会话必须由 bootstrapStorySession 负责（story 流优先），补货必须走 " +
-                "loadMoreSwipeQueue（推荐流分页接力，与详情全屏共用队列）。",
+                "loadMoreSwipeQueue（推荐流分页接力，与详情全屏共用队列）。\n" +
+                "SW-05 起三源映射（swipeEntryFromStory/FromFeedItem）随源实现落在 " +
+                "swipesource/SwipeSources.kt（编排层取数据、映射在源处落地），" +
+                "不再要求出现在 VM 里。",
             countMatching(vm, """fun\s+bootstrapStorySession\(seed:\s*VideoTarget\)""") == 1 &&
                 countMatching(vm, """fun\s+loadMoreSwipeQueue\(""") == 1 &&
-                countMatching(vm, """swipeEntryFromStory""") >= 1 &&
-                countMatching(vm, """swipeEntryFromFeedItem""") >= 1
+                countMatching(sources, """swipeEntryFromStory""") >= 1 &&
+                countMatching(sources, """swipeEntryFromFeedItem""") >= 1 &&
+                countMatching(vm, """SwipeSourceRegistry\(""") >= 1
         )
         val screen = codeOf("VideoScreen.kt")
         assertTrue(
@@ -1359,14 +1364,20 @@ class VideoLogicGuardTest {
     @Test
     fun storyBootstrapSeedsFromHomeFeed() {
         val vm = codeOf("VideoViewModel.kt")
+        val sources = codeOf("swipesource/SwipeSources.kt")
         assertTrue(
-            "起步批次必须先用首页推荐流（feedRepository.fetchFeed(idx = 0)），" +
-                "story 竖屏流只能作为拿不到内容时的兜底；并且要打印用了哪条源便于真机核对。",
-            countMatching(vm, """feedRepository\.fetchFeed\(idx = 0, pull = false, flush = 0\)""") == 1 &&
-                countMatching(vm, """feedRepository\.fetchFeed\(idx = page, pull = false, flush = 0\)""") == 1 &&
-                countMatching(vm, """storyFeedRepository\.fetchStoryFeed\(""") == 1 &&
+            "起步批次必须先用首页推荐流，story 竖屏流只能作为拿不到内容时的兜底；" +
+                "并且要打印用了哪条源便于真机核对。\n" +
+                "SW-05 起这条优先级由**源成本 + 编排顺序**表达（不再在 VM 里直呼接口）：\n" +
+                "首页推荐流 = HomeFeedSwipeSource（Light，单请求分页）、story = " +
+                "StoryFeedSwipeSource（Heavy，仅兜底），SwipeSourceRegistry.available 的 " +
+                "cost 升序消费顺序由 core:swipe 的 SwipeSourceRegistryTest 锁定；" +
+                "VM 侧断言两个源都在起步源集里、且日志仍打 source=。",
+            countMatching(vm, """HomeFeedSwipeSource\(feedRepository\)""") >= 2 &&
+                countMatching(vm, """StoryFeedSwipeSource\(""") == 1 &&
                 countMatching(vm, """bootstrap: source=""") == 1 &&
-                countMatching(vm, """storyFeedCursor = 1L""") == 1
+                countMatching(sources, """feedRepository\.fetchFeed\(idx = idx, pull = false, flush = 0\)""") == 1 &&
+                countMatching(sources, """storyFeedRepository\.fetchStoryFeed\(""") == 1
         )
     }
 

@@ -140,7 +140,13 @@ data class PlayerPlaybackPrefs(
      * 与 [repeatMode] 的关系：单曲循环时播放器不会发 `STATE_ENDED`，自动翻页天然不生效；
      * 开着自动翻页但非循环时，播完前进一支（这条判据在 [SwipeAutoAdvancePolicy] 里）。
      */
-    val swipeAutoAdvance: Boolean = true
+    val swipeAutoAdvance: Boolean = true,
+    /**
+     * 跨会话「已推去重」（SW-05，决策 D7 默认开）：推荐流/story 流给过的视频，
+     * 7 天内（上限 500 条）不再进新会话的队列，防"每次进来都刷到同几支"。
+     * 关掉即回到旧行为；relate 接力不受此开关影响（那是上下文，不是推送）。
+     */
+    val crossSessionDedup: Boolean = true
 )
 
 @Immutable

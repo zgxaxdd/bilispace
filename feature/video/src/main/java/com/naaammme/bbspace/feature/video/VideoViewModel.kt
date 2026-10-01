@@ -52,9 +52,12 @@ import com.naaammme.bbspace.core.swipe.session.swipeSessionSnapshotJson
 import com.naaammme.bbspace.core.swipe.selectSwipeRefillFallbackTarget
 import com.naaammme.bbspace.core.swipe.shouldFetchNextRefillPage
 import com.naaammme.bbspace.core.swipe.shouldRunSwipeRefillFallback
+import com.naaammme.bbspace.core.swipe.source.SwipeCursor
+import com.naaammme.bbspace.core.swipe.source.SwipeSourceRegistry
 import com.naaammme.bbspace.core.swipe.swipeEntriesFromRelates
-import com.naaammme.bbspace.core.swipe.swipeEntryFromFeedItem
-import com.naaammme.bbspace.core.swipe.swipeEntryFromStory
+import com.naaammme.bbspace.feature.video.swipesource.HomeFeedSwipeSource
+import com.naaammme.bbspace.feature.video.swipesource.StoryFeedSwipeSource
+import com.naaammme.bbspace.feature.video.swipesource.SwipeSeenStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -144,6 +147,8 @@ class VideoViewModel @Inject constructor(
     private val playbackVideoRepository: VideoPlayerRepository,
     /** 补货兜底：拉队尾那一支的详情，用它的相关推荐补队列。 */
     private val detailRepository: VideoDetailRepository,
+    /** 跨会话「已推记忆」（SW-05）：推荐流/story 流给过的视频不再进新会话。 */
+    private val seenStore: SwipeSeenStore,
     /** 预取条数按网络类型决定（WiFi 才多预）。 */
     private val networkTypeProvider: NetworkTypeProvider
 ) : ViewModel() {
@@ -503,6 +508,8 @@ class VideoViewModel @Inject constructor(
     // ===== 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）=====
 
     private var storyBootstrapStarted = false
+
+    /** 首页推荐流的分页游标（SW-05 起由 SwipeSourceBatch.nextCursor 回填）。 */
     private var storyFeedCursor = 0L
     private var loadingMoreSwipe = false
 
@@ -556,35 +563,46 @@ class VideoViewModel @Inject constructor(
             via = SwipeEntryVia.StoryFeed
         )
         viewModelScope.launch {
-            // ── 起步批次的数据源：**对齐 BiliPai** ──────────────────────────────
-            // BiliPai 的竖屏流（`StoryViewModel.kt:23/42`）注释原文：「数据源与**首页推荐
-            // 一致**（`VideoRepository.getHomeVideos`），内容更元化」；
-            // 而 bbspace 之前用 `x/v2/feed/index/story`（以种子视频为锚的竖屏流）——
-            // 真机反馈「点刷视频模式，先推送的是差不多类型的视频」，正是这个锚造成的。
-            // 现在：首页推荐流起步（与推荐页同源、更个性化/更多元），
-            // story 竖屏流只在首页流拿不到时兜底（保证"点进去一定有内容"）。
-            val feedEntries = runCatchingCancellable {
-                feedRepository.fetchFeed(idx = 0, pull = false, flush = 0)
-            }.getOrNull()?.items.orEmpty().mapNotNull(::swipeEntryFromFeedItem)
-            val useHomeFeed = feedEntries.isNotEmpty()
-            if (useHomeFeed) {
-                storyFeedCursor = 1L
+            // ── 起步批次的数据源：**对齐 BiliPai + 多源编排（SW-05）** ────────────
+            // Registry 按 cost 升序问源：首页推荐流（Light）优先，拿不到才退 story
+            // 竖屏流（Heavy 兜底）——与旧版"首页流起步、story 兜底"完全同序。
+            // isUnmetered 传 true：起步**必须尽力有内容**，两个源都是单请求，
+            // 蜂窝门控作用在补货/预取的量上，不在起步这一问上（与旧行为一致）。
+            val registry = SwipeSourceRegistry(
+                listOf(
+                    HomeFeedSwipeSource(feedRepository),
+                    StoryFeedSwipeSource(
+                        storyFeedRepository = storyFeedRepository,
+                        seedAid = seedUgc.aid,
+                        seedBvid = seedBvid
+                    )
+                )
+            )
+            val batch = registry.nextBatch(
+                cursor = SwipeCursor(sourceId = HomeFeedSwipeSource.ID, idx = 0),
+                limit = SwipeSourceRegistry.REFILL_LIMIT,
+                isUnmetered = true
+            )
+            if (batch?.sourceId == HomeFeedSwipeSource.ID) {
+                storyFeedCursor = batch.nextCursor?.idx ?: 0L
             }
-            val items = if (useHomeFeed) {
-                emptyList()
+            // 跨会话已推去重（D7，默认开）：给过的不再推；remember 在入队时记
+            val dedupEnabled = playerSettings.state.first().playback.crossSessionDedup
+            val incoming = if (dedupEnabled) {
+                seenStore.filterFresh(batch?.entries.orEmpty())
             } else {
-                runCatchingCancellable {
-                    storyFeedRepository.fetchStoryFeed(aid = seedUgc.aid, bvid = seedBvid)
-                }.getOrDefault(emptyList())
+                batch?.entries.orEmpty()
             }
-            val incoming = if (useHomeFeed) feedEntries else items.mapNotNull(::swipeEntryFromStory)
+            if (dedupEnabled) {
+                seenStore.remember(incoming)
+            }
             // 流到达（含失败传空 → Ready(0,0) 降级单视频）。锚点的标题/封面查找
             // （流内同视频条目优先）在状态机 seedArrived 内做，语义与旧版一致。
             swipeSession.seedArrived(incoming)
             android.util.Log.i(
                 "PortraitSwipe",
-                "bootstrap: source=${if (useHomeFeed) "home" else "story"} " +
-                    "seeded=${swipeSession.queue.value.size}"
+                "bootstrap: source=${batch?.sourceId} raw=${batch?.entries?.size} " +
+                    "fresh=${incoming.size} seeded=${swipeSession.queue.value.size}"
             )
         }
     }
@@ -610,22 +628,35 @@ class VideoViewModel @Inject constructor(
         viewModelScope.launch {
             var attempts = 0
             var appended = 0
+            val isUnmetered = networkTypeProvider.isUnmetered()
+            val dedupEnabled = playerSettings.state.first().playback.crossSessionDedup
+            // 补货只走首页推荐流（Light，蜂窝可用）：Registry 的蜂窝降级判据在这里生效；
+            // story（Heavy）不进补货源集——它是起步兜底，不是接力源。
+            val registry = SwipeSourceRegistry(listOf(HomeFeedSwipeSource(feedRepository)))
             while (shouldFetchNextRefillPage(attempts = attempts, appended = appended)) {
                 val page = storyFeedCursor
-                val result = runCatchingCancellable {
-                    feedRepository.fetchFeed(idx = page, pull = false, flush = 0)
-                }.getOrNull() ?: break
-                if (result.items.isEmpty()) break
-                storyFeedCursor = page + 1
+                val batch = registry.nextBatch(
+                    cursor = SwipeCursor(sourceId = HomeFeedSwipeSource.ID, idx = page),
+                    limit = SwipeSourceRegistry.REFILL_LIMIT,
+                    isUnmetered = isUnmetered
+                ) ?: break
+                storyFeedCursor = batch.nextCursor?.idx ?: break
                 attempts += 1
+                val fresh = if (dedupEnabled) {
+                    seenStore.filterFresh(batch.entries)
+                } else {
+                    batch.entries
+                }
                 val before = swipeSession.queue.value.size
-                val incoming = result.items.mapNotNull(::swipeEntryFromFeedItem)
-                swipeSession.mergeRelates(incoming)
+                swipeSession.mergeRelates(fresh)
+                if (dedupEnabled) {
+                    seenStore.remember(fresh)
+                }
                 val added = swipeSession.queue.value.size - before
                 appended += added
                 android.util.Log.i(
                     "PortraitSwipe",
-                    "more: page=$page items=${result.items.size} mapped=${incoming.size} " +
+                    "more: page=$page items=${batch.entries.size} fresh=${fresh.size} " +
                         "added=$added attempts=$attempts queue=${swipeSession.queue.value.size}"
                 )
             }
