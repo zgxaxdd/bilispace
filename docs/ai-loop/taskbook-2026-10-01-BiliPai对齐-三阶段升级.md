@@ -95,7 +95,29 @@
   弹幕字号 25→15→20 反复且 CHANGELOG 与代码不一致、"按钮统一 48dp 下限"已被自己回退
   （`cea46ad23`）。
 
-## 4. 验收口径（每批）
+## 4. 第二次同步（2026-10-01 当日）：`5b93372fe` → **`34d189620`**（+2 提交，versionCode 420/421）
+
+上游这两条都不在刷视频/性能两条线上，逐条判定如下（**结论：只有一条可搬，其余不适用**）：
+
+| 上游改动 | bbspace 现状 | 判定 |
+|---|---|---|
+| `a4b8c17f8` 尾部：CDN 预取与**下一页头部预取**加 Wi-Fi 门控 | 会话预热的 `prefetchEntry` 在蜂窝下（用户开着预取开关时）照样发**一整份 gRPC 详情** | ✅ **已搬**（本批 D4：`SwipePrefetchPolicy.shouldWarmDetail`） |
+| `34d189620` 全屏播放器**截图**：按钮换位 + 保存成功后"分享 / 保留相册" | bbspace **完全没有**视频截图功能（全仓 `截图` 只出现在注释里） | ⏳ 真缺口，但要写相册 + `PlayerView.getBitmap()` + 分享面板，**没有设备无法验证任何一环** → 记 BACKLOG **AF-01**，不盲做 |
+| 液态玻璃**命名预设**（保存/一键恢复/JSON 分享/删除确认，`LiquidGlassSavedPresets.kt` 186 行） | `GlassConfig` 只有两个可调量（material 三档 + strength 0.5~2.0） | ❌ 不搬：给两个参数做预设系统是无收益的抽象（上游那是几十参数的调节面板） |
+| 直播发弹幕面板：横屏可滚 + 输入框缩小 + **多弹幕模式选项左对齐换行** | bbspace 的发送面板就是一行 `SearchCapsuleField` + 发送键，**没有模式选择** | ❌ 无对应物 |
+| RSS 订阅页 / `MessageAppScaffold` / 设置分享服务 | bbspace 无 RSS；IM 是另一套 scaffold | ❌ 无对应物 |
+
+### D4 · 蜂窝下的详情预热闸门（本批）
+
+`prefetchSwipeQueue` 原来把 `isUnmetered` 只交给 `prefetchCount`，于是"蜂窝 + 用户开着预取"
+= 每停稳一次给邻居页发 **playurl 预取 + 一整份详情 gRPC**。详情是这里面贵一个量级的那一条，
+而它买到的只是"翻过去左下角标题不空一拍"。现在按上游分层：
+playurl 预取维持原判据（便宜、直接决定起播快慢），**详情预热只在 unmetered 做**。
+一次预取只读一次网络状态（循环里反复问会在同一次滑动里得出矛盾结论），
+日志补 `unmetered=… detailWarm=…` —— 蜂窝行为只能靠日志核对，没设备不许声称省了多少流量。
+
+
+## 5. 验收口径（每批）
 
 1. `:app:assembleDebug` + 受影响模块 `testDebugUnitTest`（**单任务 `--rerun` 真跑**，先删
    `build/test-results`）；新增守卫必须配"故意改坏会红"的证据。

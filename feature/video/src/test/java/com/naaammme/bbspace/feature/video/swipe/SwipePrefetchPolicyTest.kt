@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.feature.video.swipe
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,5 +70,24 @@ class SwipePrefetchPolicyTest {
                 "改小 = 手指刚碰屏幕就发请求（浪费流量）。",
             SwipePrefetchPolicy.DRAG_OFFSET_THRESHOLD == 0.25f
         )
+    }
+
+    // ── 蜂窝下的详情预热闸门（2026-10-01，对照上游 `a4b8c17f8`）──────────────────
+
+    @Test
+    fun detailWarmIsSkippedOnCellularWhateverThePrefetchSwitchSays() {
+        // WiFi：热（一次完整 gRPC 详情换"翻过去标题不空一拍"，白给的加速）
+        assertTrue(SwipePrefetchPolicy.shouldWarmDetail(isUnmetered = true))
+        // 蜂窝：**不热**。注意这与 prefetchCount 是两层判据 ——
+        // 即便用户开着预取开关、蜂窝也允许预 1 条 playurl，重预热仍然跳过。
+        assertFalse(SwipePrefetchPolicy.shouldWarmDetail(isUnmetered = false))
+    }
+
+    @Test
+    fun cellularGateDoesNotAlsoKillPlayUrlPrefetch() {
+        // 闸门不许顺手把 playurl 预取也关掉：那是"上滑之后起播快不快"的那一条，
+        // 便宜得多，且已由 prefetchCount 的开关语义覆盖（蜂窝+开=1、蜂窝+关=0）。
+        assertEquals(1, SwipePrefetchPolicy.prefetchCount(true, isUnmetered = false, available = 5))
+        assertEquals(0, SwipePrefetchPolicy.prefetchCount(false, isUnmetered = false, available = 5))
     }
 }

@@ -866,6 +866,43 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * 蜂窝下的**详情预热**闸门接线（2026-10-01，对照上游 `a4b8c17f8`）。
+     *
+     * 判据本身由 `SwipePrefetchPolicyTest` 覆盖，这里只钉"VM 真的按它分流"：
+     * 1. 详情预热必须包在 `if (warmDetail)` 里，且 warmDetail 只能来自策略函数；
+     * 2. playurl 预取**不许**被顺手关掉（那是另一条更便宜的收益，判据在 prefetchCount）；
+     * 3. 网络状态一次预取只读一次（循环里反复问系统会在同一次滑动里得出自相矛盾的结论），
+     *    且日志要把 `unmetered` / `detailWarm` 打出来 —— 蜂窝行为只能靠日志核对。
+     */
+    @Test
+    fun cellularGateSkipsDetailWarmButNotPlayUrl() {
+        val vm = codeOf("VideoViewModel.kt")
+        assertTrue(
+            "warmDetail 必须来自 SwipePrefetchPolicy.shouldWarmDetail，不许写死。",
+            countMatching(vm, """SwipePrefetchPolicy\.shouldWarmDetail\(isUnmetered\)""") == 1 &&
+                countMatching(vm, """private fun prefetchEntry\(entry: SwipeEntry, warmDetail: Boolean\)""") == 1
+        )
+        val body = blockBody(vm, "private fun prefetchEntry(")
+        assertTrue(
+            "详情请求必须在 `if (warmDetail)` 之内；playurl 预取必须在之外（蜂窝下仍要走）。",
+            countMatching(body, """if \(warmDetail\) \{""") == 1 &&
+                run {
+                    val gate = body.indexOfFirst { it.contains("if (warmDetail) {") }
+                    val detail = body.indexOfFirst { it.contains("detailRepository.fetchVideoDetail(") }
+                    val playUrl = body.indexOfFirst { it.contains("preloadPlayUrl(") }
+                    gate in 0 until detail && playUrl in 0 until gate
+                }
+        )
+        val prefetch = blockBody(vm, "fun prefetchSwipeQueue(")
+        assertTrue(
+            "网络状态一次预取只读一次，并随 count 共用同一个值；日志必须带 unmetered/detailWarm。",
+            countMatching(prefetch, """networkTypeProvider\.isUnmetered\(\)""") == 1 &&
+                countMatching(prefetch, """isUnmetered = isUnmetered""") == 1 &&
+                countMatching(prefetch, """unmetered=[$]isUnmetered detailWarm=[$]warmDetail""") == 1
+        )
+    }
+
+    /**
      * 会话锁竖屏（`portraitSwipeSessionLocksOrientation`）的**配套出口**：
      * 竖屏连播里刷到横屏视频时，用户必须有一个显式要横屏的入口——否则只能看 letterbox，
      * "锁竖屏"这条修复就成了功能倒退。BiliPai 同款（`onRotateToLandscape`）。

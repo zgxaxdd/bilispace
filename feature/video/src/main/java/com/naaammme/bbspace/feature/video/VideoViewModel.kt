@@ -652,24 +652,29 @@ class VideoViewModel @Inject constructor(
         val pages = listOf(anchor) + _swipeQueue.value
         viewModelScope.launch {
             val prefetchEnabled = playerSettings.state.first().playback.prefetchVideo
+            val isUnmetered = networkTypeProvider.isUnmetered()
             val count = SwipePrefetchPolicy.prefetchCount(
                 prefetchEnabled = prefetchEnabled,
-                isUnmetered = networkTypeProvider.isUnmetered(),
+                isUnmetered = isUnmetered,
                 available = pages.size - page - 1
             )
             if (count <= 0) return@launch
+            // 蜂窝下跳过"详情级别"的重预热（判据与理由见 SwipePrefetchPolicy）。
+            // 与 count 同一次读网络，不在循环里反复问系统 —— 一次滑动里结论不会变。
+            val warmDetail = SwipePrefetchPolicy.shouldWarmDetail(isUnmetered)
             android.util.Log.i(
                 "PortraitSwipe",
-                "prefetch want=$count page=$page pages=${pages.size} prefetchEnabled=$prefetchEnabled"
+                "prefetch want=$count page=$page pages=${pages.size} prefetchEnabled=$prefetchEnabled " +
+                    "unmetered=$isUnmetered detailWarm=$warmDetail"
             )
             SwipePrefetchPolicy.targetPages(page, pages.size, count).forEach { index ->
                 val entry = pages.getOrNull(index) ?: return@forEach
-                prefetchEntry(entry)
+                prefetchEntry(entry, warmDetail = warmDetail)
             }
         }
     }
 
-    private fun prefetchEntry(entry: SwipeEntry) {
+    private fun prefetchEntry(entry: SwipeEntry, warmDetail: Boolean) {
         val target = entry.target
         if (target.aid <= 0L || target.cid <= 0L) return
         val key = "${target.aid}#${target.cid}"
@@ -683,8 +688,13 @@ class VideoViewModel @Inject constructor(
             // 而详情是开播时才并发请求的 —— 不预热就会"翻过去先空一拍再补上标题"。
             // 预热后 `StreamPlaybackSessionImpl` 那条 `reuseDetail` 短路会命中，
             // 连"取详情"这次请求都省了（详情仓库自己有 LRU）。失败一律吞掉。
-            runCatchingCancellable {
-                detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
+            // **蜂窝下不做**（warmDetail 由 SwipePrefetchPolicy.shouldWarmDetail 决定）：
+            // 这是一整份 gRPC 详情响应，比 playurl 贵一个量级，换来的是"没滑到的那一页
+            // 标题不空一拍"—— 上游 `a4b8c17f8` 对头部预热加的正是同一层 Wi-Fi 门控。
+            if (warmDetail) {
+                runCatchingCancellable {
+                    detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
+                }
             }
             android.util.Log.i("PortraitSwipe", "prefetched: key=$key total=${prefetchedKeys.size}")
         }

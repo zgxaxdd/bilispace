@@ -115,6 +115,8 @@
 | UI-12 | 染色视觉语言推广到直播/搜索/关注流 | `feature/home/live/HomeLivePage.kt` 等仍用中性容器 | 推荐页与排行页已共用 `rememberVideoCardCoverTint` 一套配方（`b4abd2d9`），其余卡片流仍是"白底 + 封面"，同一 App 里两种卡片语言 | B | 纯观感决策，必须真机浅色/深色各走一遍；每接一处要更新 `UiStyleDecisionRatchetTest` 的逐文件登记 | 待办（**需真机**） |
 | UI-13 | 整体再收一档密度 | `core/designsystem/theme/Spacing.kt` 的 `BiliCardDensity` | 上游 v0.2.3.5 整版在做留白收紧，但它自己也在 `cea46ad23` 把"按钮统一 48dp 下限"回退了 —— 说明收多紧是观感判断。把手已经只有一个（六个语义值），改起来不会再漂 | B | 改完必须真机对照整屏卡片数与触控命中区（上游口径：只压可见容器、不动 Compose 命中区，`SubReplyDetailComponents.kt:1418-1470`） | 待办（**需真机**） |
 
+| AF-01 | 全屏播放器**视频截图**（保存相册 + 保存后"分享 / 保留"） | `feature/video/player/VideoPlayerPane.kt`（TextureView 的 `playerView` 已在手）、播放设置侧栏 ⋮ 的动作文案 | bbspace 完全没有截图功能（全仓 `截图` 只出现在注释里）；上游 `34d189620` 做的就是这件事：`captureAndSaveVideoScreenshotUri` 返回 Uri，保存成功后弹"是否分享这张截图"，并且**协程取消时把已插入的 MediaStore 行删掉**（否则相册里留一张写坏的图）。位置：`feature/video/util/VideoScreenshotUtils.kt`、`ui/components/VideoScreenshotSharePrompt.kt:24-56` | **需真机** | 可离线判定的部分只有纯逻辑（文件名/MediaStore 值映射/重入守卫 `!capturing && pendingUri == null`）；但**取帧是否正确、相册是否可见、分享权限是否授予**三条都必须设备上验，无设备不许做 | 待办（**需真机**） |
+
 ---
 
 ## 已关闭 / 不需再做（防重复劳动）
