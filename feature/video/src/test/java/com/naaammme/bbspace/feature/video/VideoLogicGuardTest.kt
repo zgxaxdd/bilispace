@@ -710,13 +710,15 @@ class VideoLogicGuardTest {
                 "直接取 `!hasRenderedFirstFrame` 的瞬时值是错的 —— 换视频后的头几十毫秒里" +
                 "它仍是上一支的 true（finishVideoPlayback 先发布新 ids、后 stopForReuse 归零），" +
                 "加载层会先卸载再挂上，中间那一帧就是真机看到的「黑屏 + 大暂停键」。\n" +
-                "SW-11 起**何时撤**交给 SwipeWaitPolicy 纯判据（retireVeil），旧断言 " +
-                "「if (firstFrameRendered) waitingKey = null」随之换形：默认 " +
-                "MIN_VEIL_VISIBLE_MS_DEFAULT=0 时策略退化为首帧即撤，逐帧同拍（编译期判据）。",
+                "SW-11 起**何时撤**交给 SwipeWaitPolicy 纯判据，且清键必须与判据在**同一个 " +
+                "effect** 内直落（不许再经 retireVeil 之类的中间状态转手：多一跳 effect 派发 " +
+                "会把首帧→撤遮罩从 ~19ms 拖到 ~37ms，真机多盖一帧）。默认 " +
+                "MIN_VEIL_VISIBLE_MS_DEFAULT=0 时退化为首帧即撤，逐帧同拍（编译期判据）。",
             countMatching(pager, """var\s+waitingKey\s+by\s+remember""") == 1 &&
                 countMatching(pager, """val\s+waitingFirstFrame\s*=\s*waitingKey != null""") == 1 &&
                 countMatching(pager, """LaunchedEffect\(currentId\)""") == 1 &&
-                countMatching(pager, """if \(retireVeil\) waitingKey = null""") == 1 &&
+                countMatching(pager, """retireVeil""") == 0 &&
+                countMatching(pager, """delayMs <= 0L -> waitingKey = null""") == 1 &&
                 countMatching(
                     pager,
                     """SwipeWaitPolicy\.retireDelayMs\("""
@@ -745,6 +747,15 @@ class VideoLogicGuardTest {
                     codeOf("VideoScreen.kt"),
                     """swipeWaitingFirstFrame = effectiveStoryMode"""
                 ) == 1
+        )
+        assertTrue(
+            "中央播放键必须抑制「会话内首帧未出」的窗口（2026-10-01 真机：「翻页时大暂停键" +
+                "闪一帧」——翻页瞬间引擎 stopForReuse 让 playWhenReady 短暂为假，而加载层是 " +
+                "effect 异步架起的，架起前的 1~2 帧按钮会露出来）。判据必须是**同步**信号：" +
+                "swipePagingActive && !hasRenderedFirstFrame；同时保留既有 !isPlaying / Ended " +
+                "语义（暂停与播完仍要能点到按钮，非会话单视频不受影响）。",
+            countMatching(pane, """val showCenterPlayButton =""") == 1 &&
+                countMatching(pane, """!\(swipePagingActive && !state\.hasRenderedFirstFrame\)""") == 1
         )
         assertTrue(
             "加载层必须写在**播放器 Box 内部**：写在 Box 收尾之后，它会成为 " +

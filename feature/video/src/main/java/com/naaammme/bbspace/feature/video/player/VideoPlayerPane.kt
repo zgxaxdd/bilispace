@@ -1646,9 +1646,18 @@ private fun VideoPlayerOverlay(
         //
         // 同时必须保留 Ended：播完后 playWhenReady 仍为 true 而 isPlaying 变 false，
         // 若一并抑制，用户就没有「重播」入口了。
+        //
+        // 追加判据（2026-10-01 真机实测「翻页时大暂停键闪一帧」）：**会话内首帧未出**
+        // 时不显示中央播放键。翻页瞬间引擎 `stopForReuse` 会让 `playWhenReady` 短暂为假，
+        // 而加载层（veil）是 effect 异步架起的（真机实测架起间隙 10~23ms ≈ 一帧）——
+        // 这一帧就是用户看到的闪帧。`hasRenderedFirstFrame == false` 正是"这一支还没有
+        // 画面"的**同步**信号：veil 的粘滞键防的是它的"归零晚于 ids 发布"，而这里只在它
+        // 为 false 时**抑制**按钮，不存在被滞后值误伤的路径。
+        // 非会话（详情放大的单视频全屏）不受影响：swipePagingActive=false 时判据不生效。
         val showCenterPlayButton =
             !state.isPlaying &&
-                (!state.playWhenReady || state.playbackState == PlaybackState.Ended)
+                (!state.playWhenReady || state.playbackState == PlaybackState.Ended) &&
+                !(swipePagingActive && !state.hasRenderedFirstFrame)
 
         if (showCenterPlayButton) {
             Box(

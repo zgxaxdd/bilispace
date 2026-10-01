@@ -288,10 +288,11 @@ internal fun PortraitSwipePager(
         waitingKey = currentId
         waitingSinceMs = android.os.SystemClock.elapsedRealtime()
     }
-    // veil 退场（SW-11）：走 SwipeWaitPolicy 的纯判据。默认
-    // MIN_VEIL_VISIBLE_MS_DEFAULT = 0 → 首帧一到位 delay=0 立即撤，
+    // veil 退场（SW-11）：走 SwipeWaitPolicy 的纯判据，**同一个 effect 里直接清键**
+    // （中间不再经 retireVeil 状态转手——那会多一跳 effect 派发，实测把"首帧→撤遮罩"
+    // 从 ~19ms 拖到 ~37ms，真机上表现为遮罩多盖一帧）。
+    // 默认 MIN_VEIL_VISIBLE_MS_DEFAULT = 0 → firstFrame 到位时 delay=0 立即清，
     // 与旧行为（首帧即撤）逐帧同拍；真机确认"快网仍闪"后调大常量即开启。
-    var retireVeil by remember { mutableStateOf(false) }
     LaunchedEffect(firstFrameRendered, waitingKey, playbackFailed) {
         val delayMs = SwipeWaitPolicy.retireDelayMs(
             firstFrameRendered = firstFrameRendered,
@@ -301,16 +302,13 @@ internal fun PortraitSwipePager(
             playbackFailed = playbackFailed
         )
         when {
-            delayMs == null -> retireVeil = false
-            delayMs <= 0L -> retireVeil = true
+            delayMs == null -> Unit
+            delayMs <= 0L -> waitingKey = null
             else -> {
                 delay(delayMs)
-                retireVeil = true
+                waitingKey = null
             }
         }
-    }
-    LaunchedEffect(retireVeil) {
-        if (retireVeil) waitingKey = null
     }
     val waitingFirstFrame = waitingKey != null
     // 遮掩时间线（真机反馈「感觉就是盖了一层遮罩」）：必须能量出
