@@ -55,7 +55,9 @@ class GlassDrawChainStructureTest {
     @Test
     fun glassModifierChainsAreRemembered() {
         val targets = listOf(
-            "player${File.separator}VideoPlayerPane.kt" to "private fun Modifier.playerControlGlass(",
+            // 2026-09-29：playerControlGlass 改 internal（会话覆盖层重构中曾短暂暴露给
+            // pager，现已收回 pane；可见性放宽本身不改变 remember 契约，守卫跟着改签名）。
+            "player${File.separator}VideoPlayerPane.kt" to "internal fun Modifier.playerControlGlass(",
             "video${File.separator}HomeVideoPage.kt" to "private fun Modifier.glassBadgeSurface(",
             "glass${File.separator}LiquidBackdrop.kt" to "fun Modifier.liquidGlassSurface("
         )

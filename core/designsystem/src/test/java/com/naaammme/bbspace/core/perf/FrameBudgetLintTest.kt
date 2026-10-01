@@ -106,8 +106,13 @@ class FrameBudgetLintTest {
      *    一次 350ms 过渡，**不在滚动路径上**，与本轮要压的滚动 jank 无关；
      *    真要修得先把卡片的颜色管线改成"底色由绘制期承担"，那是重构不是调优。
      *    → 见交付报告的遗留项。
+     * 6. **8 → 9（2026-09-29，排行卡同步推荐 UI）**：+1 为
+     *    `rememberVideoCardCoverTint`（core/designsystem/color/VideoCardCoverTint.kt）
+     *    —— 推荐页封面取色淡入的**同配方抽包复用**（排行卡要与推荐卡同观感，
+     *    取色宿主从 FeedCard 抽到 designsystem 供两页共用）。第 5 条的全部理由
+     *    原样适用：只在取色回来那一刻触发一次 350ms 过渡，不在滚动路径上。
      */
-    private val maxAnimateAsState = 8
+    private val maxAnimateAsState = 9
 
     /** `BlurEffect(`：不比较半径就重建 = 每帧重编着色器。 */
     private val maxBlurEffect = 0

@@ -270,6 +270,9 @@ private val PlayerCtrlButtonTextOff = Color.White.copy(alpha = 0.72f)
 
 // 播放页玻璃：视频节点（TextureView）录进专用背板，控制条采样它做真模糊。
 // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick。
+// 消费者只有 pane 内部的控制件 chrome（showCtrl 门控、2 秒 transient）；会话级
+// 常驻控件（互动栏/评论卡）不允许用真模糊（用户反馈「使用体验很卡」），
+// 因此这套 locals 收回文件私有。
 private val LocalVideoBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 /**
  * 逐帧 tick 的 **provider**，不是 tick 的值。
@@ -325,7 +328,7 @@ private const val PLAYER_CONTROL_BLUR_DP = 14f
  * @param shapeHeightPx 控件短边（px），用于把折射量按尺寸自适应。
  */
 @Composable
-private fun Modifier.playerControlGlass(
+internal fun Modifier.playerControlGlass(
     shape: Shape,
     scrim: Color,
     shapeHeightPx: Float,
@@ -436,14 +439,11 @@ internal fun VideoPlayerPane(
      */
     swipeCoverUrl: String? = null,
     /**
-     * 打开评论（刷视频会话里由 pager 提供宿主）。
-     *
-     * bbspace 的 `CommentPanel` 是**详情 pager 的一页**（`VideoDetailPage.kt:238`），
-     * 不是弹层 —— 所以连播里要用它，必须由上层（`PortraitSwipePager`）另起一个
-     * `ModalBottomSheet` 宿主，并把 `commentSubject` 与两个 `LazyListState` 一起传进去。
-     * 传 `null` 时不显示评论按钮（宁可少一个入口，也不做点了没反应的假按钮）。
+     * 播放设置侧栏（⋮）显隐变化上报：会话宿主（pager）的**常驻互动栏**要据此
+     * 隐藏——侧栏是 pane 内的全屏右挂面板，盖不住 pane 之外的互动栏，
+     * 不让位的话点亮的爱心会浮在设置面板上（z 序跨层）。`null` = 宿主不接。
      */
-    onOpenComments: (() -> Unit)? = null,
+    onPlaybackSheetVisibilityChange: ((Boolean) -> Unit)? = null,
     /**
      * 手动横屏开关（`null` = 不显示该入口）。
      *
@@ -466,6 +466,10 @@ internal fun VideoPlayerPane(
     var activeDialog by remember { mutableStateOf<PlayerDialog?>(null) }
     var showPlaybackSheet by remember { mutableStateOf(false) }
     var showCtrl by remember { mutableStateOf(false) }
+    // 底部控制栏的实测高度：会话底部信息层在控制条出现时要**整体让位**上移
+    // （否则控制条的进度滑条顶进标题/玻璃圆盘，见 SwipeSessionBottomZone 注释）。
+    // 布局期一次性写入，位移在 graphicsLayer 里读 —— 零重组。
+    var ctrlBarHeightPx by remember { mutableIntStateOf(0) }
     val zoomState = remember { PlayerZoomState() }
     val videoResizeMode = rememberSaveable { mutableStateOf(PlayerVideoResizeMode.Fit) }
     val topMetaText = remember(showCtrl, isFull) {
@@ -562,11 +566,16 @@ internal fun VideoPlayerPane(
         // tick 门控 = 「有消费者」+「画面在动」：
         // - 消费者只有 playerControlGlass 一族（文件内私有 Local），模糊关闭或材质 OFF
         //   时它们早退为纯色背景 —— 这时逐帧重录是 0 消费的纯 CPU/GPU/电量的浪费；
+        // - **showCtrl 门控**（性能重构）：玻璃消费者全部长在控制条 chrome 里（控制条/
+        //   胶囊/滑杆/中央播放键），控制条隐藏期间没有任何玻璃节点在组合里——
+        //   tick 卻照样逐帧唤醒帧时钟，与视频渲染抢帧预算。会话级常驻控件已改静态
+        //   玻璃画（见 SwipeRailAction KDoc），控制条一隐藏就整个停掉；
         // - 暂停/缓冲时画面静止，录制链不需要逐帧刷新（glass 采样到的是正确的静态帧），
         //   恢复播放时 LaunchedEffect 随 key 翻转重新起循环，最多落后一帧。
         // 播放页专用背板的 layerBackdrop 录制链本身保持常驻：节点只在被 tick 读
         // 失效时才重绘重录，不 tick 就没有录制成本，注册本身免费。
-        val videoGlassActive = state.playWhenReady &&
+        val videoGlassActive = showCtrl &&
+            state.playWhenReady &&
             controlsBlur &&
             controlsMaterial != GlassMaterial.OFF
         LaunchedEffect(videoGlassActive) {
@@ -575,6 +584,10 @@ internal fun VideoPlayerPane(
                 withFrameNanos { }
                 videoGlassTick++
             }
+        }
+        // 侧栏显隐上报（会话互动栏让位用，见参数注释）。
+        LaunchedEffect(showPlaybackSheet) {
+            onPlaybackSheetVisibilityChange?.invoke(showPlaybackSheet)
         }
         CompositionLocalProvider(
             LocalVideoBackdrop provides videoBackdrop,
@@ -638,6 +651,7 @@ internal fun VideoPlayerPane(
                 showCtrl = showCtrl,
                 activeDialog = activeDialog,
                 showPlaybackSheet = showPlaybackSheet,
+                onCtrlBarHeightChange = { ctrlBarHeightPx = it },
                 onShowCtrlChange = { showCtrl = it },
                 onShowA = {
                     showCtrl = true
@@ -779,6 +793,76 @@ internal fun VideoPlayerPane(
                 }
             }
 
+            // ── 会话底部信息层 v2（用户反馈「大幅优化操作布局和 UI」）────────────────
+            //
+            // 旧版三件套（进度条 BottomCenter / 信息 BottomStart / 互动栏 CenterEnd）
+            // 各自 align 散点摆放：互动栏悬在右侧中部、压在画面上，信息两行小字贴着
+            // 导航条，底部区域没有结构。新版收进**同一个贴底容器**：
+            //
+            //   ┌──────────────────────────────┐
+            //   │（渐变遮罩：透明 → 58% 黑）      │  ← 任何画面上文字都可读；
+            //   │ @UP                ♡ 4551   │     横屏 letterbox 时整块落在
+            //   │ 标题（最多两行）      💬 370   │     黑边里，不再与画面字幕打架
+            //   │ ─────────── 进度 ─────────── │  ← 抬在手势导航条之上
+            //   └──────────────────────────────┘
+            //
+            // 信息层**常显**（用户定稿）：即使控制条出现也不隐藏——细进度条与信息
+            // 随时可见。控制条出现时信息层**整体上移**让位（位移读 ctrlBarHeightPx，
+            // graphicsLayer 零重组）：控制条的进度滑条不得顶进标题。
+            //
+            // 互动栏**不在这里**（用户定稿 v3）：它曾是本层的一员，但 pane 是"每页
+            // 一个"的 —— 上下滑时互动栏会跟着整页滑走再滑回来（用户反馈的"整体
+            // 向上调动"）。现在它提升为会话级单实例，常驻在 PortraitSwipePager 的
+            // 页面层之上，切视频原地换数据、不随页面位移（见 pager 的互动栏接线）。
+            if (swipePagingActive && !swipeWaitingFirstFrame) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .fillMaxHeight(SWIPE_BOTTOM_ZONE_FRACTION)
+                        .graphicsLayer {
+                            translationY = if (showCtrl) -ctrlBarHeightPx.toFloat() else 0f
+                        }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(SwipeBottomScrimBrush)
+                    )
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                    ) {
+                        // 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
+                        //
+                        // 为什么需要：连播时控件 2 秒自动隐藏，用户连"在看谁的作品"都不知道
+                        // （BiliPai 的竖屏页默认就常驻信息区，PortraitFullscreenOverlay.kt:194-394）。
+                        // 右侧给会话级互动栏留白（pager 层），标题不与其重叠。
+                        // BiliPai 手法：读**本作用域已收集**的 state，不在调用点重复 collect。
+                        SwipeSessionInfoLine(
+                            title = state.detail?.title,
+                            owner = state.detail?.owner?.name
+                        )
+                        // 会话内**常驻细进度条**（信息层第一阶段）。
+                        //
+                        // 为什么需要：上下滑会话里控件是 2 秒自动隐藏的，用户没有任何"这支还剩多久"的
+                        // 线索；BiliPai 的竖屏页底部就常驻一条细进度（PortraitFullscreenOverlay.kt:387-394），
+                        // 抖音/TikTok 同为行业惯例。它不抢注意力，也不与手势冲突（不可点、不消费触摸）。
+                        SwipeProgressLine(
+                            viewModel = viewModel,
+                            modifier = Modifier.padding(
+                                top = BiliSpacing.lg,
+                                bottom = SwipeProgressBottomInset
+                            )
+                        )
+                    }
+                }
+            }
+
+            // 播放设置侧栏：必须排在**底部信息层之后**——它是全屏右挂面板，
+            // z 序要盖住互动栏/信息行，否则点亮的爱心和计数会穿透面板浮在
+            // 设置项上（真机截图实证）。仍排在 SwipeWaitVeil 之前（加载层最上）。
             if (isFull && showPlaybackSheet) {
                 VideoPlaybackSidebar(
                     state = state,
@@ -787,54 +871,6 @@ internal fun VideoPlayerPane(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .fillMaxSize()
-                )
-            }
-
-            // 会话内**常驻细进度条**（信息层第一阶段）。
-            //
-            // 为什么需要：上下滑会话里控件是 2 秒自动隐藏的，用户没有任何"这支还剩多久"的
-            // 线索；BiliPai 的竖屏页底部就常驻一条细进度（PortraitFullscreenOverlay.kt:387-394），
-            // 抖音/TikTok 同为行业惯例。它不抢注意力，也不与手势冲突（不可点、不消费触摸）。
-            //
-            // 只在"会话内 + 不在等首帧"时出现：等首帧时整屏是加载层，进度条会浮在它上面；
-            // 非会话（详情页）有完整控制条，不需要这条。
-            if (swipePagingActive && !swipeWaitingFirstFrame) {
-                // 进度条**上移**到导航条之上：原来贴屏幕最底，被手势条压着、也显得"贴边"。
-                SwipeProgressLine(
-                    viewModel = viewModel,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = SwipeProgressBottomInset)
-                )
-                // 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
-                //
-                // 为什么需要：连播时控件 2 秒自动隐藏，用户连"在看谁的作品"都不知道
-                // （BiliPai 的竖屏页默认就常驻信息区与互动栏，PortraitFullscreenOverlay.kt:194-394）。
-                // 这里只搬**信息**（不含互动按钮），是最小且不打扰的一步：
-                // 两行文字、左对齐、不与进度条抢位置、不可点。
-                SwipeSessionInfoLine(
-                    title = viewModel.videoState.collectAsStateWithLifecycle().value.detail?.title,
-                    owner = viewModel.videoState.collectAsStateWithLifecycle().value.detail?.owner?.name,
-                    modifier = Modifier.align(Alignment.BottomStart)
-                )
-                // 会话内点赞（信息层第三阶段第一步）：竖屏连播时双击点赞是"隐式"的，
-                // 而用户想确认"这支我赞过没有"时没有任何可见状态 —— BiliPai 的竖屏页右侧
-                // 常驻互动栏（PortraitFullscreenOverlay.kt:194-394）。这里先落**点赞**一个，
-                // 因为它有完整闭环（状态 + 计数 + 动作都在 ViewModel 里，无新依赖）。
-                SwipeSessionActionRail(
-                    liked = viewModel.videoState.collectAsStateWithLifecycle()
-                        .value.detail?.userState?.liked == true,
-                    likeText = viewModel.videoState.collectAsStateWithLifecycle()
-                        .value.detail?.stat?.like,
-                    onToggleLike = viewModel::toggleLike,
-                    replyText = viewModel.videoState.collectAsStateWithLifecycle()
-                        .value.detail?.stat?.reply,
-                    onOpenComments = onOpenComments,
-                    shareBvid = viewModel.videoState.collectAsStateWithLifecycle().value.ids.bvid,
-                    shareAid = viewModel.videoState.collectAsStateWithLifecycle().value.ids.aid,
-                    shareTitle = viewModel.videoState.collectAsStateWithLifecycle()
-                        .value.detail?.title,
-                    modifier = Modifier.align(Alignment.CenterEnd)
                 )
             }
 
@@ -1069,20 +1105,25 @@ private fun SwipeProgressLine(
 }
 
 /**
- * 会话内互动栏（右侧中部）：**点赞 + 分享**。
+ * 会话内互动栏（**会话级单实例**，由 `PortraitSwipePager` 常驻在页面层之上；
+ * 组件实现留在本文件与控制件玻璃同语言）：**点赞 + 评论 + 分享**。
  *
- * 为什么是这两个：它们的"状态/动作/依赖"都现成 ——
- * 点赞有 `userState.liked` + `stat.like` + `toggleLike()`；分享有
+ * 为什么提升到 pager：pane 是"每页一个"的，互动栏放 pane 里会跟着页面一起
+ * 滑走再滑回来（用户反馈的"整体向上调动"）；单实例常驻后，上下滑时它钉在
+ * 原位，只随 viewModel 状态原地换数据。
+ *
+ * 为什么是这三个：它们的"状态/动作/依赖"都现成 ——
+ * 点赞有 `userState.liked` + `stat.like` + `toggleLike()`；评论有宿主传入的
+ * `onOpenComments`（`PortraitSwipePager` 的悬浮卡片）；分享有
  * `ShareUtils.videoUrl/shareText`（详情页同一套链接构造）。
- * **收藏**要先选文件夹（`toggleFavFolder(fid)`）、**投币**有二次确认交互、
- * **评论**面板在 bbspace 里是详情 pager 的**一页**（不是弹层），要在连播里用需要
- * 另起一个弹层宿主 + 评论列表状态 —— 这三个留到后续批次，不在这里做假按钮。
+ * **收藏**要先选文件夹（`toggleFavFolder(fid)`）、**投币**有二次确认交互 ——
+ * 这两个留到后续批次，不在这里做假按钮。
  *
- * 触摸：这是会话覆盖层里的可点区域（除失败态的重试按钮），固定在右侧中部，
- * 不挡 pager 的手势起手区。
+ * 触摸：这是会话覆盖层里的可点区域（除失败态的重试按钮），固定在右侧、
+ * 悬在信息块上方（用户定稿"整体向上"），图标之间的空隙仍透给 pager 的上下滑手势。
  */
 @Composable
-private fun SwipeSessionActionRail(
+internal fun SwipeSessionActionRail(
     liked: Boolean,
     likeText: String?,
     onToggleLike: () -> Unit,
@@ -1098,7 +1139,7 @@ private fun SwipeSessionActionRail(
     Column(
         modifier = modifier.padding(end = BiliSpacing.md),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
     ) {
         // 现代短视频的互动栏：图标大、计数在图标**下方**、层间距均匀（抖音/B 站竖屏同款）
         SwipeRailAction(
@@ -1132,10 +1173,16 @@ private fun SwipeSessionActionRail(
 }
 
 /**
- * 互动栏里的单个动作：圆形图标 + 下方计数。
+ * 互动栏里的单个动作：**液态玻璃圆盘**（图标）+ 下方计数。
  *
- * 视觉约定（对齐现代短视频）：图标 28dp 视觉尺寸、白色 + 8% 投影保证任何画面上都可读；
- * 计数用 `labelSmall`、86% 白。整块用 `IconButton` 保证 ≥48dp 触摸目标（无障碍下限）。
+ * 视觉约定（用户定稿「液态玻璃」，v2 改静态实现）：圆盘是**液态玻璃观感的静态画**
+ * ——白色三段渐变 + 白色细描边，**不走** [playerControlGlass] 背景模糊。
+ *
+ * 为什么不用真模糊：互动栏是会话内**常驻**的（不随控制条隐藏），真背景模糊 =
+ * 每帧一次 RenderEffect 采样，播放期间 3 颗圆盘持续吃 GPU（用户反馈「使用体验
+ * 很卡」）；BiliPai 的互动栏同样不用玻璃。静态渐变在视频上的观感与磨砂玻璃
+ * 几乎一致，代价为零。图标 36dp 视觉尺寸，计数 `labelSmall`、88% 白落在圆盘
+ * 下方；整块用 `IconButton` 保证 ≥48dp 触摸目标。
  */
 @Composable
 private fun SwipeRailAction(
@@ -1146,13 +1193,22 @@ private fun SwipeRailAction(
     onClick: () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconButton(onClick = onClick) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = tint,
-                modifier = Modifier.size(SwipeRailIconSize)
-            )
+        Box(
+            modifier = Modifier
+                .size(SwipeRailDiscSize)
+                .clip(CircleShape)
+                .background(SwipeRailGlassBrush)
+                .border(1.dp, PlayerPlayButtonBorder, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            IconButton(onClick = onClick) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = tint,
+                    modifier = Modifier.size(SwipeRailIconSize)
+                )
+            }
         }
         label?.takeIf(String::isNotBlank)?.let { count ->
             Text(
@@ -1165,24 +1221,59 @@ private fun SwipeRailAction(
     }
 }
 
-/** 互动栏图标视觉尺寸（触摸目标由 IconButton 的 48dp 保证）。走 spacing token，不新增 dp 字面量。 */
-private val SwipeRailIconSize = BiliSpacing.xxl
+/** 互动栏图标视觉尺寸（触摸目标由 IconButton 的 48dp 保证）。走 spacing token 的 1.5 倍档，不新增 dp 字面量。 */
+private val SwipeRailIconSize = BiliSpacing.xxl * 1.5f
+
+/** 互动栏液态玻璃圆盘直径：图标 36dp + 玻璃留白。token 的 1.75 倍档，不新增 dp 字面量。 */
+private val SwipeRailDiscSize = BiliSpacing.xxxl * 1.75f
+
+/**
+ * 互动栏圆盘的**静态**液态玻璃画：白色三段渐变（上亮下暗 + 中段透）模拟磨砂，
+ * 叠一条白描边（[PlayerPlayButtonBorder]）。顶层 val 只构建一次，零逐帧成本——
+ * 常驻控件不许用逐帧采样的真背景模糊（见 [SwipeRailAction] 的 KDoc）。
+ */
+private val SwipeRailGlassBrush = Brush.verticalGradient(
+    0f to Color.White.copy(alpha = 0.28f),
+    0.55f to Color.White.copy(alpha = 0.10f),
+    1f to Color.White.copy(alpha = 0.18f)
+)
 
 /** 会话内进度条的底部内边距：抬到手势导航条之上。 */
 private val SwipeProgressBottomInset = BiliSpacing.xxxl
+
+/** 会话底部信息层（遮罩 + 信息列 + 互动栏 + 进度条）高度占屏比：够放下两行标题与互动栏，又不盖过画面主体。 */
+private const val SWIPE_BOTTOM_ZONE_FRACTION = 0.38f
+
+/**
+ * 底部渐变遮罩：上 45% 全透明、落到屏底 58% 黑。
+ *
+ * 为什么需要：旧版信息两行小字直接压在画面/黑底上——竖屏视频遇到亮画面时白字看不清，
+ * 横屏 letterbox 时底部大片纯黑又显得"空"。遮罩把信息区从画面里"托"出来，
+ * 两种画幅下文字都稳定可读。静态画笔，顶层 val 只构建一次，零逐帧成本。
+ */
+private val SwipeBottomScrimBrush = Brush.verticalGradient(
+    0f to Color.Transparent,
+    0.45f to Color.Transparent,
+    1f to Color.Black.copy(alpha = 0.58f)
+)
 
 /** 轨道高度占屏高比例（≈3dp）：够看清、又不抢画面。 */
 private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
 
 /**
- * 会话内常驻信息：标题 + UP 名（左下角，压在进度条之上）。
+ * 会话内常驻信息：UP 名 + 标题（左下角，与互动栏同排、压在进度条之上）。
+ *
+ * v2 改版（用户反馈「大幅优化操作布局和 UI」）：
+ * - **UP 名上置、标题在下**（抖音/B 站竖屏页同款的信息层级）——先知道"在看谁"，
+ *   再读"在看什么"；UP 名提到 `labelLarge`、86% 白，标题提到 `titleMedium`；
+ * - 标题放宽到**两行**：旧版一行省略，长标题（真机样例"扫舱剩下的玉米有几吨之多，
+ *   为什么不能再卖出…"）永远读不全；
+ * - 可读性交给底部的渐变遮罩（[SwipeBottomScrimBrush]），文字本身不加背板；
  *
  * 设计约束：
  * - **只读**（无点击、无 pointerInput）：连播时任何可点区域都会和上下滑抢手指；
- * - 单行省略：标题可能很长，不允许换行把画面推高；
  * - 间距/字号全部走 token（`BiliSpacing` + `MaterialTheme.typography`），
- *   不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）；
- * - 底色用纯文字 + 半透明阴影，不加背板：竖屏视频下背板会显得像"贴纸"。
+ *   不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）。
  */
 @Composable
 private fun SwipeSessionInfoLine(
@@ -1193,30 +1284,29 @@ private fun SwipeSessionInfoLine(
     val titleText = title?.takeIf(String::isNotBlank) ?: return
     Column(
         modifier = modifier
-            // 底部留出进度条 + 导航栏的空间（进度条贴在 BottomCenter）
             .padding(
                 start = BiliSpacing.lg,
-                end = BiliSpacing.xxxl,
-                bottom = BiliSpacing.xl
+                end = BiliSpacing.sm,
+                bottom = BiliSpacing.md
             ),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
     ) {
-        Text(
-            text = titleText,
-            color = Color.White,
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
         owner?.takeIf(String::isNotBlank)?.let { name ->
             Text(
                 text = "@$name",
-                color = Color.White.copy(alpha = 0.72f),
-                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.86f),
+                style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
+        Text(
+            text = titleText,
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1334,6 +1424,8 @@ private fun VideoPlayerOverlay(
     landscapeForced: Boolean = false,
     /** 手动横屏开关；null = 本宿主不提供该入口（非会话路径没有竖屏锁，不需要）。 */
     onToggleLandscape: (() -> Unit)? = null,
+    /** 底部控制栏实测高度（px）上报：会话信息层据此在控制条出现时整体上移让位。 */
+    onCtrlBarHeightChange: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     val gestureState = remember { VideoGestureState() }
@@ -1544,7 +1636,7 @@ private fun VideoPlayerOverlay(
                 onShowQ = onShowQ,
                 onShowSp = onShowSp,
                 onToggleFull = onToggleFull,
-                modifier = Modifier
+                modifier = Modifier.onSizeChanged { onCtrlBarHeightChange(it.height) }
             )
         }
     }

@@ -42,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -173,7 +174,8 @@ internal fun VideoPlaybackSidebar(
     var section by rememberSaveable { mutableStateOf(PlaybackSheetSection.Playback) }
 
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        val panelWidth = (maxWidth * 0.42f).coerceIn(240.dp, 360.dp)
+        // 下限 280dp：三个分段按钮（4 字标签）单行排开的最小宽度，再窄必折行
+        val panelWidth = (maxWidth * 0.42f).coerceIn(280.dp, 360.dp)
         Row(modifier = Modifier.fillMaxWidth()) {
             // 左侧遮罩：点击关闭，压暗背景突出悬浮面板
             Box(
@@ -253,12 +255,19 @@ private fun VideoPlaybackPanelContent(
                 SegmentedButton(
                     selected = item == section,
                     onClick = { onSectionChange(item) },
+                    // 等宽分摊整行：侧栏面板宽度有限，默认按内容测量会让
+                    // 「视频信息/播放设置/弹幕设置」在中途折行（真机截图实证）
+                    modifier = Modifier.weight(1f),
                     shape = SegmentedButtonDefaults.itemShape(
                         index = index,
                         count = PlaybackSheetSection.entries.size
                     )
                 ) {
-                    Text(item.title)
+                    Text(
+                        item.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

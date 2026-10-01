@@ -192,7 +192,12 @@ class DesignTokenLintTest {
             // 上限 981 → 980（2026-09-26，B20 形状收口）：`VideoPlayerPane` 里那处
             // 非全屏播放窗口的 `RoundedCornerShape(16.dp)` 提到了文件级常量，字面量少一处。
             // 这是"棘轮该有的方向性"——数字变小就把上限一起降下来，否则它拦不住未来的增长。
-            limit = 980,
+            // 上限 980 → 981（2026-09-29，刷视频会话覆盖层）：+1 为互动栏圆盘的
+            // `1.dp` 白色发丝描边（VideoPlayerPane.SwipeRailAction 的玻璃观感圆盘）——
+            // 描边粗细是规格常量，同 0.5.dp 发丝线的处理逻辑，不做间距 token。
+            // 同批净变化备注：评论悬浮卡片 v3 玻璃描边的 1.dp 已随实底重构删除（-1），
+            // 但它发生在同两次棘轮运行之间，未计入本上限。
+            limit = 981,
             what = "theme 包外的 `N.dp` 字面量",
             why = "同一语义的尺寸散在各处就没有单一改动点。要降它就把语义明确的" +
                 "重复值收敛进 BiliRadius/BiliSpacing；一次性尺寸（图标、分隔线粗细、" +
@@ -224,7 +229,9 @@ class DesignTokenLintTest {
         // 不是漂移。理由与真机截图对比记录在 BiliRadius.card 与 AdaptiveMediaGrid 的注释里。
         // **146 → 148（2026-09-26，iOS 阶段 C）**：+2 为 IOSActionSheet 标题/说明
         // 卡片的 padding 规格（对照 compose-cupertino ActionSheetTitlePaddingValues）。
-        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 148, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
+        // **148 → 149（2026-09-29，排行卡同步推荐 UI）**：+1 为 RankScreen 网格
+        // contentPadding bottom 从 4.dp 改成 12.dp（与推荐页同口径，见 10.dp 档的记录）。
+        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 149, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
     }
 
     @Test
@@ -242,7 +249,10 @@ class DesignTokenLintTest {
         // **上限 80 → 85 的变更记录（2026-09-22，T4 UI 收口）**：+5 全部来自那次
         // 版式调整（列距与屏幕边距改用 10dp）。仍是"没有 token 的高频值"，
         // 等 T4.1 的语义归类结论出来再决定要不要给 10 补一档 BiliSpacing。
-        assertRatchet(actual = sumOf("""\b10\.dp\b"""), limit = 85, what = "`10.dp` 字面量", why = "BiliSpacing 没有 10 这一档，同上。")
+        // **85 → 87（2026-09-29，排行卡同步推荐 UI）**：+2 为 RankScreen 的网格
+        // contentPadding start/end 从 4.dp 改成 10.dp——推荐页注释里点名过
+        // "两处不同步就会出现首页贴边、排行页留白这种不一致"，页面边距必须同口径。
+        assertRatchet(actual = sumOf("""\b10\.dp\b"""), limit = 87, what = "`10.dp` 字面量", why = "BiliSpacing 没有 10 这一档，同上。")
     }
 
     /**

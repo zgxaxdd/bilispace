@@ -1,6 +1,10 @@
 package com.naaammme.bbspace.feature.video.player
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -15,6 +19,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.PaddingValues
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -284,8 +293,11 @@ internal fun PortraitSwipePager(
     }
     // ── 会话内评论（用户需求 1：刷视频模式要能看评论）──────────────────────────────
     // bbspace 的 `CommentPanel` 本来是**详情 pager 的一页**（不是弹层），所以这里另起一个
-    // `ModalBottomSheet` 宿主：单实例挂在 pager 上（不是每页一个），交互栏的评论按钮把它打开。
+    // 悬浮卡片宿主：单实例挂在 pager 上（不是每页一个），互动栏的评论按钮把它打开。
     var showComments by remember { mutableStateOf(false) }
+    // 播放设置侧栏（pane 内 ⋮ 面板）可见性：pane 内的面板盖不住 pane 之外的互动栏，
+    // 侧栏打开时常驻互动栏要让位（见下方互动栏接线的门控）。
+    var playbackSheetVisible by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val entry = pages.getOrNull(page) ?: return@VerticalPager
@@ -298,7 +310,6 @@ internal fun PortraitSwipePager(
                     onToggleFull = onToggleFull,
                     onBackClick = onBackClick,
                     onGoHome = onGoHome,
-                    onOpenComments = { showComments = true },
                     // 翻页会话激活：垂直拖动让位给 pager（否则亮度/音量手势抢走上下滑）
                     swipePagingActive = true,
                     // 等首帧加载层：深色底 + 大尺寸粒子，首帧到达后淡出
@@ -306,9 +317,11 @@ internal fun PortraitSwipePager(
                     // 失败态：加载层留着并切成"错误 + 重试"（见 VideoPlayerPane 的 KDoc）
                     swipeFailed = playbackFailed,
                     onRetrySwipe = onRetryPlayback,
-                    // 加载层用它铺底（与 SwipeCoverPage 同一个封面、同一种取景），
+                    // 等首帧加载层用它铺底（与 SwipeCoverPage 同一个封面、同一种取景），
                     // 消灭"封面 → 一块黑布 → 视频"的遮罩观感
                     swipeCoverUrl = entry.cover,
+                    // 侧栏显隐上报：互动栏在侧栏打开时让位（见下方互动栏接线）
+                    onPlaybackSheetVisibilityChange = { playbackSheetVisible = it },
                     // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
                     landscapeForced = landscapeForced,
                     onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }
@@ -323,34 +336,106 @@ internal fun PortraitSwipePager(
 
         // 队列尾部的反馈：只有停在**最后一页**时才提示，否则会打扰正常浏览。
         // 以前滑到最后一条什么都看不到：用户分不清"卡住了"还是"真的没有更多"。
+        // 提示要抬到底部信息层（遮罩+标题，见 VideoPlayerPane 的底部信息层 v2）
+        // 之上，否则会压在标题上。
         if (pagerState.currentPage >= pages.lastIndex && tailState != SwipeQueueTail.Idle) {
             SwipeQueueTailHint(
                 state = tailState,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = BiliSpacing.xxxl * 6f)
+            )
+        }
+
+        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感）──────────────────
+        // 点赞/评论/分享**只此一份**、钉在页面层之上：
+        // - 上下滑时它不再跟着整页"滑走再滑回来"（用户反馈的"整体向上调动"），
+        //   原地换数据（BiliPai 手法：覆盖层是**纯参数组件**，数据用本层**已收集**
+        //   的 playbackState 传入，不在调用点重复 collect——一次订阅、多处读值）；
+        // - 位置整体上移（用户定稿"向上"）：悬在底部信息块（UP+标题）上方，
+        //   不再与标题/进度条同排拥挤；
+        // - 显隐走 AnimatedVisibility 淡入淡出（BiliPai 同款），不再"啪一下"弹出；
+        // - 门控：等首帧时整屏是加载层；侧栏/评论卡片打开时让位。
+        AnimatedVisibility(
+            visible = !waitingFirstFrame && !playbackSheetVisible && !showComments,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd)
+        ) {
+            SwipeSessionActionRail(
+                liked = playbackState.detail?.userState?.liked == true,
+                likeText = playbackState.detail?.stat?.like,
+                onToggleLike = viewModel::toggleLike,
+                replyText = playbackState.detail?.stat?.reply,
+                onOpenComments = { showComments = true },
+                shareBvid = playbackState.ids.bvid,
+                shareAid = playbackState.ids.aid,
+                shareTitle = playbackState.detail?.title,
+                modifier = Modifier.padding(end = BiliSpacing.md, bottom = BiliSpacing.xxxl * 4f)
             )
         }
     }
 
-    // 评论弹层：宿主在这里（**单实例**），`CommentPanel` 复用详情页那一份实现。
-    // 高度给 85% 屏高：列表要能滚，同时留出上方可点区域便于关闭。
+    // 评论：**悬浮卡片**（用户明确要求：不要占满屏的弹层）。
+    //
+    // 为什么不是 `ModalBottomSheet`：连播里弹层会把整屏盖住、只剩一条评论列表，
+    // 用户失去"我在看哪支视频"的上下文。悬浮卡片贴底、底下视频仍在，
+    // 点卡片外任意处关闭 —— 与短视频应用的评论浮层一致。
+    //
+    // 观感与性能定稿（v5，用户反馈「使用体验很卡 / 评论区风格非常奇怪」）：
+    // - **主题实底**（surface，随浅色/深色主题），不再做背景模糊——大面模糊是
+    //   逐帧 RenderEffect，评论列表滚动期间持续吃 GPU，卡顿的主因之一；
+    //   之前的"磨砂板上浮白卡"双层观感也随之消失：实底面板上条目自然融合；
+    // - 顶部圆角（sheetTop）贴底 + 投影，形状 remember 一次，不随重组重建。
     if (showComments) {
-        ModalBottomSheet(
-            onDismissRequest = { showComments = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            CommentPanel(
-                subject = viewModel.commentSubject,
-                isActive = true,
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(COMMENT_SHEET_HEIGHT_FRACTION)
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = COMMENT_SCRIM_ALPHA))
+                    .clickable(onClick = { showComments = false })
             )
+            val commentCardShape = remember {
+                RoundedCornerShape(
+                    topStart = BiliRadius.sheetTop,
+                    topEnd = BiliRadius.sheetTop
+                )
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = commentCardShape,
+                shadowElevation = COMMENT_CARD_ELEVATION,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(COMMENT_CARD_HEIGHT_FRACTION)
+            ) {
+                CommentPanel(
+                    subject = viewModel.commentSubject,
+                    isActive = true,
+                    contentPadding = PaddingValues(
+                        horizontal = BiliSpacing.md,
+                        vertical = BiliSpacing.sm
+                    ),
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }
 
-/** 评论弹层高度占屏比。 */
-private const val COMMENT_SHEET_HEIGHT_FRACTION = 0.85f
+/** 评论悬浮卡片高度占屏比：留出上方约 1/3 屏，视频仍然可见。 */
+private const val COMMENT_CARD_HEIGHT_FRACTION = 0.68f
+
+/** 卡片外遮罩：够暗以突出卡片，又不至于让视频"消失"。 */
+private const val COMMENT_SCRIM_ALPHA = 0.42f
+
+/** 卡片阴影高度（4dp 档：浮起但不"飘"）。 */
+private val COMMENT_CARD_ELEVATION = 8.dp
+
+/** 玻璃卡片描边：白色微光，勾出卡片轮廓（与中央播放键同档）。 */
+private val CommentSheetBorderColor = Color.White.copy(alpha = 0.18f)
 
 private const val TAG = "PortraitSwipe"
 
