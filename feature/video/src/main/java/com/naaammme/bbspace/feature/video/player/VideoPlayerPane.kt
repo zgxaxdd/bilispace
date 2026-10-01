@@ -1388,7 +1388,9 @@ internal fun SwipeSessionActionRail(
             tint = if (liked) LikeHeartColor else Color.White,
             onClick = onToggleLike,
             onLongClick = onLongPressLike,
-            onLongClickLabel = "一键三连"
+            onLongClickLabel = "一键三连",
+            // SW-31：点赞态变化 → 图标弹一下（形变反馈；关注按钮缺数据源见参数 KDoc）
+            popToken = liked
         )
         if (onOpenComments != null) {
             SwipeRailAction(
@@ -1407,7 +1409,9 @@ internal fun SwipeSessionActionRail(
                 contentDescription = if (faved) "取消收藏" else "收藏",
                 label = stickyFav,
                 tint = if (faved) FavStarColor else Color.White,
-                onClick = onOpenFavorite
+                onClick = onOpenFavorite,
+                // SW-31：收藏态变化 → 图标弹一下（同点赞）
+                popToken = faved
             )
         }
         SwipeRailAction(
@@ -1454,7 +1458,33 @@ private fun SwipeRailAction(
      * 只有 [onLongClick] 非空时有意义。
      */
     onLongClickLabel: String? = null,
+    /**
+     * 状态形变令牌（SW-31）：值变化时图标"弹一下"（1 → 1.18 → 1）。
+     *
+     * 为什么是令牌而不是布尔：点赞/收藏各有自己的真值源，形变只关心"变了"——
+     * 传 `liked` / `faved` 即可；`null` = 这一项没有状态形变（评论/分享）。
+     * ⚠️ 原计划的"关注按钮形变"缺数据源：仓内关系 gRPC 只有 `ModifyRelation`（写），
+     * 没有查询接口，`VideoUserState` 也不含关注位 → 不做假按钮（见 L4 记录）。
+     * `reduceMotion` 时不弹（无障碍纪律）。
+     */
+    popToken: Any? = null,
 ) {
+    // 状态形变（SW-31）：令牌变化 → 弹一下。读值在 graphicsLayer。
+    var lastPopToken by remember { mutableStateOf(popToken) }
+    val pop = remember { Animatable(1f) }
+    // CompositionLocal 只能在组合期读：effect 里读到的是"组合那一刻"的值（够用——
+    // 用户改"动效速度"后重组的下一帧就会带上新值）
+    val popReduceMotion = LocalAnimations.current.reduceMotion
+    LaunchedEffect(popToken, popReduceMotion) {
+        if (popToken != lastPopToken) {
+            lastPopToken = popToken
+            if (!popReduceMotion) {
+                pop.snapTo(1f)
+                pop.animateTo(1.18f, tween(durationMillis = 120))
+                pop.animateTo(1f, tween(durationMillis = 160))
+            }
+        }
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -1474,7 +1504,12 @@ private fun SwipeRailAction(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = tint,
-                modifier = Modifier.size(SwipeRailIconSize)
+                modifier = Modifier
+                    .size(SwipeRailIconSize)
+                    .graphicsLayer {
+                        scaleX = pop.value
+                        scaleY = pop.value
+                    }
             )
         }
         label?.takeIf(String::isNotBlank)?.let { count ->
