@@ -554,6 +554,36 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SW-13 失败态接线的写法不变式：分类只走策略函数、会话状态真的被置成失败、
+     * 重试必须去抖、veil 文案按类型显示。
+     */
+    @Test
+    fun swipeFailureIsClassifiedAndRetryIsDebounced() {
+        val vm = codeOf("VideoViewModel.kt")
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "失败必须分类（SwipeErrorPolicy.classify）并落到会话状态机（playbackFailed）；" +
+                "QoE 记一条 play_error；手动重试必须去抖（连点会把引擎打爆）。",
+            countMatching(vm, """SwipeErrorPolicy\.classify\(""") == 1 &&
+                countMatching(vm, """swipeSession\.playbackFailed\(""") == 1 &&
+                countMatching(vm, """SwipeQoeEventType\.PlayError""") == 1 &&
+                countMatching(vm, """SwipeErrorPolicy\.isManualRetryDebounced\(""") == 1 &&
+                countMatching(vm, """SwipeErrorPolicy\.autoRetryDelayMs\(""") == 1
+        )
+        assertTrue(
+            "veil 文案必须按分类给'人话'（网络→检查网络、解码→换一支）：" +
+                "pager 传 swipeErrorText、pane 用它渲染，找不到则退默认文案。",
+            countMatching(
+                pager,
+                """swipeErrorText = swipeErrorKind\?\.let\(SwipeErrorPolicy::messageOf\)"""
+            ) == 1 &&
+                countMatching(pane, """errorText = swipeErrorText,""") == 1 &&
+                countMatching(pane, """text = errorText \?:""") == 1
+        )
+    }
+
     // ── 刷视频入口：简介区边缘下滑（不新增控件；全屏按钮不连播）────────────────
 
     /**

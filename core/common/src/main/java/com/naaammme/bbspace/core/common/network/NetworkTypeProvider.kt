@@ -31,4 +31,19 @@ class NetworkTypeProvider @Inject constructor(
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
+
+    /**
+     * 当前是否有可用网络（SW-13 失败分类的输入：断网时"自动重试"没有意义，
+     * 文案要指向"检查网络"而不是"重试这一支"）。
+     *
+     * 判据 = 有默认网络且声明了 INTERNET 能力；**不做连通性探测**（一次探测就是一个
+     * 往返，失败态下再花它不值得——分类只影响文案与"要不要自动重试"，不影响手动重试）。
+     */
+    fun isNetworkAvailable(): Boolean {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
 }

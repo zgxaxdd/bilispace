@@ -59,6 +59,7 @@ import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.swipe.SwipeChromeBurnInPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.SwipeErrorPolicy
 import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
 import com.naaammme.bbspace.core.swipe.SwipeWaitPolicy
 import kotlinx.coroutines.delay
@@ -286,6 +287,8 @@ internal fun PortraitSwipePager(
     // 用户在连播页面上根本看不到。现在改成：失败时加载层**留着**并切成错误态 + 重试按钮
     // （见 VideoPlayerPane 的 SwipeWaitVeil），返回手势与上下滑照常可用。
     val playbackState by viewModel.videoState.collectAsStateWithLifecycle()
+    // SW-13：失败类型（veil 文案按类型给"人话"）
+    val swipeErrorKind by viewModel.swipeErrorKind.collectAsStateWithLifecycle()
     val firstFrameRendered = playbackState.hasRenderedFirstFrame
     val playbackFailed = playbackState.error != null
     // 粘滞键类型化（SW-03）：数据类相等语义与旧字符串完全同拍（同视频同键）。
@@ -426,6 +429,8 @@ internal fun PortraitSwipePager(
                     swipeWaitingFirstFrame = waitingFirstFrame,
                     // 失败态：加载层留着并切成"错误 + 重试"（见 VideoPlayerPane 的 KDoc）
                     swipeFailed = playbackFailed,
+                    // SW-13：失败文案按类型给"人话"（网络/取流/解码）
+                    swipeErrorText = swipeErrorKind?.let(SwipeErrorPolicy::messageOf),
                     onRetrySwipe = onRetryPlayback,
                     // 等首帧加载层用它铺底（与 SwipeCoverPage 同一个封面、同一种取景），
                     // 消灭"封面 → 一块黑布 → 视频"的遮罩观感

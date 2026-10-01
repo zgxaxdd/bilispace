@@ -40,6 +40,7 @@ import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import com.naaammme.bbspace.core.video.VideoActionRepository
 import com.naaammme.bbspace.core.video.VideoDetailRepository
 import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.SwipeErrorPolicy
 import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
@@ -66,6 +67,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -793,6 +795,75 @@ class VideoViewModel @Inject constructor(
     /** 上一次真正发起的预取请求（SW-12 取消判据的输入；随会话 exit 清空）。 */
     private var lastPrefetchRequest: SwipePrefetchPolicy.PrefetchRequest? = null
 
+    // ── 失败态（SW-13）：分类 + 重试策略 ────────────────────────────────────────
+    /** 当前页的失败类型（null = 没有失败）；UI 的 veil 文案读它。 */
+    private val _swipeErrorKind = MutableStateFlow<SwipeErrorPolicy.Kind?>(null)
+    val swipeErrorKind: StateFlow<SwipeErrorPolicy.Kind?> = _swipeErrorKind.asStateFlow()
+
+    /** 本页已经自动重试过几次（成功出帧/换页即清零）。 */
+    private var swipeAutoRetryCount = 0
+
+    /** 上一次手动重试的时刻（去抖；见 SwipeErrorPolicy.isManualRetryDebounced）。 */
+    private var lastManualRetryMs: Long? = null
+
+    init {
+        // 引擎错误 → 会话失败态（分类 + QoE）+ 一次退避自动重试。
+        // 为什么只在"会话仍在"时接：详情页的单视频失败有自己的错误面板，不走这里。
+        viewModelScope.launch {
+            videoState
+                .map { it.error }
+                .distinctUntilChanged()
+                .collect { error ->
+                    if (error == null) {
+                        _swipeErrorKind.value = null
+                        return@collect
+                    }
+                    if (swipeSession.anchor.value == null) return@collect
+                    val ids = videoState.value.ids
+                    // 分类只看稳定的错误串：RequestFailed 带 message（+ cause 的类名），
+                    // NoPlayableStream 是"取到了但没有可播流"（取流类）。
+                    val rawMessage = when (error) {
+                        is com.naaammme.bbspace.core.model.PlaybackError.RequestFailed ->
+                            listOfNotNull(error.message, error.cause?.javaClass?.simpleName).joinToString(" ")
+                        is com.naaammme.bbspace.core.model.PlaybackError.NoPlayableStream ->
+                            "no playable stream ${error.message}"
+                    }
+                    val kind = SwipeErrorPolicy.classify(
+                        errorMessage = rawMessage,
+                        networkAvailable = networkTypeProvider.isNetworkAvailable()
+                    )
+                    _swipeErrorKind.value = kind
+                    swipeSession.playbackFailed(
+                        id = SwipeId.of(ids.bvid, ids.aid),
+                        retryable = true
+                    )
+                    SwipeQoeHub.record(SwipeQoeEventType.PlayError)
+                    val delayMs = SwipeErrorPolicy.autoRetryDelayMs(swipeAutoRetryCount, kind)
+                    android.util.Log.i(
+                        "PortraitSwipe",
+                        "playError: kind=$kind autoRetryIn=${delayMs ?: "no"} attempts=$swipeAutoRetryCount"
+                    )
+                    if (delayMs != null) {
+                        swipeAutoRetryCount += 1
+                        delay(delayMs)
+                        retryCurrentPlaybackInternal(fromAuto = true)
+                    }
+                }
+        }
+        // 出帧即认为这一页好了：清失败类型与自动重试计数（新的一页重新开始计数）
+        viewModelScope.launch {
+            videoState
+                .map { it.hasRenderedFirstFrame }
+                .distinctUntilChanged()
+                .collect { rendered ->
+                    if (rendered) {
+                        swipeAutoRetryCount = 0
+                        _swipeErrorKind.value = null
+                    }
+                }
+        }
+    }
+
     private fun prefetchEntry(entry: SwipeEntry, warmDetail: Boolean) {
         val target = entry.target
         if (target.aid <= 0L || target.cid <= 0L) return
@@ -852,10 +923,25 @@ class VideoViewModel @Inject constructor(
      * （那是**切页**语义，防重复开播），重试要的正是"再开一次"——
      * `openVideo` 内部会自增 `openId`，等于一次全新的取流尝试。
      */
+    /**
+     * 重试当前页（veil 里那个"重试"按钮，SW-13）：
+     * - **去抖**：连点间隔 < 800ms 直接忽略（防连点把引擎打爆）；
+     * - 状态回 `Ready`（状态机不变式 2），重开播放（`openVideo` 自增 openId = 全新一次取流）。
+     */
     fun retryCurrentPlayback() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (SwipeErrorPolicy.isManualRetryDebounced(now, lastManualRetryMs)) {
+            android.util.Log.i("PortraitSwipe", "retry ignored: debounced")
+            return
+        }
+        lastManualRetryMs = now
+        retryCurrentPlaybackInternal(fromAuto = false)
+    }
+
+    private fun retryCurrentPlaybackInternal(fromAuto: Boolean) {
         val target = _targetStack.value.lastOrNull() ?: return
-        android.util.Log.i("PortraitSwipe", "retry: target=$target")
-        swipeSession.retry() // PlaybackFailed → Ready（状态机不变式 2；SW-13 起接 UI）
+        android.util.Log.i("PortraitSwipe", "retry: target=$target auto=$fromAuto")
+        swipeSession.retry() // PlaybackFailed → Ready（状态机不变式 2）
         playbackController.openVideo(target)
     }
 

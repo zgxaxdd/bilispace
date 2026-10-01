@@ -431,6 +431,11 @@ internal fun VideoPlayerPane(
      * 而错误详情只写在播放器侧栏里，用户在连播页面上看不到任何解释。
      */
     swipeFailed: Boolean = false,
+    /**
+     * 失败文案（SW-13 分类后的"人话"；`null` = 用默认文案）。
+     * 网络类指向"检查网络"、解码类指向"换一支"——分类对用户可见。
+     */
+    swipeErrorText: String? = null,
     /** 失败态的重试回调（`null` = 不给重试入口，只显示错误）。 */
     onRetrySwipe: (() -> Unit)? = null,
     /**
@@ -892,6 +897,7 @@ internal fun VideoPlayerPane(
                 visible = swipeWaitingFirstFrame,
                 coverUrl = swipeCoverUrl,
                 failed = swipeFailed,
+                errorText = swipeErrorText,
                 onRetry = onRetrySwipe
             )
         }
@@ -991,6 +997,11 @@ private fun SwipeWaitVeil(
     coverUrl: String? = null,
     /** 这一支取流/解码失败了：加载层留着，改成"错误 + 重试"，而不是撤掉露出一片黑。 */
     failed: Boolean = false,
+    /**
+     * 失败文案（SW-13 分类后的人话；`null` = 用默认文案）。
+     * 网络类会指向"检查网络"，解码类会指向"换一支"——分类对用户可见。
+     */
+    errorText: String? = null,
     onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -1099,7 +1110,7 @@ private fun SwipeWaitVeil(
                         modifier = Modifier.size(VeilErrorIconSize)
                     )
                     Text(
-                        text = "这一支加载失败了",
+                        text = errorText ?: "这一支加载失败了",
                         color = WaitVeilErrorTint,
                         style = MaterialTheme.typography.bodyMedium
                     )
