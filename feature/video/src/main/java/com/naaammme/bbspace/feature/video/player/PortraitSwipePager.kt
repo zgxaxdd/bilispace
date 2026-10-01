@@ -7,6 +7,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -26,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.PaddingValues
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -62,6 +69,7 @@ import com.naaammme.bbspace.core.swipe.SwipeChromeBurnInPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeErrorPolicy
 import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
+import com.naaammme.bbspace.core.swipe.SwipePageTransformPolicy
 import com.naaammme.bbspace.core.swipe.SwipeWaitPolicy
 import kotlinx.coroutines.delay
 import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
@@ -408,6 +416,41 @@ internal fun PortraitSwipePager(
             closeFavSheet()
         }
     }
+    // ── 翻页动效与越界阻尼（SW-10）────────────────────────────────────────────
+    // 1:1 跟手由 VerticalPager 自带；这里补的是"带走感"（出页轻微缩放 + 淡出）
+    // 与"越界阻尼"（滑到末端还继续拖，画面按系数折减跟随、松手回弹）。
+    // 读值一律在 graphicsLayer 的 lambda 里（绘制阶段读取 → 不触发重组）。
+    val reduceMotion = LocalAnimations.current.reduceMotion
+    var rawOverScroll by remember { mutableStateOf(0f) }
+    val overScrollConnection = remember(reduceMotion) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                // 只观察**未被消费**的纵向位移（= 已经滑到头还继续拖的那部分）
+                if (source == NestedScrollSource.UserInput && available.y != 0f) {
+                    rawOverScroll += available.y
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                // 松手：阻尼位移回弹到 0（`animate` 是挂起函数，不是 animate*AsState，
+                // 不占帧预算棘轮的额度）
+                if (rawOverScroll != 0f) {
+                    val start = rawOverScroll
+                    androidx.compose.animation.core.animate(
+                        initialValue = start,
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 240)
+                    ) { value, _ -> rawOverScroll = value }
+                }
+                return Velocity.Zero
+            }
+        }
+    }
     CompositionLocalProvider(LocalSwipeChromeBurnIn provides chromeBurnIn) {
     Box(modifier = modifier) {
         // `beyondViewportPageCount = 1`：**起滑之前**就把左右邻居页组合出来。
@@ -418,7 +461,13 @@ internal fun PortraitSwipePager(
         VerticalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                // SW-10：越界阻尼（观察未消费位移 + 松手回弹；reduceMotion 时不接）
+                .then(if (reduceMotion) Modifier else Modifier.nestedScroll(overScrollConnection))
+                .graphicsLayer {
+                    translationY = SwipePageTransformPolicy.overScrollTranslation(rawOverScroll)
+                }
         ) { page ->
             val entry = pages.getOrNull(page) ?: return@VerticalPager
             if (entry.isCurrentVideo(currentBvid, currentAid)) {
@@ -462,7 +511,17 @@ internal fun PortraitSwipePager(
             } else {
                 SwipeCoverPage(
                     entry = entry,
-                    isLoading = page == pagerState.currentPage && detailLoading
+                    isLoading = page == pagerState.currentPage && detailLoading,
+                    // SW-10：封面页按"离落定位置的距离"做轻微缩放 + 淡出，
+                    // 让翻页有"带走感"而不是硬切。读值在 graphicsLayer（绘制阶段）。
+                    modifier = Modifier.graphicsLayer {
+                        val offset = (pagerState.currentPage - page) +
+                            pagerState.currentPageOffsetFraction
+                        val t = SwipePageTransformPolicy.transformFor(offset, reduceMotion)
+                        scaleX = t.scale
+                        scaleY = t.scale
+                        alpha = t.alpha
+                    }
                 )
             }
         }
@@ -480,7 +539,8 @@ internal fun PortraitSwipePager(
             )
         }
 
-        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感；v6 去掉翻页闪烁）──────        // 点赞/评论/分享**只此一份**、钉在页面层之上：
+        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感；v6 去掉翻页闪烁）──────
+        // 点赞/评论/分享**只此一份**、钉在页面层之上：
         // - 上下滑时它不再跟着整页"滑走再滑回来"（用户反馈的"整体向上调动"），
         //   原地换数据（BiliPai 手法：覆盖层是**纯参数组件**，数据用本层**已收集**
         //   的 playbackState 传入，不在调用点重复 collect——一次订阅、多处读值）；
@@ -683,8 +743,9 @@ private const val SETTLED_OFFSET_EPSILON = 0.02f
 private fun SwipeCoverPage(
     entry: SwipeEntry,
     isLoading: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         if (entry.cover.isNotBlank()) {
             BiliAsyncImage(
                 url = entry.cover,

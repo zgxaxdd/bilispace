@@ -474,6 +474,28 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SW-10 翻页动效的写法不变式：数值全部来自纯策略、读值只在 graphicsLayer
+     * （绘制阶段读取 → 不触发重组）、越界阻尼走 nestedScroll 的未消费位移 + 松手回弹、
+     * reduceMotion 时不接阻尼且策略退化。
+     */
+    @Test
+    fun swipePageTransformIsPolicyDrivenAndDrawPhase() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val policy = codeOf("SwipePageTransformPolicy.kt")
+        assertTrue(
+            "出页缩放/淡出必须由 SwipePageTransformPolicy 给值（幅度 ≤2% 与交接落定同量级）；" +
+                "越界阻尼 = nestedScroll 未消费位移 + 策略折减 + 松手回弹（`animate` 挂起函数，" +
+                "不占 animate*AsState 棘轮）；reduceMotion 时不接阻尼（策略内部退化）。",
+            countMatching(pager, """SwipePageTransformPolicy\.transformFor\(""") == 1 &&
+                countMatching(pager, """SwipePageTransformPolicy\.overScrollTranslation\(""") == 1 &&
+                countMatching(pager, """NestedScrollConnection""") == 1 &&
+                countMatching(pager, """if \(reduceMotion\) Modifier else Modifier\.nestedScroll""") == 1 &&
+                countMatching(policy, """const val MAX_SCALE_DELTA""") == 1 &&
+                countMatching(policy, """MIN_ALPHA""") >= 1
+        )
+    }
+
     // ── 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）────────
 
     /**
