@@ -14,13 +14,17 @@ package com.naaammme.bbspace.core.swipe
  * @param isLastPage 当前是不是最后一页（最后一页后面没有内容可翻）
  * @param alreadyAdvancedForThisVideo 这一支是不是已经因为 `STATE_ENDED` 翻过一次
  *   （幂等键：某些机型会连发两次，翻两次就是"跳过了一支"）
+ * @param isScrubbing 用户是不是正在拖进度条（SW-15）：拖动中播完不该翻页——
+ *   用户的注意力在进度条上，此时翻页等于把他的操作"打断并丢弃"
  */
 fun shouldAutoAdvanceToNextSwipePage(
     autoAdvanceEnabled: Boolean,
     repeatOne: Boolean,
     isLastPage: Boolean,
     alreadyAdvancedForThisVideo: Boolean,
+    isScrubbing: Boolean = false,
 ): Boolean {
+    if (isScrubbing) return false
     if (!autoAdvanceEnabled) return false
     if (repeatOne) return false
     if (isLastPage) return false

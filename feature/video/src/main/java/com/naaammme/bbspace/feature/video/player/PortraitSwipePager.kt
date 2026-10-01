@@ -148,6 +148,8 @@ internal fun PortraitSwipePager(
     // 防烧屏的"最近交互时刻"（用户要求）：翻页回调（下方 collect）与评论/收藏面板都要写它，
     // 所以在第一个 effect 之前声明；亮度/drift 的派生在本函数更下方（要读 playerSettings）。
     var lastChromeInteractionMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
+    // SW-15：进度条拖动中（pane 里的 SwipeProgressLine 上报）→ 抑制播完自动翻页
+    var scrubbingProgress by remember { mutableStateOf(false) }
     LaunchedEffect(pagerState, pages) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
@@ -248,7 +250,9 @@ internal fun PortraitSwipePager(
                     repeatOne = playerSettings.playback.repeatMode != PlayerRepeatMode.Off,
                     isLastPage = next > pages.lastIndex,
                     alreadyAdvancedForThisVideo =
-                        key.isNotEmpty() && key == viewModel.swipeLastAutoAdvancedKey.value
+                        key.isNotEmpty() && key == viewModel.swipeLastAutoAdvancedKey.value,
+                    // SW-15：拖动进度条中不自动翻页（别把用户的操作打断并丢弃）
+                    isScrubbing = scrubbingProgress
                 )
                 if (!shouldAdvance) return
                 viewModel.noteSwipeAutoAdvanced(key)
@@ -432,6 +436,11 @@ internal fun PortraitSwipePager(
                     // SW-13：失败文案按类型给"人话"（网络/取流/解码）
                     swipeErrorText = swipeErrorKind?.let(SwipeErrorPolicy::messageOf),
                     onRetrySwipe = onRetryPlayback,
+                    // SW-15：进度条拖动状态 → 抑制自动翻页 + 算作一次交互（防烧屏回满亮）
+                    onSwipeScrubbingChange = { scrubbing ->
+                        scrubbingProgress = scrubbing
+                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                    },
                     // 等首帧加载层用它铺底（与 SwipeCoverPage 同一个封面、同一种取景），
                     // 消灭"封面 → 一块黑布 → 视频"的遮罩观感
                     swipeCoverUrl = entry.cover,

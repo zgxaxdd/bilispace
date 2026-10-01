@@ -1133,6 +1133,7 @@ class VideoLogicGuardTest {
     @Test
     fun swipeSessionShowsPersistentProgressLine() {
         val pane = codeOf("player/VideoPlayerPane.kt")
+        val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
             "会话内常驻细进度条必须存在、且判据是 `swipePagingActive && !swipeWaitingFirstFrame`" +
                 "（用户定稿「常显」：控制条出现也不隐藏；等首帧时整屏是加载层）。" +
@@ -1150,12 +1151,26 @@ class VideoLogicGuardTest {
                 ) == 1
         )
         assertTrue(
-            "进度条尺寸必须走比例而不是 dp 字面量（DesignTokenLintTest 的棘轮会判红），" +
-                "也不许带 pointerInput/clickable —— 它只是指示器，不能吃掉手势。",
+            "进度条尺寸仍须走 token/比例（DesignTokenLintTest 的棘轮会判红新增 dp 字面量）。\n" +
+                "2026-10-01 反转（SW-15，任务书 B-3）：旧不变式是「进度条只是指示器、不许 " +
+                "pointerInput/clickable」；现在它**可拖**——但只认横向拖动（纵向让位 pager）、" +
+                "触摸带走 token 的 2 倍档（48dp）、拖手才提交（SwipeSeekPolicy 单测覆盖）。" +
+                "因此断言由「不许 pointerInput」改为「只许横向拖动 + 热区/提交判据走策略函数」。\n" +
+                "🔁 若将来改回只读指示器：把断言恢复成 none { pointerInput } 并删掉拖动接线。",
             blockBody(pane, "private fun SwipeProgressLine(").let { body ->
                 body.none { it.contains(".dp") } &&
-                    body.none { it.contains("pointerInput") || it.contains("clickable") }
+                    body.any { it.contains("detectHorizontalDragGestures(") } &&
+                    body.none { it.contains("detectVerticalDragGestures") } &&
+                    body.any { it.contains("SwipeSeekPolicy.positionForFraction(") } &&
+                    body.any { it.contains("SwipeSeekPolicy.bubbleText(") }
             }
+        )
+        assertTrue(
+            "拖动中必须抑制自动翻页（SW-15）：pager 把 scrubbing 喂进策略函数，pane 上报拖动状态。",
+            countMatching(pager, """isScrubbing = scrubbingProgress""") == 1 &&
+                countMatching(pager, """onSwipeScrubbingChange = \{ scrubbing ->""") == 1 &&
+                countMatching(pane, """onScrubbingChange\(true\)""") == 1 &&
+                countMatching(pane, """onScrubbingChange\(false\)""") == 2
         )
         assertTrue(
             "进度条必须排在加载层之前：加载层是 Box 的最后一个子节点，" +
