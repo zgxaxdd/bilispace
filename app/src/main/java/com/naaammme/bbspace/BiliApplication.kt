@@ -19,6 +19,7 @@ import com.naaammme.bbspace.memory.ImageCacheAction
 import com.naaammme.bbspace.memory.MemoryTrimPlan
 import com.naaammme.bbspace.memory.SeamlessCoverAction
 import com.naaammme.bbspace.memory.TRIM_TO_RATIO
+import com.naaammme.bbspace.memory.imageCacheTrimTargetBytes
 import com.naaammme.bbspace.memory.planLowMemory
 import com.naaammme.bbspace.memory.planTrimMemory
 import coil3.disk.DiskCache
@@ -180,11 +181,13 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
      */
     private fun trimImageMemoryCache(reason: String, fraction: Float = 0.5f) {
         val cache = SingletonImageLoader.get(this).memoryCache ?: return
-        val target = (cache.maxSize * fraction).toLong().coerceAtLeast(1L)
-        // 已经比目标小就不动：避免"切后台一次就 trim 一次"的无谓抖动
-        if (cache.size <= target) return
+        // 目标 = min(比例, 绝对预算)。只有比例的话，大堆设备上"切后台"收掉的
+        // 仍然是几十 MB 量级的图形内存（位图不吃 Java 堆，percent 约束不了它）。
+        val target = imageCacheTrimTargetBytes(cache.maxSize, cache.size, fraction) ?: return
         cache.trimToSize(target)
-        Logger.d(TAG) { "已修剪图片内存缓存（$reason，${cache.size}/${cache.maxSize} 字节）" }
+        Logger.d(TAG) {
+            "已修剪图片内存缓存（$reason，${cache.size} -> ≤$target / 容量 ${cache.maxSize} 字节）"
+        }
     }
 
     /** 仅清内存缓存；磁盘缓存与播放器缓冲一律不动。 */

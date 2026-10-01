@@ -53,6 +53,28 @@ fun coverUrlFor(src: String?, size: BiliCoverSize = BiliCoverSize.Small): String
 
 fun coverThumbnailUrl(src: String?): String? = coverUrlFor(src, BiliCoverSize.Small)
 
+/**
+ * **限宽 + 限质量、不裁切**的图片地址（`@{widthPx}w_{q}q.webp`）。
+ *
+ * ## 为什么需要它（`thumbnailUrl` 的宽度是无界的）
+ * `thumbnailUrl` 只追加 `@15q` 这类**质量**后缀、不带宽度。图床的后缀串里
+ * 没有宽度约束时，返回的就是**原始尺寸**的图 —— 一张 4K 的直播封面/聊天记录大图
+ * 会按原尺寸下载再解码，内存与解码耗时都不受我们控制。
+ * 上游 BiliPai 这轮修的正是同一类问题（`3d5c296cb` 直播封面按屏幕宽度采样并夹上限）。
+ *
+ * 与 [coverUrlFor] 的区别：这里**不带 `_1e_1c`**（不按目标比例裁切），
+ * 用于"保持原图比例、只是要限个尺寸"的场景（播放器铺满背景、预览九宫格）。
+ *
+ * @param widthPx 期望宽度上限（px）；图床会按此宽度等比缩放。
+ */
+fun widthLimitedImageUrl(src: String?, widthPx: Int, q: Int = BILI_IMAGE_DEFAULT_Q): String? {
+    require(widthPx > 0) { "widthPx 必须为正，收到 $widthPx" }
+    if (src.isNullOrBlank()) return src
+    return src.httpsImageUrl().replaceImageBody { body ->
+        body.substringBefore('@') + "@${widthPx}w_${q}q.webp"
+    }
+}
+
 fun thumbnailUrl(src: String?, q: Int = BILI_IMAGE_DEFAULT_Q): String? {
     if (src.isNullOrBlank()) return src
     var matched = false

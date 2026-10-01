@@ -17,6 +17,7 @@ import com.naaammme.bbspace.core.common.media.coverThumbnailUrl
 import com.naaammme.bbspace.core.common.media.coverUrlFor
 import com.naaammme.bbspace.core.common.media.originImageUrl
 import com.naaammme.bbspace.core.common.media.thumbnailUrl
+import com.naaammme.bbspace.core.common.media.widthLimitedImageUrl
 
 enum class BiliImageVariant(
     val q: Int = BILI_IMAGE_DEFAULT_Q,
@@ -57,8 +58,25 @@ fun biliImageUrlForVariant(url: String?, variant: BiliImageVariant): String? = w
     variant == BiliImageVariant.CardCover43 -> coverUrlFor(url, BiliCoverSize.Small43)
     variant == BiliImageVariant.PlayerPreview -> coverUrlFor(url, BiliCoverSize.PlayerPreview)
     variant == BiliImageVariant.CardCover -> coverThumbnailUrl(url)
+    // 这两档原先落到 `thumbnailUrl(url, q)` —— 那**只限质量不限宽度**，图床按原尺寸返回。
+    // 直播铺满背景的封面与聊天/预览九宫格的大图因此走的是"整张原图"的下载 + 解码。
+    variant == BiliImageVariant.Banner -> widthLimitedImageUrl(url, BANNER_MAX_WIDTH_PX, variant.q)
+    variant == BiliImageVariant.PreviewThumb ->
+        widthLimitedImageUrl(url, PREVIEW_THUMB_MAX_WIDTH_PX, variant.q)
+
     else -> thumbnailUrl(url, variant.q)
 }
+
+/**
+ * 直播播放器背景铺满用的封面宽度上限（px）。
+ *
+ * 手机横屏铺满也就 1280~1600px 宽，取 1280 与上游 `3d5c296cb` 的夹取量级一致；
+ * 再大属于"人眼看不出区别但内存照单全收"的那一段。
+ */
+const val BANNER_MAX_WIDTH_PX = 1280
+
+/** 预览缩略图（IM 会话、图片九宫格）的宽度上限（px）：它们是网格小图，不是主画面。 */
+const val PREVIEW_THUMB_MAX_WIDTH_PX = 480
 
 /**
  * 信息流卡片按"单列/双列"实际使用的封面变体。

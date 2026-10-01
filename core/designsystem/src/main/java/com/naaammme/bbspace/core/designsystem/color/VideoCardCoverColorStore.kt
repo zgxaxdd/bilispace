@@ -29,6 +29,13 @@ object VideoCardCoverColorStore {
 
     private const val MAX_CACHE_SIZE = 128
 
+    /**
+     * 取色采样的边长（px）。palette 最终只用 48×48 的面积，留一档余量是为了缩图时
+     * 不把相邻色块混成一坨；96² 的 ARGB_8888 ≈ 36KB，比旧写法"按封面尺寸整张复制"
+     * （640×480 ≈1.2MB、960×540 ≈2.1MB）小两个数量级。见 [extractRepresentativeColor]。
+     */
+    private const val PALETTE_SAMPLE_PX = 96
+
     private val colorCache = LruCache<String, Color>(MAX_CACHE_SIZE)
 
     /** 同步读取已缓存的封面代表色；未命中返回 null（调用方据此决定是否触发提取）。 */
@@ -75,7 +82,12 @@ object VideoCardCoverColorStore {
     ) {
         if (cacheKey.isBlank() || url.isBlank()) return
         getCachedColor(cacheKey)?.let { cached ->
-            if (onExtracted != null) scope.launch(Dispatchers.Main) { onExtracted(cached) }
+            // **Main.immediate**：调用点就在主线程（卡片组合里的 LaunchedEffect），
+            // 用 `Dispatchers.Main` 会再排一次队 → 缓存明明命中了，染色却要晚一帧才出现
+            // （滚动里表现为"卡片先白后有色"）。对照 BiliPai `7ee5c10b5` 的同类修正。
+            // 下面两处 `withContext(Dispatchers.Main)` 不改：那两处是从 Default 线程
+            // 跳回主线程，本来就要排队，immediate 不改变任何行为。
+            if (onExtracted != null) scope.launch(Dispatchers.Main.immediate) { onExtracted(cached) }
             return
         }
         synchronized(inFlight) {
@@ -142,32 +154,63 @@ object VideoCardCoverColorStore {
     }
 
     /**
-     * 对整张封面聚类，按 swatch 面积选代表色。
+     * 对封面聚类取代表色。
      *
-     * `resizeBitmapArea(48*48)` 把采样压到约 2300 像素：palette 的耗时与像素数近似线性，
-     * 这个尺寸下单张实测在毫秒级，且足以反映主色调。`clearFilters()` 关掉默认的
-     * 白/黑/近白过滤——暗色封面（夜景、黑底字幕）本来就该染深色，过滤掉会让它无色可染。
+     * `resizeBitmapArea(48*48)` 把 palette 的采样压到约 2300 像素：它的耗时与像素数
+     * 近似线性，这个尺寸下足以反映主色调。`clearFilters()` 关掉默认的白/黑/近白过滤
+     * ——暗色封面（夜景、黑底字幕）本来就该染深色，过滤掉会让它无色可染。
+     *
+     * ## 为什么先画进 [PALETTE_SAMPLE_PX] 见方的小图（2026-10-01，对照 BiliPai `8cfc4246b`）
+     * 旧写法是 `bitmap.copy(Bitmap.Config.ARGB_8888, false)`：HARDWARE 位图读不了像素，
+     * 于是**按封面原尺寸**复制一份软件位图 —— 640×480 ≈1.2MB、960×540 ≈2.1MB，
+     * 而且**没人回收它**，要等 GC。每张染色卡片一次，滚动时就是持续制造大对象，
+     * 而 GC 停顿恰恰落在滚动帧上（这类"看起来没泄漏"的分配最容易被忽略）。
+     * palette 反正只按 48×48 面积采样，先降采样不损失任何信息：改成画进
+     * [PALETTE_SAMPLE_PX]² ≈36KB 的小图并在 finally 里 recycle，**分配少两个数量级**。
+     *
+     * 线性缩放的各向异性拉伸不改变**相对面积**（仿射变换对所有区域同比例缩放），
+     * 所以 swatch 的 population 排序与整图一致，选色结论不变。
      */
     internal fun extractRepresentativeColor(bitmap: Bitmap): Color? {
         return runCatching {
             if (bitmap.isRecycled) return@runCatching null
-
-            // HARDWARE 位图不能直接给 palette 采样（读像素会抛），需先转 ARGB_8888
-            val safeBitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                bitmap.config == Bitmap.Config.HARDWARE
-            ) {
-                bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return@runCatching null
-            } else {
-                bitmap
+            val sampled = sampleIntoSoftwareBitmap(bitmap) ?: return@runCatching null
+            try {
+                val palette = Palette.from(sampled)
+                    .resizeBitmapArea(48 * 48)
+                    .maximumColorCount(16)
+                    .clearFilters()
+                    .generate()
+                resolveRepresentativeSwatch(palette.swatches)?.rgb?.let { Color(it) }
+            } finally {
+                // 只回收我们自己造的那张；软件位图路径返回的是入参本身，不归我们管
+                if (sampled !== bitmap && !sampled.isRecycled) sampled.recycle()
             }
+        }.getOrNull()
+    }
 
-            val palette = Palette.from(safeBitmap)
-                .resizeBitmapArea(48 * 48)
-                .maximumColorCount(16)
-                .clearFilters()
-                .generate()
-
-            resolveRepresentativeSwatch(palette.swatches)?.rgb?.let { Color(it) }
+    /**
+     * HARDWARE 位图 → [PALETTE_SAMPLE_PX]² 的 ARGB_8888 小样；软件位图原样返回
+     * （palette 内部本就会按 `resizeBitmapArea` 缩放，没必要再套一层）。
+     * 造不出小图（尺寸非法/内存吃紧）时返回 null，调用方按"取不到色"降级。
+     */
+    private fun sampleIntoSoftwareBitmap(source: Bitmap): Bitmap? {
+        val hardware = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            source.config == Bitmap.Config.HARDWARE
+        if (!hardware) return source
+        return runCatching {
+            val small = Bitmap.createBitmap(
+                PALETTE_SAMPLE_PX, PALETTE_SAMPLE_PX, Bitmap.Config.ARGB_8888
+            )
+            // isFilterBitmap：缩放走双线性而不是就近取整，避免小样里出现马赛克状假主色
+            val paint = android.graphics.Paint().apply { isFilterBitmap = true }
+            android.graphics.Canvas(small).drawBitmap(
+                source,
+                null,
+                android.graphics.Rect(0, 0, PALETTE_SAMPLE_PX, PALETTE_SAMPLE_PX),
+                paint
+            )
+            small
         }.getOrNull()
     }
 

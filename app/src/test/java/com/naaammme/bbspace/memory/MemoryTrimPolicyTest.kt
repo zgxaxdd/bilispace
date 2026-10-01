@@ -2,6 +2,7 @@ package com.naaammme.bbspace.memory
 
 import android.content.ComponentCallbacks2
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -177,6 +178,57 @@ class MemoryTrimPolicyTest {
             "onLowMemory 与后台吃紧同档",
             SeamlessCoverAction.Clear,
             planLowMemory().seamlessCovers
+        )
+    }
+
+    // ── 图片内存缓存的绝对预算（2026-10-01，对照 BiliPai `8cfc4246b`）──────────────
+
+    @Test
+    fun trimTargetIsRatioAndAbsoluteBudgetWhicheverIsSmaller() {
+        val mb = 1024L * 1024L
+        // 小容量设备：比例(0.5×32MB=16MB) 比绝对预算(24MB) 更狠 → 走比例，行为与旧实现一致
+        assertEquals(
+            "派生容量本来就小时应保持'留一半'的旧语义",
+            16L * mb,
+            imageCacheTrimTargetBytes(maxSizeBytes = 32L * mb, currentSizeBytes = 30L * mb)
+        )
+        // 大堆设备：percent(0.25) 派生出 128MB，一半是 64MB —— 那根本不是"给系统让路"
+        assertEquals(
+            "大派生容量必须被绝对预算夹住",
+            24L * mb,
+            imageCacheTrimTargetBytes(maxSizeBytes = 128L * mb, currentSizeBytes = 120L * mb)
+        )
+        assertEquals(BACKGROUND_IMAGE_BUDGET_BYTES, 24L * mb)
+    }
+
+    @Test
+    fun alreadyUnderBudgetMeansNoOp() {
+        val mb = 1024L * 1024L
+        // 已经在目标之内 → null = 什么都不做（原实现的早退，避免"每次切后台都 trim 一次"）
+        assertNull(
+            imageCacheTrimTargetBytes(maxSizeBytes = 48L * mb, currentSizeBytes = 20L * mb)
+        )
+        assertNull(
+            "恰好等于目标也不许动",
+            imageCacheTrimTargetBytes(maxSizeBytes = 48L * mb, currentSizeBytes = 24L * mb)
+        )
+        // 刚好超一字节也要动（边界不许含糊）
+        assertEquals(24L * mb, imageCacheTrimTargetBytes(48L * mb, 24L * mb + 1))
+    }
+
+    @Test
+    fun trimTargetNeverExceedsCapacityOrGoesBelowOne() {
+        val mb = 1024L * 1024L
+        // 容量小于预算：走比例那一档（2MB 容量 → 留 1MB），且永远不超过容量
+        assertEquals(1L * mb, imageCacheTrimTargetBytes(2L * mb, 2L * mb))
+        // 退化输入（0 容量 / 负数）不许算出 0 或负目标，也不许抛
+        assertEquals(1L, imageCacheTrimTargetBytes(0L, 10L))
+        assertEquals(1L, imageCacheTrimTargetBytes(-5L, 10L))
+        // 比例被夹进 0..1：传 2f 也不许算出比容量更大的目标
+        assertEquals(
+            "ratio>1 必须被夹回 1（目标永远不超过容量）",
+            2L,
+            imageCacheTrimTargetBytes(2L, 3L, ratio = 2f)
         )
     }
 }
