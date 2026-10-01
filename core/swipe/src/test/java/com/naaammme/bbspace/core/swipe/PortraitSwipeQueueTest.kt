@@ -153,7 +153,7 @@ class PortraitSwipeQueueTest {
         )
         assertEquals(
             listOf("BV1", converted, "aid:${Long.MAX_VALUE}", "BV2"),
-            entries.map { it.key }
+            entries.map { it.legacyKey() }
         )
     }
 
@@ -185,7 +185,7 @@ class PortraitSwipeQueueTest {
             durationText = null
         )
         // 建队时的身份键（relate 卡没有 bvid）
-        assertEquals("aid:117339261503379", aidOnly.key)
+        assertEquals("aid:117339261503379", aidOnly.legacyKey())
         // 取流中：ids 还是请求参数（bvid 为空）
         assertTrue("取流中就该认定这一页归播放器", aidOnly.isCurrentVideo(null, 117_339_261_503_379L))
         // 取流完成：applyDetailResult 把 ids 整体换成服务端解析结果（bvid 被补齐）
@@ -195,7 +195,7 @@ class PortraitSwipeQueueTest {
             aidOnly.isCurrentVideo("BV1Kyas6wEuz", 117_339_261_503_379L)
         )
         // 反证：字符串比较在这里必然失配
-        assertTrue(aidOnly.key != swipeKey("BV1Kyas6wEuz", 117_339_261_503_379L))
+        assertTrue(aidOnly.legacyKey() != swipeKey("BV1Kyas6wEuz", 117_339_261_503_379L))
     }
 
     @Test
@@ -258,7 +258,7 @@ class PortraitSwipeQueueTest {
         )
         assertEquals(1, entries.size)
         assertEquals("BV1Kyas6wEuz", entries[0].bvid)
-        assertEquals("BV1Kyas6wEuz", entries[0].key)
+        assertEquals("BV1Kyas6wEuz", entries[0].legacyKey())
         // 补的是 **target** 而不只是条目字段：进栈/上报/历史都拿 target
         assertEquals("BV1Kyas6wEuz", entries[0].target.bvid)
     }
@@ -292,7 +292,7 @@ class PortraitSwipeQueueTest {
         val entries = swipeEntriesFromRelates(listOf(relate(null, aid = Long.MAX_VALUE)))
         assertEquals(1, entries.size)
         assertEquals("", entries[0].bvid)
-        assertEquals("aid:${Long.MAX_VALUE}", entries[0].key)
+        assertEquals("aid:${Long.MAX_VALUE}", entries[0].legacyKey())
         assertTrue(entries[0].isCurrentVideo(null, Long.MAX_VALUE))
     }
 

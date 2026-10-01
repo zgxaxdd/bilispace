@@ -388,20 +388,20 @@ class VideoLogicGuardTest {
                 countMatching(pager, """VideoPlayerPane\(""") == 1
         )
         assertTrue(
-            "翻页监听必须经 requestedKey（SwipeEntry.key，bvid 优先 / aid 兜底）防目标震荡" +
-                "（直接比 currentKey 会在取流完成前被快速往返翻页打转），" +
+            "翻页监听必须经 requestedKey（SW-03 起为类型化 SwipeEntry.id，aid 优先 / bvid 兜底）" +
+                "防目标震荡（直接比 currentId 会在取流完成前被快速往返翻页打转），" +
                 "翻页与迟到结果对齐各走一处 onSwipeTo。",
             countMatching(pager, """requestedKey""") >= 3 &&
                 countMatching(pager, """onSwipeTo\(entry\)""") == 2
         )
         assertTrue(
-            "「哪一页归播放器」必须按**内容身份**判断（isCurrentVideo），不许拿 entry.key " +
-                "和 currentKey 比字符串——队列条目的 key 是建队时算的（relate 卡没有 bvid " +
-                "→ `aid:…`），而 videoState.ids 在取流/详情返回后会被服务端补齐的 bvid " +
-                "整体覆盖，字符串会在「取流完成」的一瞬间翻转 → 播放器页落空、翻页后新视频" +
-                "永不起播（真机阻塞问题的根因）。",
+            "「哪一页归播放器」必须按**内容身份**判断（isCurrentVideo / SwipeId.matches），" +
+                "不许拿 entry 与 currentId 比字符串——队列条目的旧字符串 key 是建队时算的" +
+                "（relate 卡没有 bvid → `aid:…`），而 videoState.ids 在取流/详情返回后会被服务端" +
+                "补齐的 bvid 整体覆盖，字符串会在「取流完成」的一瞬间翻转 → 播放器页落空、" +
+                "翻页后新视频永不起播（真机阻塞问题的根因）。",
             countMatching(pager, """isCurrentVideo\(""") >= 3 &&
-                countMatching(pager, """entry\.key == currentKey""") == 0
+                countMatching(pager, """entry\.id == currentId""") == 0
         )
         assertTrue(
             "pager 必须从调用方拿到当前播放的 ids（currentBvid / currentAid）——" +
@@ -412,9 +412,11 @@ class VideoLogicGuardTest {
                 countMatching(screen, """currentAid\s*=\s*videoState\.ids\.aid""") == 1
         )
         assertTrue(
-            "同条目短路也必须 aid 优先（与 isCurrentVideo 同一判据），否则「同一个视频的 " +
-                "aid-only 目标 vs 已补齐 bvid 的栈顶」会被判成不同目标 → 白白从重开播一次。",
-            countMatching(vm, """current\.aid\s*==\s*entry\.target\.aid""") == 1
+            "同条目短路也必须走类型化身份（SW-03：entry.id.matches(SwipeId.of(current.bvid, " +
+                "current.aid))，aid 优先语义内置在 SwipeId.matches，与 isCurrentVideo 同一判据），" +
+                "否则「同一个视频的 aid-only 目标 vs 已补齐 bvid 的栈顶」会被判成不同目标 → " +
+                "白白从重开播一次。",
+            countMatching(vm, """entry\.id\.matches\(SwipeId\.of\(current\.bvid, current\.aid\)\)""") == 1
         )
         assertTrue(
             "全屏分支必须用 swipeSessionActive + 锚点判据启用 pager；会话开启必须调 " +
@@ -446,6 +448,29 @@ class VideoLogicGuardTest {
                     controller,
                     """fun exit\(\)"""
                 ) == 1
+        )
+    }
+
+    /**
+     * SW-03：条目身份必须**类型化**，字符串键退场到"日志与去重 map"两个用途。
+     *
+     * ## 为什么要有这条守卫
+     * C7 真机事故（能滑动但不播放）的根因就是"页身份"与"去重键"共用一个字符串，
+     * 而字符串在取流完成的一瞬间翻转。`SwipeId` 类型化把两个语义在编译期分开；
+     * 但只要 `val key: String` 还在，下一个改动就可能把它再写回页身份判断里——
+     * 这条守卫让"改回去"直接红。
+     */
+    @Test
+    fun swipeEntryIdentityIsTypedNotString() {
+        val queue = codeOf("PortraitSwipeQueue.kt")
+        assertTrue(
+            "SwipeEntry 不得再有 val key: String（旧字符串身份键）：页身份一律走 " +
+                "val id: SwipeId + isCurrentVideo（内部 id.matches(SwipeId.of(...))），" +
+                "legacyKey() 只许用于日志与去重 map——删掉类型化身份或把字符串键加回来都会红。",
+            countMatching(queue, """val key: String""") == 0 &&
+                countMatching(queue, """val id: SwipeId""") == 1 &&
+                countMatching(queue, """fun legacyKey\(\): String""") == 1 &&
+                countMatching(queue, """id\.matches\(SwipeId\.of\(bvid, aid\)\)""") == 1
         )
     }
 
@@ -674,8 +699,8 @@ class VideoLogicGuardTest {
     fun swipeWaitsFirstFrameBehindLoadingVeil() {
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
-            "「等首帧」必须是**粘滞**状态：换视频（currentKey）进入等待，" +
-                "直到这一支真的出帧才退出。" +
+            "「等首帧」必须是**粘滞**状态：换视频（SW-03 起为类型化 currentId，旧字符串 " +
+                "currentKey 与之同拍变化）进入等待，直到这一支真的出帧才退出。" +
                 "直接取 `!hasRenderedFirstFrame` 的瞬时值是错的 —— 换视频后的头几十毫秒里" +
                 "它仍是上一支的 true（finishVideoPlayback 先发布新 ids、后 stopForReuse 归零），" +
                 "加载层会先卸载再挂上，中间那一帧就是真机看到的「黑屏 + 大暂停键」。" +
@@ -683,7 +708,7 @@ class VideoLogicGuardTest {
                 "而错误详情只在播放器侧栏里、连播页面上看不到；改成留着加载层并切成错误态 + 重试。",
             countMatching(pager, """var\s+waitingKey\s+by\s+remember""") == 1 &&
                 countMatching(pager, """val\s+waitingFirstFrame\s*=\s*waitingKey != null""") == 1 &&
-                countMatching(pager, """LaunchedEffect\(currentKey\)""") == 1 &&
+                countMatching(pager, """LaunchedEffect\(currentId\)""") == 1 &&
                 countMatching(
                     pager,
                     """if \(firstFrameRendered\) waitingKey = null"""

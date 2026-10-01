@@ -20,8 +20,8 @@ import kotlin.random.Random
  *   重排会让"用户当前所在页"跳变）——这是硬约束，调用点只在合并新批次时。
  * - bbspace 的相关推荐里有 **bvid 为空的条目**（relate 的 uri 是 aid 格式，靠本地
  *   `avToBv` 补；补不出来时只有 aid）。BiliPai 直接 `filter { bvid.isNotBlank() }`，
- *   在 bbspace 会把整页推荐丢掉（C7 真机事故），所以这里按 [SwipeEntry.key] 去重，
- *   **不丢 aid 条目**。
+ *   在 bbspace 会把整页推荐丢掉（C7 真机事故），所以这里按 [SwipeEntry.legacyKey] 去重，
+ *   **不丢 aid 条目**（页身份判断已类型化为 [SwipeEntry.id]，见 SW-03）。
  *
  * 纯逻辑（固定 seed 的 `Random`），JVM 可测。
  */
@@ -34,11 +34,11 @@ fun arrangeSwipeEntries(
     if (incoming.size <= 1) return incoming
 
     val shuffled = incoming
-        .distinctBy { it.key }
+        .distinctBy { it.legacyKey() }
         // 先按身份键排序再洗牌：Kotlin 的 `shuffled(Random(seed))` 依赖**输入顺序**，
         // 同一批推荐若以不同顺序到达（接口分页/本地去重先后不同），结果就会不一样。
         // 排序后"同一个集合 → 同一个顺序"，跨会话/跨补货都可复现。
-        .sortedBy { it.key }
+        .sortedBy { it.legacyKey() }
         .shuffled(Random(seed))
 
     // 逐对比较是 O(n²)：签名（关键词集合）每批只算一次

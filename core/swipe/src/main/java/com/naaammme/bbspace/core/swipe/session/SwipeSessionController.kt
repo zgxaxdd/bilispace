@@ -4,6 +4,7 @@ import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
 import com.naaammme.bbspace.core.swipe.resolveSwipeQueueTail
+import com.naaammme.bbspace.core.swipe.model.SwipeId
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -97,7 +98,7 @@ class SwipeSessionController {
         _queue.value = appendSwipeEntries(
             existing = emptyList(),
             incoming = entries,
-            anchorKey = seed.key
+            anchorKey = seed.legacyKey()
         )
         _state.value = SwipeSessionState.Ready(page = 0, size = _queue.value.size)
     }
@@ -111,7 +112,7 @@ class SwipeSessionController {
         _queue.value = appendSwipeEntries(
             existing = _queue.value,
             incoming = entries,
-            anchorKey = anchor.key
+            anchorKey = anchor.legacyKey()
         )
         val current = _state.value
         if (current is SwipeSessionState.Ready) {
@@ -150,9 +151,9 @@ class SwipeSessionController {
     }
 
     /** 取流/解码失败（接线在 SW-13；状态先行收敛在此）。 */
-    fun playbackFailed(key: String, retryable: Boolean) {
+    fun playbackFailed(id: SwipeId, retryable: Boolean) {
         if (_anchor.value == null) return
-        _state.value = SwipeSessionState.PlaybackFailed(key = key, retryable = retryable)
+        _state.value = SwipeSessionState.PlaybackFailed(id = id, retryable = retryable)
     }
 
     /** 重试：状态必回 `Ready`（不变式 2）；重开播放是调用方的事（openVideo 自增 openId）。 */

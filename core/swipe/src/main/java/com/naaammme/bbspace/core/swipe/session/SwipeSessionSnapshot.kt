@@ -119,4 +119,4 @@ private fun JsonObject.toSwipeEntry(): SwipeEntry? {
 
 /** 供日志用的短标识（不落盘）。 */
 internal val SwipeSessionSnapshot.describe: String
-    get() = "via=$via page=$page queue=${queue.size} anchor=${anchor.key}"
+    get() = "via=$via page=$page queue=${queue.size} anchor=${anchor.legacyKey()}"

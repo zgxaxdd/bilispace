@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.core.swipe.session
 
 import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.model.SwipeId
 
 /**
  * 刷视频会话的来路。两条入口的数据链完全不同（任务书 §2.2）：
@@ -17,8 +18,6 @@ enum class SwipeEntryVia { DetailPullDown, StoryFeed }
  *   UI 用），但 `SwipeSessionController.anchor` 在 story 流到达前保持 null——
  *   VideoScreen 的 pager 启用判据是"锚点非空 + 队列非空"，提前发布会让 pager 分支
  *   在流在途时激活，改变加载层的行为（守卫 `homeStoryEntryWiring` 锁的就是这条链）。
- * - `PlaybackFailed.id` 在 SW-03 类型化 `SwipeId` 落地前先用既有字符串 key 承载，
- *   SW-03 同批迁移。
  */
 sealed interface SwipeSessionState {
     /** 无会话（退出后 / 从未进入）。 */
@@ -51,8 +50,8 @@ sealed interface SwipeSessionState {
 
     /** 当前页取流/解码失败；[SwipeSessionState.PlaybackFailed.retryable] 为 false 时 UI 禁用重试按钮。 */
     data class PlaybackFailed(
-        /** 当前页的身份键（SW-03 起为 [com.naaammme.bbspace.core.swipe.SwipeEntry] 的类型化 id）。 */
-        val key: String,
+        /** 失败页的类型化身份（SW-03：页身份一律 SwipeId，不再用字符串 key）。 */
+        val id: SwipeId,
         val retryable: Boolean,
     ) : SwipeSessionState
 }

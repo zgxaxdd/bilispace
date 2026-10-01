@@ -163,7 +163,7 @@ class SwipeSimilarityTest {
             entry("BV2", "【合集】原神 深渊 攻略", author = "UP乙", durationText = "10:10"),
             entry("BV3", "完全无关的另一支视频", author = "UP丙", durationText = "03:00"),
         )
-        val merged = appendSwipeEntries(existing = accepted, incoming = incoming, anchorKey = anchor.key)
+        val merged = appendSwipeEntries(existing = accepted, incoming = incoming, anchorKey = anchor.legacyKey())
         assertEquals("只应留下那支真正不同的视频", 2, merged.size)
         assertTrue(merged.any { it.bvid == "BV1" })
         assertTrue(merged.any { it.bvid == "BV3" })

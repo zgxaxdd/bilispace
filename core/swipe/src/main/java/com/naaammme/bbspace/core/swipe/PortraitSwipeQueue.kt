@@ -6,6 +6,7 @@ import com.naaammme.bbspace.core.model.StoryFeedItem
 import com.naaammme.bbspace.core.model.VideoRelate
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
+import com.naaammme.bbspace.core.swipe.model.SwipeId
 
 /**
  * 竖屏全屏「上下滑切换视频」（BiliPai 上游 PortraitVideoPager 同款功能的 bbspace 化）的
@@ -33,27 +34,27 @@ data class SwipeEntry(
     val displayAuthor: String? get() = author?.takeIf(String::isNotBlank)
 
     /**
-     * 条目身份键（**用于请求去重**：`requestedKey` 防目标震荡）：bvid 优先、aid 兜底。
-     *
-     * 为什么需要 aid 兜底（真机 bug 修复）：bbspace 的相关推荐来自详情响应的 relate
-     * 模块，其 `basic.uri` 是 **aid 格式**（`bilibili://video/{aid}`），bvid 解析为空
-     * （BiliPai 的 relate 是独立接口、JSON 直接带 bvid，所以上游没有这个问题）。
-     * 早期版本只认 bvid → 整页 40 条推荐全部被丢弃、滑动队列为空、pager 只有一页
-     * ——真机症状"无法上滑、没有内容"。身份键必须覆盖两种形态。
-     *
-     * ⚠️ 这个**字符串**只适合做"同一目标别重复发请求"的去重，**不能**用来判断
-     * "这一页是不是当前正在播放的那一页"——见 [isCurrentVideo]。
+     * 类型化身份键（SW-03）：**页身份一律走它**（"这一页是不是当前正在播放的视频"
+     * → [isCurrentVideo]）。aid 优先、bvid 兜底的语义在 [SwipeId.matches] 内置。
      */
-    val key: String get() = swipeKey(bvid, target.aid)
+    val id: SwipeId get() = SwipeId.of(bvid, target.aid)
+
+    /**
+     * 旧版字符串身份键：**只许**用于日志与去重 map（appendSwipeEntries 的 seenKeys、
+     * 相似度签名缓存这类"同形同串"比较），**不得**再用于页身份判断——
+     * 字符串在"取流完成、bvid 被服务端补齐"的一瞬间会从 `aid:…` 翻成 `BV…`
+     * （C7 真机事故根因，见 [isCurrentVideo]）。源码守卫盯着这里不许回归。
+     */
+    fun legacyKey(): String = swipeKey(bvid, target.aid)
 
     /**
      * **这一页是不是「当前正在播放的视频」**（pager 用它决定哪一页组合播放器）。
      *
-     * ## 为什么不能直接比 [key] 字符串（真机 bug：翻页后新视频不播放）
+     * ## 为什么不能直接比字符串（真机 bug：翻页后新视频不播放）
      *
      * 两侧的 key 是**在不同时刻**算出来的：
      * - 队列条目在**建队时**算：relate 卡没有 bvid → `key = "aid:117339261503379"`；
-     * - pager 的 `currentKey` 从 `videoState.ids` 算，而 `ids` 在**取流/详情返回后会被
+     * - pager 的 currentKey 从 `videoState.ids` 算，而 `ids` 在**取流/详情返回后会被
      *   解析结果整体覆盖**（`applyDetailResult`：`ids = detailResult.ids`，此时 bvid 已被
      *   服务端补齐）→ `currentKey` 变成 `"BV…"`。
      *
@@ -61,19 +62,16 @@ data class SwipeEntry(
      * 落空 → 用户看到的是封面页 + 永远不起播（真机症状"可以滑动，但无法播放下一个
      * 视频"）。锚点页（页 0，bvid 本来就全）不受影响，所以只有后续页坏。
      *
-     * 判据因此改为**按内容比**、而不是按字符串比：aid 是 bvid 的 1:1 另一侧表示，
+     * 判据因此是**按内容比**、而不是按字符串比：aid 是 bvid 的 1:1 另一侧表示，
      * 两侧都有 aid 时以 aid 为准（对"bvid 后来才补齐"天然免疫）；只有 aid 缺失的
      * 特殊条目才退回比 bvid。这样"取流前/取流后"两个阶段结论一致。
+     * 语义逐条固化在 [com.naaammme.bbspace.core.swipe.model.SwipeId.matches]。
      */
-    fun isCurrentVideo(bvid: String?, aid: Long): Boolean {
-        if (target.aid > 0L && aid > 0L) return target.aid == aid
-        val entryBvid = this.bvid.trim()
-        val playingBvid = bvid.orEmpty().trim()
-        return entryBvid.isNotEmpty() && entryBvid == playingBvid
-    }
+    fun isCurrentVideo(bvid: String?, aid: Long): Boolean =
+        id.matches(SwipeId.of(bvid, aid))
 }
 
-/** 身份键：bvid 优先、aid 兜底（[SwipeEntry.key] 与 pager 的 currentKey 必须同构）。 */
+/** 旧版字符串身份键：bvid 优先、aid 兜底（[SwipeEntry.legacyKey] 与去重 map 同构；仅限日志与去重）。 */
 fun swipeKey(bvid: String?, aid: Long): String =
     bvid.orEmpty().trim().ifEmpty { "aid:$aid" }
 
@@ -183,7 +181,8 @@ fun swipeCoverKey(pic: String): String =
 /**
  * 把新拿到的相关推荐合并进滑动队列：**只追加、不重排**（保护用户当前所在页）。
  *
- * - 身份键（[SwipeEntry.key]，bvid 优先 / aid 兜底）硬去重（含锚点与已在队列内的）；
+ * - 身份去重（[SwipeEntry.legacyKey]，bvid 优先 / aid 兜底的字符串形；页身份判断
+ *   已类型化为 [SwipeEntry.id]/[SwipeEntry.isCurrentVideo]）硬去重（含锚点与已在队列内的）；
  * - 规范化标题相同、或封面 key 相同 → 视为同一视频的重复推荐；
  * - UP 主多样性：已接受条目的最近 [recentWindow] 条里，同一作者已占
  *   [maxPerOwnerPerWindow] 条时不收（BiliPai 同款「最近 12 条同 UP 最多 2 条」）。
@@ -199,7 +198,7 @@ fun appendSwipeEntries(
 ): List<SwipeEntry> {
     if (incoming.isEmpty()) return existing
     val accepted = existing.toMutableList()
-    val seenKeys = accepted.mapTo(mutableSetOf()) { it.key }
+    val seenKeys = accepted.mapTo(mutableSetOf()) { it.legacyKey() }
     anchorKey.trim().takeIf(String::isNotEmpty)?.let(seenKeys::add)
     val seenTitles = accepted.mapNotNullTo(mutableSetOf()) {
         normalizeSwipeTitle(it.title).takeIf(String::isNotEmpty)
@@ -217,7 +216,7 @@ fun appendSwipeEntries(
         precedingOwner = accepted.lastOrNull()?.displayAuthor
     )
     ordered.forEach { candidate ->
-        val key = candidate.key
+        val key = candidate.legacyKey()
         val title = normalizeSwipeTitle(candidate.title)
         val cover = swipeCoverKey(candidate.cover)
         val owner = candidate.displayAuthor
@@ -258,8 +257,8 @@ internal fun areSwipeEntriesSimilarCached(
     val firstCoverKey = swipeCoverKey(first.cover)
     val secondCoverKey = swipeCoverKey(second.cover)
     if (firstCoverKey.isNotEmpty() && firstCoverKey == secondCoverKey) return true
-    val firstKeywords = cache.getOrPut(first.key) { extractSwipeTitleKeywords(first.title) }
-    val secondKeywords = cache.getOrPut(second.key) { extractSwipeTitleKeywords(second.title) }
+    val firstKeywords = cache.getOrPut(first.legacyKey()) { extractSwipeTitleKeywords(first.title) }
+    val secondKeywords = cache.getOrPut(second.legacyKey()) { extractSwipeTitleKeywords(second.title) }
     if (firstKeywords.isEmpty() || secondKeywords.isEmpty()) return false
     val overlap = firstKeywords.intersect(secondKeywords).size
     if (overlap >= SWIPE_KEYWORD_OVERLAP_STRONG) return true

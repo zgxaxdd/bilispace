@@ -3,6 +3,7 @@ package com.naaammme.bbspace.core.swipe.session
 import com.naaammme.bbspace.core.model.VideoSrc
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.model.SwipeId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -170,12 +171,15 @@ class SwipeSessionControllerTest {
         controller.enterReady(entry(aid = 1), SwipeEntryVia.DetailPullDown, seedQueue = listOf(entry(aid = 2)))
         controller.pageChanged(1)
 
-        controller.playbackFailed(key = "BV1xx", retryable = false)
-        assertEquals(SwipeSessionState.PlaybackFailed(key = "BV1xx", retryable = false), controller.state.value)
+        controller.playbackFailed(id = SwipeId.Both(1L, "BV1xx"), retryable = false)
+        assertEquals(
+            SwipeSessionState.PlaybackFailed(id = SwipeId.Both(1L, "BV1xx"), retryable = false),
+            controller.state.value
+        )
         controller.retry()
         assertEquals(SwipeSessionState.Ready(page = 1, size = 1), controller.state.value)
 
-        controller.playbackFailed(key = "BV1xx", retryable = true)
+        controller.playbackFailed(id = SwipeId.Both(1L, "BV1xx"), retryable = true)
         controller.retry()
         assertEquals(SwipeSessionState.Ready(page = 1, size = 1), controller.state.value)
     }
@@ -328,7 +332,7 @@ class SwipeSessionControllerTest {
         assertFalse(controller.state.value.isSnapshotWorthy())
         controller.seedArrived(listOf(entry(aid = 2)))
         assertTrue(controller.state.value.isSnapshotWorthy())
-        controller.playbackFailed(key = "k", retryable = true)
+        controller.playbackFailed(id = SwipeId.Av(1L), retryable = true)
         assertFalse(controller.state.value.isSnapshotWorthy())
     }
 

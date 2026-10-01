@@ -59,6 +59,7 @@ import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.shouldAutoAdvanceToNextSwipePage
 import com.naaammme.bbspace.core.swipe.shouldExtendSwipeQueue
+import com.naaammme.bbspace.core.swipe.model.SwipeId
 import com.naaammme.bbspace.core.swipe.swipeKey
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -130,12 +131,12 @@ internal fun PortraitSwipePager(
     val pageCountState = rememberUpdatedState(pages.size)
     val pagerState = rememberPagerState { pageCountState.value }
     val scope = rememberCoroutineScope()
-    // pager 认定的「应播放页」：以它为准发切换请求，而不是拿 currentKey 反向比较——
+    // pager 认定的「应播放页」：以它为准发切换请求，而不是拿 currentId 反向比较——
     // 后者在取流完成前仍是旧值，快速往返翻页时会造成目标震荡。
-    // 身份键 = SwipeEntry.key（bvid 优先 / aid 兜底，见其 KDoc）；**只用于去重**，
-    // 「哪一页归播放器」一律走 entry.isCurrentVideo（字符串会在取流完成后翻转）。
-    val currentKey = swipeKey(currentBvid, currentAid)
-    var requestedKey by remember { mutableStateOf(anchor.key) }
+    // 身份键 = SwipeEntry.id（SW-03 类型化；**只用于"已请求页"的去重震荡防护**，
+    // 「哪一页归播放器」一律走 entry.isCurrentVideo）。
+    val currentId = SwipeId.of(currentBvid, currentAid)
+    var requestedKey by remember { mutableStateOf(anchor.id) }
     LaunchedEffect(pagerState, pages) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
@@ -143,11 +144,11 @@ internal fun PortraitSwipePager(
                 val entry = pages.getOrNull(page) ?: return@collect
                 // 状态机记账（SW-02）：Ready.page 跟随落定页，供恢复/快照与后续派生 UI 用。
                 viewModel.onSwipePageChanged(page)
-                if (entry.key != requestedKey) {
-                    requestedKey = entry.key
+                if (entry.id != requestedKey) {
+                    requestedKey = entry.id
                     Log.i(
                         TAG,
-                        "swipe: page=$page key=${entry.key} aid=${entry.target.aid} bvid=${entry.bvid}"
+                        "swipe: page=$page key=${entry.legacyKey()} aid=${entry.target.aid} bvid=${entry.bvid}"
                     )
                     onSwipeTo(entry)
                 }
@@ -189,22 +190,22 @@ internal fun PortraitSwipePager(
                 onPrefetch(target)
             }
     }
-    LaunchedEffect(currentKey, pages) {
+    LaunchedEffect(currentId, pages) {
         // 取流完成后的对齐：正常路径上 pager 停在的页就是当前播放的视频，直接同步；
         // 若是快速往返翻页的迟到结果（pager 停在用户已离开的页），以用户所在页为
         // 准再发一次切换（openVideo 幂等）——否则 pager 会停在"播放器在看不见的页"的状态。
         // 判据是**内容身份**（isCurrentVideo）而非字符串：见 SwipeEntry.isCurrentVideo。
         //
-        // 同步的是 entry.key 而不是 currentKey：requestedKey 的语义是「已请求的那一页」，
-        // 用 currentKey 会让「锚点 bvid 为空（story 入口）」这类条目在补货/补流引发的
+        // 同步的是 entry.id 而不是 currentId：requestedKey 的语义是「已请求的那一页」，
+        // 用 currentId 会让「锚点 bvid 为空（story 入口）」这类条目在补货/补流引发的
         // 重新收集里反复判定为"目标变了"（虽然 openSwipeTarget 会短路，但白跑一趟）。
         val entry = pages.getOrNull(pagerState.currentPage)
         if (entry == null) {
-            requestedKey = currentKey
+            requestedKey = currentId
         } else if (entry.isCurrentVideo(currentBvid, currentAid)) {
-            requestedKey = entry.key
+            requestedKey = entry.id
         } else {
-            requestedKey = entry.key
+            requestedKey = entry.id
             onSwipeTo(entry)
         }
     }
@@ -247,9 +248,11 @@ internal fun PortraitSwipePager(
     }
     // 播放器归属诊断：页身份失配（症状="翻页后只有封面、不起播"）在真机上唯一的可观测
     // 证据就是这个三元组。只在两侧变化时打一行，不在重组里刷屏。
-    LaunchedEffect(currentKey, pagerState.currentPage, pages) {
+    // 日志沿用 legacyKey 字符串（bvid 优先/aid 兜底），字段格式与既有脚本兼容。
+    val currentLegacyKey = swipeKey(currentBvid, currentAid)
+    LaunchedEffect(currentId, pagerState.currentPage, pages) {
         val owner = pages.indexOfFirst { it.isCurrentVideo(currentBvid, currentAid) }
-        Log.i(TAG, "bind: page=${pagerState.currentPage} current=$currentKey playerPage=$owner")
+        Log.i(TAG, "bind: page=${pagerState.currentPage} current=$currentLegacyKey playerPage=$owner")
     }
     // ── 等首帧（真机反馈：上滑后第一个出现的是"黑屏 + 大暂停键"）──────────────────
     // 症状链：翻页 → 新页立刻从 SwipeCoverPage 切成 VideoPlayerPane → 但播放器
@@ -263,7 +266,7 @@ internal fun PortraitSwipePager(
     // 几十毫秒后再挂上，中间那一帧就是用户看到的黑屏 + 大暂停键
     // （真机日志实证：`veil: visible=false mounted=false` 之后 37ms 又 `visible=true`）。
     //
-    // 所以用**粘滞**状态：换视频（currentKey 变化）进入等待，直到"这一支"真的出帧才退出。
+    // 所以用**粘滞**状态：换视频（currentId 变化）进入等待，直到"这一支"真的出帧才退出。
     //
     // **失败时不再撤掉加载层**（本轮改动，对照 BiliPai 的失败态）：以前这里是
     // `if (firstFrameRendered || playbackFailed) waitingKey = null` —— 取流失败就把加载层
@@ -273,10 +276,11 @@ internal fun PortraitSwipePager(
     val playbackState by viewModel.videoState.collectAsStateWithLifecycle()
     val firstFrameRendered = playbackState.hasRenderedFirstFrame
     val playbackFailed = playbackState.error != null
-    var waitingKey by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(currentKey) {
+    // 粘滞键类型化（SW-03）：数据类相等语义与旧字符串完全同拍（同视频同键）。
+    var waitingKey by remember { mutableStateOf<SwipeId?>(null) }
+    LaunchedEffect(currentId) {
         // 首次组合同样置位：锚点视频还没出帧时，一样该看到加载层而不是黑屏
-        waitingKey = currentKey
+        waitingKey = currentId
     }
     LaunchedEffect(firstFrameRendered) {
         if (firstFrameRendered) waitingKey = null
@@ -285,10 +289,10 @@ internal fun PortraitSwipePager(
     // 遮掩时间线（真机反馈「感觉就是盖了一层遮罩」）：必须能量出
     // 「换页 → 遮罩出现 → 首帧到达 → 遮罩撤掉」四点的间隔，否则只能靠观感猜。
     // 只在状态翻转时各打一行，不进重组刷屏。
-    LaunchedEffect(waitingFirstFrame, currentKey, playbackState.hasRenderedFirstFrame) {
+    LaunchedEffect(waitingFirstFrame, currentId, playbackState.hasRenderedFirstFrame) {
         Log.i(
             TAG,
-            "veil: waiting=$waitingFirstFrame key=$currentKey " +
+            "veil: waiting=$waitingFirstFrame key=$currentLegacyKey " +
                 "firstFrame=${playbackState.hasRenderedFirstFrame} " +
                 "error=${playbackState.error != null} state=${playbackState.playbackState}"
         )

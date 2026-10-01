@@ -42,6 +42,7 @@ import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
+import com.naaammme.bbspace.core.swipe.model.SwipeId
 import com.naaammme.bbspace.core.swipe.session.SwipeEntryVia
 import com.naaammme.bbspace.core.swipe.session.SwipeSessionController
 import com.naaammme.bbspace.core.swipe.session.SwipeSessionState
@@ -635,7 +636,7 @@ class VideoViewModel @Inject constructor(
                     appended += added
                     android.util.Log.i(
                         "PortraitSwipe",
-                        "more fallback: tail=${tail.key} added=$added queue=${swipeSession.queue.value.size}"
+                        "more fallback: tail=${tail.legacyKey()} added=$added queue=${swipeSession.queue.value.size}"
                     )
                 }
             }
@@ -739,26 +740,23 @@ class VideoViewModel @Inject constructor(
     /**
      * 上下滑切换：**替换栈顶**而不是压栈（openTarget 的语义）——刷视频是同一
      * 浏览会话内的连续浏览，返回键应当退出详情而不是逐个回放刷过的视频
-     * （与 B 站官方/BiliPai 的行为一致）。同 bvid 重复调用直接忽略。
+     * （与 B 站官方/BiliPai 的行为一致）。同条目重复调用直接忽略。
      */
     fun openSwipeTarget(entry: SwipeEntry) {
         val stack = _targetStack.value
         if (stack.isEmpty()) return
         val current = stack.last()
-        // 同条目短路：**aid 优先、bvid 兜底**（与 SwipeEntry.isCurrentVideo 同一判据）。
-        // relate 卡的 bvid 是取流后才在 ids 里被补齐的，纯 bvid 字符串比较会把
-        // "同一视频"误判成不同目标 → 白白重开一次播放（画面从头发起、进度丢失）。
+        // 同条目短路：**类型化身份**（SW-03，aid 优先、bvid 兜底语义在 SwipeId.matches
+        // 内置，与 SwipeEntry.isCurrentVideo 同一判据）。relate 卡的 bvid 是取流后才在
+        // ids 里被补齐的，纯 bvid 字符串比较会把"同一视频"误判成不同目标 → 白白重开
+        // 一次播放（画面从头发起、进度丢失）。
         if (current is VideoTarget.Ugc) {
-            val same = if (current.aid > 0L && entry.target.aid > 0L) {
-                current.aid == entry.target.aid
-            } else {
-                entry.bvid.isNotEmpty() && current.bvid == entry.bvid
-            }
+            val same = entry.id.matches(SwipeId.of(current.bvid, current.aid))
             if (same) return
         }
         android.util.Log.i(
             "PortraitSwipe",
-            "open: key=${entry.key} aid=${entry.target.aid} cid=${entry.target.cid} " +
+            "open: key=${entry.legacyKey()} aid=${entry.target.aid} cid=${entry.target.cid} " +
                 "bvid=${entry.bvid} from=${(current as? VideoTarget.Ugc)?.aid}"
         )
         _targetStack.value = stack.dropLast(1) + entry.target
