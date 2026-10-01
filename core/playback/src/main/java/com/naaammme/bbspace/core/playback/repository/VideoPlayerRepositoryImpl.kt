@@ -47,9 +47,12 @@ class VideoPlayerRepositoryImpl @Inject constructor(
         val cacheKey = PlayUrlCache.keyOf(request, flavor)
         playUrlCache.get(cacheKey)?.let { cached ->
             // 预取命中：省掉一整个 gRPC 往返（竖屏连播的起播速度主要来自这里）
+            PlayUrlCacheMetrics.record(hit = true)
             Logger.d(TAG) { "playurl cache hit aid=${request.ids.aid} cid=${request.ids.cid}" }
             return cached
         }
+        PlayUrlCacheMetrics.record(hit = false)
+        Logger.d(TAG) { "playurl cache miss aid=${request.ids.aid} cid=${request.ids.cid}" }
         val source = if (shouldUseWebPlayback(request)) {
             webPlaybackResolver.fetchPlaybackSource(request)
         } else {

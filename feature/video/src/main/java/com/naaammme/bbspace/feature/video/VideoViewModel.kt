@@ -13,6 +13,7 @@ import com.naaammme.bbspace.core.feed.StoryFeedRepository
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.playback.VideoPlayerRepository
+import com.naaammme.bbspace.core.playback.repository.PlayUrlCacheMetrics
 import com.naaammme.bbspace.core.favorite.FavoriteRepository
 import com.naaammme.bbspace.core.model.CommentSubject
 import com.naaammme.bbspace.core.model.CommentSubjectTool
@@ -45,6 +46,7 @@ import com.naaammme.bbspace.core.swipe.appendSwipeEntries
 import com.naaammme.bbspace.core.swipe.model.SwipeId
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeEventType
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeHub
+import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeSnapshot
 import com.naaammme.bbspace.core.swipe.session.SwipeEntryVia
 import com.naaammme.bbspace.core.swipe.session.SwipeSessionController
 import com.naaammme.bbspace.core.swipe.session.SwipeSessionState
@@ -507,7 +509,19 @@ class VideoViewModel @Inject constructor(
     /** 退出全屏时清会话：下次进入全屏重新锚定当时的视频（见 VideoScreen 的接线的判据）。 */
     fun clearSwipeSession() {
         swipeSession.exit()
+        lastPrefetchRequest = null
         SwipeQoeHub.record(SwipeQoeEventType.Exit)
+    }
+
+    init {
+        // playurl 缓存的命中/未命中 → QoE 具名计数器（SW-12）：诊断页要能读到
+        // "预取到底有没有省掉往返"。出口是单例（后注册覆盖先注册），多 VM 场景无重复计数。
+        PlayUrlCacheMetrics.setListener { hit ->
+            SwipeQoeHub.recordCounter(
+                if (hit) SwipeQoeSnapshot.COUNTER_PLAYURL_HIT
+                else SwipeQoeSnapshot.COUNTER_PLAYURL_MISS
+            )
+        }
     }
 
     // ===== 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）=====
@@ -724,6 +738,8 @@ class VideoViewModel @Inject constructor(
      *   蜂窝+开关 1 / 否则 0）；
      * - 同一支视频在一次会话里只预取一次（会话状态机的预取去重表，随 exit 清空），
      *   避免反复刷同一页时重复请求；
+     * - **取消语义（SW-12）**：上一次请求若已失效（回滑 / 切网 / 队列收缩），
+     *   本次按新口径重算（[SwipePrefetchPolicy.isPrefetchRequestStale]），不再按旧口径补发；
      * - 失败静默（预取是尽力而为）。
      */
     fun prefetchSwipeQueue(page: Int) {
@@ -732,12 +748,32 @@ class VideoViewModel @Inject constructor(
         viewModelScope.launch {
             val prefetchEnabled = playerSettings.state.first().playback.prefetchVideo
             val isUnmetered = networkTypeProvider.isUnmetered()
+            // 本次请求签名：网络状态只读这一处，后续判据/计数/台账全部复用它
+            // （守卫 cellularGateSkipsDetailWarmButNotPlayUrl 锁的就是"一次预取只读一次网络"）。
+            val request = SwipePrefetchPolicy.PrefetchRequest(
+                page = page,
+                isUnmetered = isUnmetered,
+                pagesSize = pages.size
+            )
+            // 取消判据（SW-12）：上一次的预取口径是否已失效——失效就按新口径重算
+            // （页数收缩会让目标索引位移、切网会让预算口径翻转、回滑会让"向后预"落空）。
+            val previous = lastPrefetchRequest
+            val stale = previous != null && SwipePrefetchPolicy.isPrefetchRequestStale(
+                previous = previous,
+                currentPage = page,
+                currentUnmetered = request.isUnmetered,
+                pagesSizeNow = pages.size
+            )
+            if (stale) {
+                SwipeQoeHub.recordCounter("prefetch_cancelled")
+            }
             val count = SwipePrefetchPolicy.prefetchCount(
                 prefetchEnabled = prefetchEnabled,
-                isUnmetered = isUnmetered,
+                isUnmetered = request.isUnmetered,
                 available = pages.size - page - 1
             )
             if (count <= 0) return@launch
+            lastPrefetchRequest = request
             SwipeQoeHub.record(SwipeQoeEventType.Prefetch, durationMs = count.toLong())
             // 蜂窝下跳过"详情级别"的重预热（判据与理由见 SwipePrefetchPolicy）。
             // 与 count 同一次读网络，不在循环里反复问系统 —— 一次滑动里结论不会变。
@@ -745,7 +781,7 @@ class VideoViewModel @Inject constructor(
             android.util.Log.i(
                 "PortraitSwipe",
                 "prefetch want=$count page=$page pages=${pages.size} prefetchEnabled=$prefetchEnabled " +
-                    "unmetered=$isUnmetered detailWarm=$warmDetail"
+                    "unmetered=$isUnmetered detailWarm=$warmDetail stale=${stale}"
             )
             SwipePrefetchPolicy.targetPages(page, pages.size, count).forEach { index ->
                 val entry = pages.getOrNull(index) ?: return@forEach
@@ -753,6 +789,9 @@ class VideoViewModel @Inject constructor(
             }
         }
     }
+
+    /** 上一次真正发起的预取请求（SW-12 取消判据的输入；随会话 exit 清空）。 */
+    private var lastPrefetchRequest: SwipePrefetchPolicy.PrefetchRequest? = null
 
     private fun prefetchEntry(entry: SwipeEntry, warmDetail: Boolean) {
         val target = entry.target
@@ -1380,6 +1419,19 @@ class VideoViewModel @Inject constructor(
 
     private fun currentTarget(): VideoTarget? {
         return _targetStack.value.lastOrNull()
+    }
+
+    /**
+     * VM 真正销毁时补记 QoE 的 Exit（真机实测发现：从 story 模式返回/还原时
+     * `clearSwipeSession` 不会被调用——那条路径只在离开全屏时走——于是 Exit 恒为 0）。
+     * 只在"会话仍在"时补记：正常退出全屏已记过一次（exit() 会把 anchor 清空，
+     * 此处 snapshot() 即为 null，不会重复计数）；配置变更不触发 onCleared，不误记。
+     */
+    override fun onCleared() {
+        if (swipeSession.snapshot() != null) {
+            SwipeQoeHub.record(SwipeQoeEventType.Exit)
+        }
+        super.onCleared()
     }
 
     private companion object {

@@ -23,6 +23,9 @@ object SwipeQoeHub {
     private val buffer = ArrayDeque<SwipeQoeEvent>(CAPACITY)
     private val counterMap = HashMap<SwipeQoeEventType, Int>()
 
+    /** 具名计数器（SW-12 起用：playurl 命中/未命中等"次数"类指标，不是事件）。 */
+    private val namedCounters = HashMap<String, Long>()
+
     private val versionFlow = MutableStateFlow(0)
 
     /** 版本号：每次记录 +1，诊断页订阅它做轻量刷新（不订阅大列表）。 */
@@ -50,8 +53,20 @@ object SwipeQoeHub {
     fun snapshot(): SwipeQoeSnapshot = synchronized(lock) {
         SwipeQoeSnapshot(
             events = buffer.toList(),
-            counters = counterMap.toMap()
+            counters = counterMap.toMap(),
+            namedCounters = namedCounters.toMap()
         )
+    }
+
+    /**
+     * 具名计数器累加（SW-12）：给"次数"类指标用（playurl 命中/未命中、预取取消次数…）。
+     * 与事件分离——这类指标高频、不需要时间线。
+     */
+    fun recordCounter(name: String, delta: Long = 1L) {
+        synchronized(lock) {
+            namedCounters[name] = (namedCounters[name] ?: 0L) + delta
+            versionFlow.value += 1
+        }
     }
 
     /** 清空（诊断页的"清空"按钮；与 ErrorLog 同款交互）。 */
@@ -59,6 +74,7 @@ object SwipeQoeHub {
         synchronized(lock) {
             buffer.clear()
             counterMap.clear()
+            namedCounters.clear()
             versionFlow.value += 1
         }
     }

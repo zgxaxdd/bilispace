@@ -56,8 +56,16 @@ class PlayUrlCache(
     fun size(): Int = lru.size
 
     companion object {
-        /** 一次会话里"当前页 + 预取 2~3 页 + 回看"足够，不需要 BiliPai 的 80 条。 */
-        const val MAX_ENTRIES = 8
+        /**
+         * 容量（SW-12 调参）。
+         *
+         * 原值 8 与预取矩阵**不匹配**：WiFi+开关时一次预取 3 条、当前页 1 条、用户回看
+         * 上一两支再各占 1 条，加上"切清晰度/开关变化"产生的第二个 flavor 键，
+         * 8 会在一次快节奏连播里触顶——被淘汰的正好是"用户下一步要回去的那一支"。
+         * 提到 16 覆盖"预取 3 + 回看 3 + 双 flavor 余量"；**TTL 不动**（见 [TTL_MS]）：
+         * 容量与 TTL 解耦，扩容不会放大"陈旧 resume 进度"的风险（R-06）。
+         */
+        const val MAX_ENTRIES = 16
 
         /** 见类注释：比 BiliPai 的 10 分钟保守，避免陈旧 resume 进度。 */
         const val TTL_MS = 90_000L

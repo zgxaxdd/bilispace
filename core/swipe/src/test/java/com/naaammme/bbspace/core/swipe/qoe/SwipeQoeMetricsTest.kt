@@ -95,8 +95,43 @@ class SwipeQoeMetricsTest {
         assertTrue(text.contains("events_total="))
         assertTrue(text.contains("first_frame_p50_ms=-1") || text.contains("first_frame_p50_ms="))
         assertTrue(text.contains("page_success_rate=n/a") || text.contains("page_success_rate=0."))
+        // SW-12：playurl 命中率也要进导出（诊断三件套之一）
+        assertTrue(text.contains("playurl_hits="))
+        assertTrue(text.contains("playurl_hit_rate="))
         // 导出内容不包含任何事件之外的内容字段（这里只查不出现标题式字段名）
         assertFalse(text.contains("title="))
         assertFalse(text.contains("owner="))
+    }
+
+    // ── 具名计数器（SW-12）──────────────────────────────────────────────────
+
+    @Test
+    fun `named counters accumulate and drive playurl hit rate`() {
+        SwipeQoeHub.clear()
+        repeat(4) { SwipeQoeHub.recordCounter(SwipeQoeSnapshot.COUNTER_PLAYURL_HIT) }
+        repeat(1) { SwipeQoeHub.recordCounter(SwipeQoeSnapshot.COUNTER_PLAYURL_MISS) }
+        SwipeQoeHub.recordCounter("prefetch_cancelled", delta = 2L)
+
+        val snapshot = SwipeQoeHub.snapshot()
+        assertEquals(4L, snapshot.namedCounters[SwipeQoeSnapshot.COUNTER_PLAYURL_HIT])
+        assertEquals(1L, snapshot.namedCounters[SwipeQoeSnapshot.COUNTER_PLAYURL_MISS])
+        assertEquals(2L, snapshot.namedCounters["prefetch_cancelled"])
+        assertEquals(0.8, snapshot.playUrlHitRate!!, 1e-9)
+
+        // 清空后无样本 → 命中率 null（不硬造 0）
+        SwipeQoeHub.clear()
+        assertNull(SwipeQoeHub.snapshot().playUrlHitRate)
+        assertEquals(0, SwipeQoeHub.snapshot().namedCounters.size)
+    }
+
+    @Test
+    fun `ring buffer keeps newest events`() {
+        SwipeQoeHub.clear()
+        repeat(SwipeQoeHub.CAPACITY + 5) { SwipeQoeHub.record(SwipeQoeEventType.Page) }
+        val snapshot = SwipeQoeHub.snapshot()
+        assertEquals(SwipeQoeHub.CAPACITY, snapshot.events.size)
+        // 计数不受环形缓冲影响（计数与时间线分离）
+        assertEquals(SwipeQoeHub.CAPACITY + 5, snapshot.counters[SwipeQoeEventType.Page])
+        SwipeQoeHub.clear()
     }
 }

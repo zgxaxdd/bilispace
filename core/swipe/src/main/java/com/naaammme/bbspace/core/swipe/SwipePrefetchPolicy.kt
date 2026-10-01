@@ -73,4 +73,35 @@ object SwipePrefetchPolicy {
         offsetFraction >= threshold -> (currentPage - 1).takeIf { it >= 0 }
         else -> null
     }
+
+    /**
+     * 上一次预取请求的签名（SW-12 取消语义的输入）。
+     * 每次真正发起预取时由调用方记账；下一次触发时拿它判"还该不该按旧口径补发"。
+     */
+    data class PrefetchRequest(
+        val page: Int,
+        val isUnmetered: Boolean,
+        val pagesSize: Int,
+    )
+
+    /**
+     * **取消判据**（SW-12）：上一次的预取请求是否已失效——失效就不再按旧口径补发
+     * （已发出的请求无法撤回，但"预算过期"的请求不必再续、也不该据此重试）。
+     *
+     * 三条语义（任务书 §4.6 要求补的判据）：
+     * 1. **用户回滑**：当前页 < 请求时的页 → 之前"向后预"的目标已不在用户前方；
+     * 2. **网络切换**：计费/非计费翻转 → 预算口径变了（WiFi+开关 3 / 蜂窝+开关 1），
+     *    旧请求的条数结论作废，必须按新网络重算；
+     * 3. **队列变更**：页数变少（去重收缩/会话重置）→ 目标索引发生位移，
+     *    旧索引可能指向另一支视频，必须整批作废重算。
+     */
+    fun isPrefetchRequestStale(
+        previous: PrefetchRequest,
+        currentPage: Int,
+        currentUnmetered: Boolean,
+        pagesSizeNow: Int,
+    ): Boolean =
+        currentPage < previous.page ||
+            previous.isUnmetered != currentUnmetered ||
+            pagesSizeNow < previous.pagesSize
 }

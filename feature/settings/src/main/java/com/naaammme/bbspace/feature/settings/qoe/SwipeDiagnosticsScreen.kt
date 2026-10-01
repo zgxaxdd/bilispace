@@ -115,6 +115,8 @@ private fun overviewLines(snapshot: SwipeQoeSnapshot): List<Pair<String, String>
     val deltas = SwipeQoeMath.firstFrameDeltas(snapshot.events)
     val pages = snapshot.counters[SwipeQoeEventType.Page] ?: 0
     val frames = snapshot.counters[SwipeQoeEventType.FirstFrame] ?: 0
+    val hits = snapshot.namedCounters[SwipeQoeSnapshot.COUNTER_PLAYURL_HIT] ?: 0L
+    val misses = snapshot.namedCounters[SwipeQoeSnapshot.COUNTER_PLAYURL_MISS] ?: 0L
     return listOf(
         "事件总数" to "${snapshot.total}",
         "首帧样本" to "${deltas.size}",
@@ -122,7 +124,11 @@ private fun overviewLines(snapshot: SwipeQoeSnapshot): List<Pair<String, String>
         "首帧 P90" to "${SwipeQoeMath.percentile(deltas, 90.0) ?: "样本不足"}",
         "首帧 P99" to "${SwipeQoeMath.percentile(deltas, 99.0) ?: "样本不足"}",
         "翻页成功率" to (SwipeQoeMath.pageSuccessRate(pages, frames)
-            ?.let { "%.1f%%".format(it * 100) } ?: "样本不足")
+            ?.let { "%.1f%%".format(it * 100) } ?: "样本不足"),
+        // SW-12：预取命中率 = playurl 命中/(命中+未命中)；命中即省掉一个 gRPC 往返
+        "预取命中率" to (snapshot.playUrlHitRate?.let { "%.1f%%".format(it * 100) } ?: "样本不足"),
+        "命中/未命中" to "$hits/$misses",
+        "预取取消次数" to "${snapshot.namedCounters["prefetch_cancelled"] ?: 0L}"
     )
 }
 

@@ -90,4 +90,45 @@ class SwipePrefetchPolicyTest {
         assertEquals(1, SwipePrefetchPolicy.prefetchCount(true, isUnmetered = false, available = 5))
         assertEquals(0, SwipePrefetchPolicy.prefetchCount(false, isUnmetered = false, available = 5))
     }
+
+    // ── 取消语义（SW-12）：回滑 / 切网 / 队列收缩 ────────────────────────────
+
+    private fun req(page: Int = 3, unmetered: Boolean = true, pages: Int = 20) =
+        SwipePrefetchPolicy.PrefetchRequest(page = page, isUnmetered = unmetered, pagesSize = pages)
+
+    @Test
+    fun requestIsStaleWhenUserPagesBack() {
+        // 回滑：当前页 < 请求页 → "向后预"的目标已不在用户前方
+        assertTrue(
+            SwipePrefetchPolicy.isPrefetchRequestStale(
+                previous = req(page = 5),
+                currentPage = 3,
+                currentUnmetered = true,
+                pagesSizeNow = 20
+            )
+        )
+        // 同页/继续前进：不作废（预取继续有效）
+        assertFalse(
+            SwipePrefetchPolicy.isPrefetchRequestStale(req(page = 5), 5, true, 20)
+        )
+        assertFalse(
+            SwipePrefetchPolicy.isPrefetchRequestStale(req(page = 5), 6, true, 20)
+        )
+    }
+
+    @Test
+    fun requestIsStaleWhenNetworkFlips() {
+        // 切网：预算口径翻转（WiFi+开关 3 / 蜂窝+开关 1）→ 旧口径作废，必须按新网络重算
+        assertTrue(SwipePrefetchPolicy.isPrefetchRequestStale(req(unmetered = true), 3, false, 20))
+        assertTrue(SwipePrefetchPolicy.isPrefetchRequestStale(req(unmetered = false), 3, true, 20))
+        assertFalse(SwipePrefetchPolicy.isPrefetchRequestStale(req(unmetered = true), 3, true, 20))
+    }
+
+    @Test
+    fun requestIsStaleWhenQueueShrinks() {
+        // 队列收缩（去重后的重置/会话重建）：目标索引位移 → 整批作废
+        assertTrue(SwipePrefetchPolicy.isPrefetchRequestStale(req(pages = 20), 3, true, 12))
+        // 队列变长（补货）：索引语义不变，不作废
+        assertFalse(SwipePrefetchPolicy.isPrefetchRequestStale(req(pages = 20), 3, true, 30))
+    }
 }

@@ -25,8 +25,24 @@ data class SwipeQoeEvent(
 data class SwipeQoeSnapshot(
     val events: List<SwipeQoeEvent>,
     val counters: Map<SwipeQoeEventType, Int>,
+    /** 具名计数器（SW-12：playurl 命中/未命中等"次数"类指标）。 */
+    val namedCounters: Map<String, Long> = emptyMap(),
 ) {
     val total: Int get() = events.size
+
+    /** playurl 缓存命中率（命中/(命中+未命中)）；无样本 null。 */
+    val playUrlHitRate: Double?
+        get() {
+            val hits = namedCounters[COUNTER_PLAYURL_HIT] ?: 0L
+            val misses = namedCounters[COUNTER_PLAYURL_MISS] ?: 0L
+            val total = hits + misses
+            return if (total <= 0L) null else hits.toDouble() / total
+        }
+
+    companion object {
+        const val COUNTER_PLAYURL_HIT = "playurl_hit"
+        const val COUNTER_PLAYURL_MISS = "playurl_miss"
+    }
 }
 
 object SwipeQoeMath {
@@ -93,6 +109,12 @@ object SwipeQoeMath {
         val frames = snapshot.counters[SwipeQoeEventType.FirstFrame] ?: 0
         appendLine(
             "page_success_rate=" + (pageSuccessRate(pages, frames)
+                ?.let { "%.3f".format(it) } ?: "n/a")
+        )
+        appendLine("playurl_hits=${snapshot.namedCounters[SwipeQoeSnapshot.COUNTER_PLAYURL_HIT] ?: 0}")
+        appendLine("playurl_misses=${snapshot.namedCounters[SwipeQoeSnapshot.COUNTER_PLAYURL_MISS] ?: 0}")
+        appendLine(
+            "playurl_hit_rate=" + (snapshot.playUrlHitRate
                 ?.let { "%.3f".format(it) } ?: "n/a")
         )
     }
