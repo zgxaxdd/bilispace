@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.video.swipe
+package com.naaammme.bbspace.core.swipe
 
 /**
  * 「播完要不要自动翻到下一支」的判据（对照 BiliPai 的 `playbackCompletionBehavior`：

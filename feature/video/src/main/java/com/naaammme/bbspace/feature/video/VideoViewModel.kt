@@ -37,17 +37,17 @@ import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
 import com.naaammme.bbspace.core.video.VideoActionRepository
 import com.naaammme.bbspace.core.video.VideoDetailRepository
-import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
-import com.naaammme.bbspace.feature.video.swipe.SwipePrefetchPolicy
-import com.naaammme.bbspace.feature.video.swipe.SwipeQueueTail
-import com.naaammme.bbspace.feature.video.swipe.appendSwipeEntries
-import com.naaammme.bbspace.feature.video.swipe.resolveSwipeQueueTail
-import com.naaammme.bbspace.feature.video.swipe.shouldFetchNextRefillPage
-import com.naaammme.bbspace.feature.video.swipe.shouldRunSwipeRefillFallback
-import com.naaammme.bbspace.feature.video.swipe.selectSwipeRefillFallbackTarget
-import com.naaammme.bbspace.feature.video.swipe.swipeEntriesFromRelates
-import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromFeedItem
-import com.naaammme.bbspace.feature.video.swipe.swipeEntryFromStory
+import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
+import com.naaammme.bbspace.core.swipe.SwipeQueueTail
+import com.naaammme.bbspace.core.swipe.appendSwipeEntries
+import com.naaammme.bbspace.core.swipe.resolveSwipeQueueTail
+import com.naaammme.bbspace.core.swipe.shouldFetchNextRefillPage
+import com.naaammme.bbspace.core.swipe.shouldRunSwipeRefillFallback
+import com.naaammme.bbspace.core.swipe.selectSwipeRefillFallbackTarget
+import com.naaammme.bbspace.core.swipe.swipeEntriesFromRelates
+import com.naaammme.bbspace.core.swipe.swipeEntryFromFeedItem
+import com.naaammme.bbspace.core.swipe.swipeEntryFromStory
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -542,7 +542,7 @@ class VideoViewModel @Inject constructor(
     }
 
     /**
-     * 队列补货：翻到倒数第 [com.naaammme.bbspace.feature.video.swipe.SWIPE_EXTEND_THRESHOLD]
+     * 队列补货：翻到倒数第 [com.naaammme.bbspace.core.swipe.SWIPE_EXTEND_THRESHOLD]
      * 页时由 pager 触发，接力首页推荐流（`fetchFeed(idx)` 分页，BiliPai StoryViewModel
      * 的 loadMoreStories 同款数据源）。详情全屏与 story 两种会话共用同一队列。
      *

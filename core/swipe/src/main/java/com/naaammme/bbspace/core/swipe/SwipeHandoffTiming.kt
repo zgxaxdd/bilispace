@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.video.swipe
+package com.naaammme.bbspace.core.swipe
 
 /**
  * 刷视频「封面 → 画面」交接的**纯时序策略**（可 JVM 单测）。

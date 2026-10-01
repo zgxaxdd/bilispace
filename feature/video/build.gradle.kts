@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":core:navigation"))
     implementation(project(":core:settings"))
     implementation(project(":core:sponsorblock"))
+    implementation(project(":core:swipe"))
     implementation(project(":infra:player"))
 
     implementation(libs.hilt.android)

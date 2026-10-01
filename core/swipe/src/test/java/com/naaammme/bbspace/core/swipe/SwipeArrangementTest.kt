@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.video.swipe
+package com.naaammme.bbspace.core.swipe
 
 import com.naaammme.bbspace.core.model.VideoTarget
 import org.junit.Assert.assertEquals

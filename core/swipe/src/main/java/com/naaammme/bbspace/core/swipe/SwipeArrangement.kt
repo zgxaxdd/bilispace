@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.video.swipe
+package com.naaammme.bbspace.core.swipe
 
 import kotlin.random.Random
 

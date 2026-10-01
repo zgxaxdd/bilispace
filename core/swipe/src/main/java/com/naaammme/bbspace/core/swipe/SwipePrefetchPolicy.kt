@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.video.swipe
+package com.naaammme.bbspace.core.swipe
 
 /**
  * 竖屏连播「相邻页预取」的**纯策略**（可 JVM 单测）。

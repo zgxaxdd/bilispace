@@ -145,7 +145,7 @@ import com.naaammme.bbspace.feature.video.formatPlaybackTime
 import com.naaammme.bbspace.feature.video.formatSpeed
 import com.naaammme.bbspace.feature.video.getAudioName
 import com.naaammme.bbspace.feature.video.getQualityName
-import com.naaammme.bbspace.feature.video.swipe.SwipeHandoffTiming
+import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs

@@ -1,4 +1,4 @@
-package com.naaammme.bbspace.feature.video.swipe
+package com.naaammme.bbspace.core.swipe
 
 /**
  * 队列补货的"凑满"判据（对照 BiliPai `PortraitVideoPager.kt:1341-1412`）。
