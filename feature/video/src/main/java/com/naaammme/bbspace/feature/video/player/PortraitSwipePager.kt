@@ -1,6 +1,8 @@
 package com.naaammme.bbspace.feature.video.player
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +57,7 @@ import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
+import com.naaammme.bbspace.core.swipe.SwipeChromeBurnInPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
 import com.naaammme.bbspace.core.swipe.SwipeWaitPolicy
@@ -140,6 +144,9 @@ internal fun PortraitSwipePager(
     // 「哪一页归播放器」一律走 entry.isCurrentVideo）。
     val currentId = SwipeId.of(currentBvid, currentAid)
     var requestedKey by remember { mutableStateOf(anchor.id) }
+    // 防烧屏的"最近交互时刻"（用户要求）：翻页回调（下方 collect）与评论/收藏面板都要写它，
+    // 所以在第一个 effect 之前声明；亮度/drift 的派生在本函数更下方（要读 playerSettings）。
+    var lastChromeInteractionMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(pagerState, pages) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
@@ -147,6 +154,8 @@ internal fun PortraitSwipePager(
                 val entry = pages.getOrNull(page) ?: return@collect
                 // 状态机记账（SW-02）：Ready.page 跟随落定页，供恢复/快照与后续派生 UI 用。
                 viewModel.onSwipePageChanged(page)
+                // 防烧屏：翻页是交互 → 常驻控件立刻回满亮并重算漂移基准
+                lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
                 if (entry.id != requestedKey) {
                     requestedKey = entry.id
                     Log.i(
@@ -328,6 +337,34 @@ internal fun PortraitSwipePager(
         val stream = playbackState.currentStream ?: return@remember true
         (stream.width ?: 0) in 1..<(stream.height ?: 0)
     }
+    // ── 常驻控件的防烧屏（用户要求，2026-10-01）─────────────────────────────────
+    // 一处计时（本层），经 LocalSwipeChromeBurnIn 下发给 pane 的常驻件；
+    // 交互 = 翻页落定 / 打开评论 / 打开收藏 / 打开侧栏 → 立刻回满亮并重置漂移相位基准。
+    val burnInEnabled = playerSettings.playback.burnInGuard
+    val chromeAlpha = remember { Animatable(1f) }
+    var chromeDrift by remember { mutableStateOf(0f to 0f) }
+    LaunchedEffect(burnInEnabled) {
+        if (!burnInEnabled) {
+            chromeAlpha.snapTo(1f)
+            chromeDrift = 0f to 0f
+            return@LaunchedEffect
+        }
+        // 1s 采样：静置阈值分钟级、漂移分钟级，秒级轮询足够且远低于任何帧预算
+        while (true) {
+            delay(1_000)
+            val now = android.os.SystemClock.elapsedRealtime()
+            val target = SwipeChromeBurnInPolicy.chromeAlpha(now, lastChromeInteractionMs)
+            if (chromeAlpha.value != target) {
+                chromeAlpha.animateTo(target, tween(durationMillis = 400))
+            }
+            chromeDrift = SwipeChromeBurnInPolicy.driftOffsetPx(now)
+        }
+    }
+    val chromeBurnIn = SwipeChromeBurnIn(
+        alpha = chromeAlpha.value,
+        offsetXPx = chromeDrift.first,
+        offsetYPx = chromeDrift.second
+    )
     // ── 会话内评论（用户需求 1：刷视频模式要能看评论）──────────────────────────────
     // bbspace 的 `CommentPanel` 本来是**详情 pager 的一页**（不是弹层），所以这里另起一个
     // 悬浮卡片宿主：单实例挂在 pager 上（不是每页一个），互动栏的评论按钮把它打开。
@@ -361,6 +398,7 @@ internal fun PortraitSwipePager(
             closeFavSheet()
         }
     }
+    CompositionLocalProvider(LocalSwipeChromeBurnIn provides chromeBurnIn) {
     Box(modifier = modifier) {
         // `beyondViewportPageCount = 1`：**起滑之前**就把左右邻居页组合出来。
         // 默认 0 时，邻居页要等手指拖动、它开始进入视口才建树 —— 于是"手指一动"那一帧
@@ -393,7 +431,11 @@ internal fun PortraitSwipePager(
                     // 消灭"封面 → 一块黑布 → 视频"的遮罩观感
                     swipeCoverUrl = entry.cover,
                     // 侧栏显隐上报：互动栏在侧栏打开时让位（见下方互动栏接线）
-                    onPlaybackSheetVisibilityChange = { playbackSheetVisible = it },
+                    onPlaybackSheetVisibilityChange = {
+                        playbackSheetVisible = it
+                        // 防烧屏：面板开/关都是交互 → 常驻件回满亮
+                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                    },
                     // 手动横屏：会话锁竖屏，横屏视频要满屏只能用户显式要一次
                     landscapeForced = landscapeForced,
                     onToggleLandscape = onToggleLandscape.takeIf { !isPortraitVideo }
@@ -419,7 +461,7 @@ internal fun PortraitSwipePager(
             )
         }
 
-        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感）──────────────────
+        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感；v6 去掉翻页闪烁）──────
         // 点赞/评论/分享**只此一份**、钉在页面层之上：
         // - 上下滑时它不再跟着整页"滑走再滑回来"（用户反馈的"整体向上调动"），
         //   原地换数据（BiliPai 手法：覆盖层是**纯参数组件**，数据用本层**已收集**
@@ -427,9 +469,12 @@ internal fun PortraitSwipePager(
         // - 位置整体上移（用户定稿"向上"）：悬在底部信息块（UP+标题）上方，
         //   不再与标题/进度条同排拥挤；
         // - 显隐走 AnimatedVisibility 淡入淡出（BiliPai 同款），不再"啪一下"弹出；
-        // - 门控：等首帧时整屏是加载层；侧栏/评论卡片打开时让位。
+        // - **门控只有"让位"两类**（播放设置侧栏 / 评论卡 / 收藏面板）：
+        //   v6 去掉了 `!waitingFirstFrame`——翻页 veil 每次会亮 ~0.5s，带上它等于
+        //   "每次下滑互动栏先消失再出现"（用户反馈的体验问题）。常驻件的常驻性
+        //   优先于"加载层期间让位"；计数的短暂缺失由 rail 内部的粘滞值兜住。
         AnimatedVisibility(
-            visible = !waitingFirstFrame && !playbackSheetVisible && !showComments && !showFavSheet,
+            visible = !playbackSheetVisible && !showComments && !showFavSheet,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomEnd)
@@ -439,19 +484,28 @@ internal fun PortraitSwipePager(
                 likeText = playbackState.detail?.stat?.like,
                 onToggleLike = viewModel::toggleLike,
                 replyText = playbackState.detail?.stat?.reply,
-                onOpenComments = { showComments = true },
+                onOpenComments = {
+                    showComments = true
+                    // 防烧屏：打开面板也算交互 → 常驻件回满亮（下同）
+                    lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                },
                 faved = playbackState.detail?.userState?.faved == true,
                 favText = playbackState.detail?.stat?.fav,
                 onOpenFavorite = {
                     // 弹不弹由 `openFavSheet()` 的返回值决定：未登录时它只弹 toast 并返回
                     // false，无条件弹就会把一层空白的"暂无收藏夹"面板盖在"请先登录"上面
                     // （详情页实测踩过，见 VideoDetailPage 的同一判据）。
-                    if (viewModel.openFavSheet()) showFavSheet = true
+                    if (viewModel.openFavSheet()) {
+                        showFavSheet = true
+                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                    }
                 },
                 shareBvid = playbackState.ids.bvid,
                 shareAid = playbackState.ids.aid,
                 shareTitle = playbackState.detail?.title,
-                modifier = Modifier.padding(end = BiliSpacing.md, bottom = BiliSpacing.xxxl * 4f)
+                modifier = Modifier
+                    .padding(end = BiliSpacing.md, bottom = BiliSpacing.xxxl * 4f)
+                    .applyBurnIn(chromeBurnIn)
             )
         }
     }
@@ -525,6 +579,7 @@ internal fun PortraitSwipePager(
             )
         }
     }
+    } // CompositionLocalProvider(LocalSwipeChromeBurnIn)
 }
 
 /** 评论悬浮卡片高度占屏比：留出上方约 1/3 屏，视频仍然可见。 */

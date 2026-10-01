@@ -607,6 +607,7 @@ class AppSettings @Inject constructor(
     private val prefetchVideoKey = booleanPreferencesKey("prefetch_video")
     private val swipeAutoAdvanceKey = booleanPreferencesKey("swipe_auto_advance")
     private val crossSessionDedupKey = booleanPreferencesKey("swipe_cross_session_dedup")
+    private val burnInGuardKey = booleanPreferencesKey("swipe_burn_in_guard")
     private val autoRotateFullscreenKey = booleanPreferencesKey("auto_rotate_fullscreen")
     private val gestureSpeedKey = floatPreferencesKey("gesture_speed")
     private val doubleTapLikeKey = booleanPreferencesKey("double_tap_like")
@@ -661,7 +662,8 @@ class AppSettings @Inject constructor(
                     ?.let(PlayerRepeatMode::valueOf)
                     ?: defaultPlaybackPrefs.repeatMode,
                 crossSessionDedup = prefs[crossSessionDedupKey]
-                    ?: defaultPlaybackPrefs.crossSessionDedup
+                    ?: defaultPlaybackPrefs.crossSessionDedup,
+                burnInGuard = prefs[burnInGuardKey] ?: defaultPlaybackPrefs.burnInGuard
             ),
             danmaku = DanmakuConfig(
                 enabled = prefs[danmakuEnabledKey] ?: defaultDanmakuConfig.enabled,
@@ -736,6 +738,11 @@ class AppSettings @Inject constructor(
     /** 跨会话「已推去重」（SW-05，默认开）：见 `PlayerPlaybackPrefs.crossSessionDedup`。 */
     suspend fun setSwipeCrossSessionDedup(enabled: Boolean) {
         editSettingsMirrored { it[crossSessionDedupKey] = enabled }
+    }
+
+    /** 刷视频模式防烧屏（默认开）：见 `PlayerPlaybackPrefs.burnInGuard`。 */
+    suspend fun setSwipeBurnInGuard(enabled: Boolean) {
+        editSettingsMirrored { it[burnInGuardKey] = enabled }
     }
 
     suspend fun setReportPlayback(enabled: Boolean) {

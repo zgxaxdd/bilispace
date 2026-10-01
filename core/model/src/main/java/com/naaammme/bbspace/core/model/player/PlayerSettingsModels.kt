@@ -146,7 +146,13 @@ data class PlayerPlaybackPrefs(
      * 7 天内（上限 500 条）不再进新会话的队列，防"每次进来都刷到同几支"。
      * 关掉即回到旧行为；relate 接力不受此开关影响（那是上下文，不是推送）。
      */
-    val crossSessionDedup: Boolean = true
+    val crossSessionDedup: Boolean = true,
+    /**
+     * 刷视频模式**防烧屏**（用户要求，默认开）：常驻控件静置 15s 后变暗到 55%
+     * （不隐藏），并每 60s 做一次 ±2px 的缓慢像素漂移（3×3 游走）。
+     * 关掉则常驻控件恒满亮、不漂移（OLED 上长时间连播有烧屏风险，默认开）。
+     */
+    val burnInGuard: Boolean = true
 )
 
 @Immutable

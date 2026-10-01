@@ -912,7 +912,7 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "弹层开关只能由 openFavSheet() 的返回值驱动。",
-            countMatching(pager, """if \(viewModel\.openFavSheet\(\)\) showFavSheet = true""") == 1 &&
+            countMatching(pager, """if \(viewModel\.openFavSheet\(\)\) \{""") == 1 &&
                 countMatching(pager, """showFavSheet = true""") == 1
         )
         assertTrue(
@@ -1280,15 +1280,38 @@ class VideoLogicGuardTest {
             "互动栏必须是**会话级单实例、常驻页面层之上**（用户定稿）：pane 里不得再调用" +
                 "（pane 每页一个，互动栏会跟着整页滑走再滑回来——用户反馈的「整体向上调动」）；" +
                 "显隐走 AnimatedVisibility 淡入淡出（不许\"啪一下\"弹出）；" +
-                "门控 = 等首帧隐藏 + 播放设置侧栏让位 + 评论卡片让位。",
+                "门控 = 播放设置侧栏让位 + 评论卡片让位 + 收藏面板让位（**只许让位类条件**）。\n" +
+                "2026-10-01 用户反馈「每次下滑互动栏消失再出现」：旧门控带了 !waitingFirstFrame，" +
+                "而翻页 veil 每次亮 ~0.5s → 每次翻页都淡出淡入。常驻件的常驻性优先，已去掉该条件；" +
+                "计数侧的短暂缺失由 rail 内的粘滞值兜住（rememberStickyText）。",
             countMatching(pane, """SwipeSessionActionRail\(""") == 1 &&
                 countMatching(
                     pager,
-                    """visible = !waitingFirstFrame && !playbackSheetVisible && !showComments"""
+                    """visible = !playbackSheetVisible && !showComments && !showFavSheet"""
                 ) == 1 &&
+                countMatching(pager, """waitingFirstFrame &&""") == 0 &&
+                countMatching(pager, """onPlaybackSheetVisibilityChange = \{""") == 1 &&
+                countMatching(pager, """playbackSheetVisible = it""") == 1
+        )
+        assertTrue(
+            "互动栏计数必须**粘滞**（用户反馈「消失再出现」的计数侧）：换页时 stat 为 null，" +
+                "三个计数一律走 rememberStickyText；liked/faved 仍按真值（粘滞会显示错觉）。",
+            countMatching(pane, """private fun rememberStickyText\(""") == 1 &&
+                countMatching(pane, """label = stickyLike""") == 1 &&
+                countMatching(pane, """label = stickyReply""") == 1 &&
+                countMatching(pane, """label = stickyFav""") == 1 &&
+                countMatching(pane, """label = likeText""") == 0
+        )
+        assertTrue(
+            "常驻控件防烧屏（用户要求）：策略在核心层（静置 15s 变暗到 0.55、每 60s ±2px 漂移），" +
+                "pager 一处计时 + CompositionLocal 下发，pane 的常驻件（信息层/进度条）必须真的读它。",
+            countMatching(pager, """LocalSwipeChromeBurnIn provides chromeBurnIn""") == 1 &&
+                countMatching(pager, """SwipeChromeBurnInPolicy\.chromeAlpha\(""") == 1 &&
+                countMatching(pager, """SwipeChromeBurnInPolicy\.driftOffsetPx\(""") == 1 &&
+                countMatching(pane, """LocalSwipeChromeBurnIn\.current""") >= 2 &&
                 countMatching(
-                    pager,
-                    """onPlaybackSheetVisibilityChange = \{ playbackSheetVisible = it \}"""
+                    codeOf("SwipeChromeBurnInPolicy.kt"),
+                    """const val DIM_ALPHA = 0.55f"""
                 ) == 1
         )
         assertTrue(

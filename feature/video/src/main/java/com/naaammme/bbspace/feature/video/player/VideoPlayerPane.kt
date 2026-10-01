@@ -1141,8 +1141,11 @@ private fun SwipeProgressLine(
     val durationMs = progress.durationMs
     if (durationMs <= 0L) return
     val fraction = (progress.positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    // 常驻件：跟随会话级防烧屏（进度条是竖屏连播里最"钉死"的一条静态线，最先烧屏）。
+    val burnIn = LocalSwipeChromeBurnIn.current
     Box(
         modifier = modifier
+            .applyBurnIn(burnIn)
             .fillMaxWidth()
             .fillMaxHeight(SWIPE_PROGRESS_TRACK_FRACTION)
             .background(SwipeProgressTrackColor)
@@ -1154,6 +1157,20 @@ private fun SwipeProgressLine(
                 .background(SwipeProgressBarColor)
         )
     }
+}
+
+/**
+ * 非空展示值**粘滞**到下一个非空值到达（用户反馈「每次下滑控件消失再出现」的计数侧修复）：
+ * 换页瞬间新视频详情未回（`stat` 为 null），计数若跟着 null 走就会闪没。
+ * ⚠️ 只允许用于**展示数值**；`liked/faved` 这类状态粘滞会显示错觉，不许用。
+ */
+@Composable
+private fun rememberStickyText(value: String?): String? {
+    var last by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(value) {
+        if (!value.isNullOrBlank()) last = value
+    }
+    return value ?: last
 }
 
 /**
@@ -1196,6 +1213,14 @@ internal fun SwipeSessionActionRail(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    // ── 计数粘滞（用户反馈：每次下滑控件"消失再出现"）────────────────────────────
+    // 换页瞬间新视频的 detail 还没回来（`stat` 为 null），计数若直接跟着 null 走，
+    // 就会出现"数字消失 → 数字出现"的闪烁。这里把**非空**值记住，直到新值到达；
+    // 亚秒级的旧数字比"数字整块闪没"体验好得多（BiliPai/抖音同款做法）。
+    // liked/faved 仍按真值（粘滞会显示错觉，绝不粘）。
+    val stickyLike = rememberStickyText(likeText)
+    val stickyReply = rememberStickyText(replyText)
+    val stickyFav = rememberStickyText(favText)
     Column(
         modifier = modifier.padding(end = BiliSpacing.md),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1205,7 +1230,7 @@ internal fun SwipeSessionActionRail(
         SwipeRailAction(
             icon = Icons.Filled.Favorite,
             contentDescription = if (liked) "取消点赞" else "点赞",
-            label = likeText,
+            label = stickyLike,
             tint = if (liked) LikeHeartColor else Color.White,
             onClick = onToggleLike
         )
@@ -1213,7 +1238,7 @@ internal fun SwipeSessionActionRail(
             SwipeRailAction(
                 icon = Icons.AutoMirrored.Filled.Comment,
                 contentDescription = "评论",
-                label = replyText,
+                label = stickyReply,
                 tint = Color.White,
                 onClick = onOpenComments
             )
@@ -1224,7 +1249,7 @@ internal fun SwipeSessionActionRail(
             SwipeRailAction(
                 icon = if (faved) Icons.Filled.Star else Icons.Outlined.Star,
                 contentDescription = if (faved) "取消收藏" else "收藏",
-                label = favText,
+                label = stickyFav,
                 tint = if (faved) FavStarColor else Color.White,
                 onClick = onOpenFavorite
             )
@@ -1353,8 +1378,11 @@ private fun SwipeSessionInfoLine(
     modifier: Modifier = Modifier,
 ) {
     val titleText = title?.takeIf(String::isNotBlank) ?: return
+    // 常驻件：跟随会话级防烧屏（静置变暗 + 缓慢像素漂移，见 SwipeChromeBurnIn）。
+    val burnIn = LocalSwipeChromeBurnIn.current
     Column(
         modifier = modifier
+            .applyBurnIn(burnIn)
             .padding(
                 start = BiliSpacing.lg,
                 end = BiliSpacing.sm,
