@@ -263,3 +263,42 @@ B20 两次被自己的守卫骗过去，形状都很典型：
    把它抓出来的，而不是全仓那条"0 处"断言（那时它只会显示"违规 2 处"，看起来像真有其事）。
 **结论**：写扫描断言时同时写下一个"应当抓到"的样例；只写"应当抓不到"的断言，
 正则一失效它就永久成立。
+
+## W22 · `--rerun` 只在命令行**只有一个任务**时生效（2026-10-01）
+
+`./gradlew testDebugUnitTest --rerun`（不限定模块）与
+`./gradlew :a:testDebugUnitTest :b:testDebugUnitTest --rerun` 都会把 `--rerun`
+**静默丢掉**：实测整轮 `1352 actionable tasks: 1352 up-to-date`、13 秒 `BUILD SUCCESSFUL`，
+看起来像"复跑过且全绿"。逐模块单任务调用 `./gradlew :core:designsystem:testDebugUnitTest --rerun`
+才真的执行（同一条命令 5~6 分钟）。
+**How to apply**：任何"我复跑过守卫"的声明，先看日志里那一行是 `> Task :x:testDebugUnitTest`
+（无后缀）还是带 `UP-TO-DATE`/`FROM-CACHE`；多模块要**分别**调用，别指望一次 `--rerun` 通吃。
+
+## W23 · 扫源码 helper 的前缀参数不许带缩进（2026-10-01）
+
+`blockBody(lines, sig)` 的判据是 `it.trimStart().startsWith(sig)`。把 sig 写成
+`"    fun requestExtraction("`（照抄源码里的缩进）→ 永远匹配不到 → 断言必红，
+而且红的原因看起来像"代码不符合规范"，实际是扫描器没扫到。
+新写的 `CoverTintAllocationStructureTest` 两条断言就是这么废的，靠"故意改坏"那轮
+（改坏点根本不在它们守的东西上，它们却先红了）才暴露。
+**How to apply**：给这类 helper 加 `require(!prefix.startsWith(" "))`，把静默失配变成显式失败；
+写扫描断言时永远先跑一次"未经改坏的绿"——如果它红得莫名其妙，第一嫌疑是扫描器没抓到函数体。
+
+## W24 · 棘轮的 actual 必须用本仓扫描器读，别自己写脚本（2026-10-01）
+
+`DesignTokenLintTest.countMatching` 统计的是**匹配行数**，不是出现次数；一个文件集合、
+一条跳过注释与 import 的规则。我按"出现次数"另写脚本实测得到 `12.dp×156`，
+而守卫自己报的是 **144** —— 差 12 处，若照我的数去调上限，会把棘轮设成一个永远够不着的假值。
+**How to apply**：要读 actual 就把 `assertRatchet` 临时改成恒失败（`actual <= limit && false`），
+跑一次过滤到该类的任务，从失败消息里读真实数字，再还原、再写上限。
+顺带：这条临时改坏本身也就是"棘轮会咬人"的证据，不用另做。
+
+## W25 · §2.3 第一条我又犯了（第四、五次，2026-10-01）
+
+用 python 脚本改源码内容两次：一次是 9 处同构替换（RankScreen 的 dp→token），
+一次是 4 处"临时改坏"。规则本身覆盖临时改坏，且这是台账里已经记过的同一件事。
+这次侥幸没出事（读写都显式 utf-8 + `newline=''` 保留 LF，事后 `git diff` 逐条核对过），
+但**根因是"多文件同构替换时图快"**，不是不知道规则。
+**How to apply**：同构替换要么逐个 Edit，要么先 `git diff` 复核再编译；
+临时改坏一律 Edit（一次调用就够，没有"批量"这回事）。
+

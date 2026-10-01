@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
 
 @Composable
 fun rememberAdaptiveGridColumnCount(
@@ -76,17 +77,18 @@ fun <T> AdaptiveMediaGrid(
     // 6dp 是"能塞下就塞下"的密度取向，整屏看过去卡片彼此贴太近、封面色彩直接相邻，
     // 读作拥挤；现代信息流的呼吸感来自**行距大于列距**（横向 10dp 保证双列不散、
     // 纵向 12dp 让每张卡与下一张切开）。这两个值是全局默认，排行/搜索/动态页同享，
-    // 所以改这里等于一次性统一全站列表节奏。
-    horizontalSpacing: Dp = 10.dp,
-    verticalSpacing: Dp = 12.dp,
+    // 所以改这里等于一次性统一全站列表节奏 —— 数值现在住在 `BiliCardDensity` 里，
+    // 与首页/排行页显式传的那一份是**同一处定义**（以前是两处字面量，会漂）。
+    horizontalSpacing: Dp = BiliCardDensity.gridSpacing,
+    verticalSpacing: Dp = BiliCardDensity.rowSpacing,
     flingBehavior: FlingBehavior? = null,
     contentPadding: PaddingValues = PaddingValues(
         // 4 → 10/12：屏幕边距必须**大于**列间距（10dp），否则左右两列会被读成
         // "贴边溢出"，而不是"在页边距里排布"。底部留 12dp 给最后一行收口。
-        start = 10.dp,
+        start = BiliCardDensity.pageHorizontal,
         top = 0.dp,
-        end = 10.dp,
-        bottom = 12.dp
+        end = BiliCardDensity.pageHorizontal,
+        bottom = BiliCardDensity.pageBottom
     ),
     key: (index: Int, item: T) -> Any = { index, _ -> index },
     contentType: (index: Int, item: T) -> Any? = { _, _ -> null },

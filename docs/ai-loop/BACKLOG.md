@@ -104,6 +104,19 @@
 
 ---
 
+## C-好看 · 2026-10-01 对齐上游 v0.2.3.5 后新增（U-2 ~ U-4，均需真机）
+
+> 上游配方与 file:line 见 `taskbook-2026-10-01-BiliPai对齐-三阶段升级.md` §3。
+> U-1（卡片密度单源 + 棘轮下降）已在 2026-10-01 本批关闭，见 PROGRESS。
+
+| 编号 | 标题 | 位置 | 根因线索 | 级别 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| UI-11 | meta 行基线对齐 + 共享 stat row | `feature/rank/RankScreen.kt`（两处 meta Row）、`feature/home/video/HomeVideoPage.kt` 卡信息区 | 全仓 `alignByBaseline` **零命中**，混字号的 label/value 全靠 CenterVertically → 数字与小字视觉不在一条线上。上游手法：简介块首行标签+正文 `alignByBaseline`、次行 meta `labelLarge` 粗体（`b47643af7`→`3c912210f`），分集统计删自造组件复用共享行（`965223855`） | B | **前置约束**：现有 Row 里有 `Spacer(weight)` 分支，`CrossAxisAlignment.Baseline` 要求所有主孩子有基线 → 直接换会崩。必须先做成"纯 Text 的共享组件"，再逐页走查（6+ 界面）；受 `TextStyleVariants` 内联 copy 禁令与 `ListAllocationStructureTest` 约束 | 待办（**需真机**） |
+| UI-12 | 染色视觉语言推广到直播/搜索/关注流 | `feature/home/live/HomeLivePage.kt` 等仍用中性容器 | 推荐页与排行页已共用 `rememberVideoCardCoverTint` 一套配方（`b4abd2d9`），其余卡片流仍是"白底 + 封面"，同一 App 里两种卡片语言 | B | 纯观感决策，必须真机浅色/深色各走一遍；每接一处要更新 `UiStyleDecisionRatchetTest` 的逐文件登记 | 待办（**需真机**） |
+| UI-13 | 整体再收一档密度 | `core/designsystem/theme/Spacing.kt` 的 `BiliCardDensity` | 上游 v0.2.3.5 整版在做留白收紧，但它自己也在 `cea46ad23` 把"按钮统一 48dp 下限"回退了 —— 说明收多紧是观感判断。把手已经只有一个（六个语义值），改起来不会再漂 | B | 改完必须真机对照整屏卡片数与触控命中区（上游口径：只压可见容器、不动 Compose 命中区，`SubReplyDetailComponents.kt:1418-1470`） | 待办（**需真机**） |
+
+---
+
 ## 已关闭 / 不需再做（防重复劳动）
 
 - 可执行优化方案 §7 全部条目、§9.1 的 B1–B9（PROGRESS B0 已归档提交）。

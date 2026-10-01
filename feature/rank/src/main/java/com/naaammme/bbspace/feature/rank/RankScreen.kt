@@ -59,6 +59,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.withFontSize
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -142,10 +143,10 @@ fun RankScreen(
         // 边距与推荐页同口径（10/10/12）：推荐页注释里点名过"两处不同步就会出现
         // 首页贴边、排行页留白这种不一致"，卡片同款之后边距也必须一致
         contentPadding = PaddingValues(
-            start = 10.dp,
+            start = BiliCardDensity.pageHorizontal,
             top = topContentPadding,
-            end = 10.dp,
-            bottom = 12.dp
+            end = BiliCardDensity.pageHorizontal,
+            bottom = BiliCardDensity.pageBottom
         ),
         headerContent = {
             RankSelectors(
@@ -235,7 +236,7 @@ private fun RankSelectors(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = BiliCardDensity.infoHorizontal, vertical = BiliCardDensity.infoVertical),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             RankType.entries.forEach { type ->
@@ -257,7 +258,7 @@ private fun RankSelectors(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = BiliCardDensity.badgeHorizontal, vertical = BiliCardDensity.badgeVertical)
                     )
                 }
             }
@@ -443,7 +444,7 @@ private fun RankVideoCard(
                         Modifier
                     }
                 )
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = BiliCardDensity.infoHorizontal, vertical = BiliCardDensity.infoVertical)
         ) {
             Text(
                 text = item.title,
@@ -453,7 +454,7 @@ private fun RankVideoCard(
                 color = adaptiveColors.titleColor,
                 style = titleStyle
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(BiliCardDensity.titleToMeta))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -607,7 +608,7 @@ private fun RankPgcCard(
                         Modifier
                     }
                 )
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = BiliCardDensity.infoHorizontal, vertical = BiliCardDensity.infoVertical)
         ) {
             Text(
                 text = item.title,
@@ -616,7 +617,7 @@ private fun RankPgcCard(
                 color = adaptiveColors.titleColor,
                 style = titleStyle
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(BiliCardDensity.titleToMeta))
             Text(
                 text = buildString {
                     append(formatRankCount(item.follow))

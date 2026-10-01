@@ -91,6 +91,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.recordCardLayer
 import com.naaammme.bbspace.core.designsystem.seamless.sharedContentKey
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
+import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
@@ -289,12 +290,13 @@ fun HomeVideoPage(
         // 首屏不足一屏时自动补一页（额度上限在 HomeViewModel）
         autoFillWhenNotScrollable = true,
         contentPadding = PaddingValues(
-            // 与 AdaptiveMediaGrid 的默认边距保持一致（显式传参覆盖了默认值，
-            // 两处不同步就会出现"首页贴边、排行页留白"这种不一致）
-            start = 10.dp,
+            // 与排行页共用 `BiliCardDensity`（显式传参覆盖了 AdaptiveMediaGrid 的默认值）：
+            // 这条注释点名的"两处不同步就会出现首页贴边、排行页留白"，
+            // 现在由同一个语义常量收口 —— 改密度只需要改 BiliCardDensity 一处。
+            start = BiliCardDensity.pageHorizontal,
             top = topContentPadding,
-            end = 10.dp,
-            bottom = 12.dp
+            end = BiliCardDensity.pageHorizontal,
+            bottom = BiliCardDensity.pageBottom
         ),
         errorMessage = errorMessage,
         onRetry = onRetry,
@@ -533,7 +535,10 @@ private fun FeedCard(
                 Modifier
             }
         )
-        .padding(horizontal = 8.dp, vertical = 6.dp)
+        .padding(
+            horizontal = BiliCardDensity.infoHorizontal,
+            vertical = BiliCardDensity.infoVertical
+        )
 
     // ── 无缝过渡期间整卡内容的可见性 ────────────────────────────────────────
     // 锚点已铺满整卡（见 fullCardOverlay），且**不再用封面位图装饰**，因此框架

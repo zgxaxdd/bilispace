@@ -197,7 +197,13 @@ class DesignTokenLintTest {
             // 描边粗细是规格常量，同 0.5.dp 发丝线的处理逻辑，不做间距 token。
             // 同批净变化备注：评论悬浮卡片 v3 玻璃描边的 1.dp 已随实底重构删除（-1），
             // 但它发生在同两次棘轮运行之间，未计入本上限。
-            limit = 981,
+            // 上限 981 → 960（2026-10-01，阶段三 U1 卡片密度单源）：净 −21 处。
+            // 首页信息流卡、排行页卡与 `AdaptiveMediaGrid` 的全站默认值原本各自内联
+            // 同一批 8/6/10/12/4 dp（三处注释都点名过"两处不同步就会首页贴边、排行页留白"，
+            // 也就是**漂移已经发生过**）。现在它们引用 `BiliCardDensity` 的语义常量，
+            // 数值仍全部指回 `BiliSpacing` 档位（该对象本身零 dp 字面量，
+            // 见 CardDensitySingleSourceTest）。逐像素无变化，收的是"改动点数量"。
+            limit = 960,
             what = "theme 包外的 `N.dp` 字面量",
             why = "同一语义的尺寸散在各处就没有单一改动点。要降它就把语义明确的" +
                 "重复值收敛进 BiliRadius/BiliSpacing；一次性尺寸（图标、分隔线粗细、" +
@@ -231,28 +237,40 @@ class DesignTokenLintTest {
         // 卡片的 padding 规格（对照 compose-cupertino ActionSheetTitlePaddingValues）。
         // **148 → 149（2026-09-29，排行卡同步推荐 UI）**：+1 为 RankScreen 网格
         // contentPadding bottom 从 4.dp 改成 12.dp（与推荐页同口径，见 10.dp 档的记录）。
-        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 149, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
+        // **149 → 144（2026-10-01，阶段三 U1）**：−5 为排行页角标/页边与首页、栅格默认值
+        // 的 12.dp 收进 BiliCardDensity（badgeHorizontal / pageBottom / rowSpacing）。
+        assertRatchet(actual = sumOf("""\b12\.dp\b"""), limit = 144, what = "`12.dp` 字面量", why = "同上，对应 BiliSpacing.md。")
     }
 
     @Test
     fun eightDpLiterals_isFrozen() {
         // **149 → 150（2026-09-26，iOS 阶段 C）**：+1 为 IOSAlertDialog 卡片底部
         // padding 规格（对照 compose-cupertino ActionSheetWindowInsets 的 bottom 8dp）。
-        assertRatchet(actual = sumOf("""\b8\.dp\b"""), limit = 150, what = "`8.dp` 字面量", why = "同上，对应 BiliSpacing.sm。")
+        // **150 → 145（2026-10-01，阶段三 U1）**：−5 为卡信息区左右内边距收进
+        // BiliCardDensity.infoHorizontal（首页 1 处 + 排行 3 处 + 其它 1 处）。
+        assertRatchet(actual = sumOf("""\b8\.dp\b"""), limit = 145, what = "`8.dp` 字面量", why = "同上，对应 BiliSpacing.sm。")
     }
 
-    /** 6.dp 与 10.dp **没有对应 token**，所以它们的上限只是"别继续长"。 */
+    /**
+     * 6.dp / 10.dp 两档：token 早在 2026-09-25 就补齐了（`BiliSpacing.xsPlus` / `.smPlus`），
+     * 所以这里守的不再是"没有标度"，而是"调用点还没收口"。
+     */
     @Test
     fun sixAndTenDpLiterals_isFrozen() {
         // 6.dp 反而降了（栅格列距 6 → 10），上限保持不动，这就是棘轮该有的方向性。
-        assertRatchet(actual = sumOf("""\b6\.dp\b"""), limit = 111, what = "`6.dp` 字面量", why = "BiliSpacing 没有 6 这一档，先补标度再谈收口。")
+        // **111 → 104（2026-10-01，阶段三 U1）**：−7 为卡信息区上下内边距/角标内边距
+        // 收进 BiliCardDensity.infoVertical / badgeVertical（排行 3 处 + 首页 1 处 + 其余 3 处）。
+        assertRatchet(actual = sumOf("""\b6\.dp\b"""), limit = 104, what = "`6.dp` 字面量", why = "对应 BiliSpacing.xsPlus；标度已补齐，剩的是调用点收口。")
         // **上限 80 → 85 的变更记录（2026-09-22，T4 UI 收口）**：+5 全部来自那次
         // 版式调整（列距与屏幕边距改用 10dp）。仍是"没有 token 的高频值"，
         // 等 T4.1 的语义归类结论出来再决定要不要给 10 补一档 BiliSpacing。
         // **85 → 87（2026-09-29，排行卡同步推荐 UI）**：+2 为 RankScreen 的网格
         // contentPadding start/end 从 4.dp 改成 10.dp——推荐页注释里点名过
         // "两处不同步就会出现首页贴边、排行页留白这种不一致"，页面边距必须同口径。
-        assertRatchet(actual = sumOf("""\b10\.dp\b"""), limit = 87, what = "`10.dp` 字面量", why = "BiliSpacing 没有 10 这一档，同上。")
+        // **87 → 80（2026-10-01，阶段三 U1）**：−7。那"两处不同步"的隐患已由
+        // BiliCardDensity.pageHorizontal / gridSpacing 收成一个定义点（首页、排行页、
+        // 栅格默认值三处同源），字面量随之减少。
+        assertRatchet(actual = sumOf("""\b10\.dp\b"""), limit = 80, what = "`10.dp` 字面量", why = "对应 BiliSpacing.smPlus；同上，语义位已有 token。")
     }
 
     /**
