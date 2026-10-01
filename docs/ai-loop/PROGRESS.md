@@ -545,6 +545,27 @@
   `blockBody` 前缀不许带缩进；棘轮 actual 必须用本仓扫描器读（行数≠出现次数）；
   **我又用 shell 改了两轮源码内容**（批量替换 + 4 处临时改坏），是 §2.3 第一条的第四、五次违反。
 
-## 批次 U2+ · （阻塞）需要真机：L4-23~L4-27 走查后才能继续推 C-好看区
+## 批次 D4 · 2026-10-01（同日第二轮）· 蜂窝预热闸门 + 上游第二次同步判定
+
+**分区**：A-功能/流量｜**级别**：A 级·可机器判定（省流量数额需真机+计费口径，不声称）
+｜**提交**：`f10519a5`｜**详情**：任务书 §4
+
+- **上游第二次同步**：`5b93372fe` → **`34d189620`**（+2 提交）。两条都不在刷视频/性能主线上，
+  逐条判适用性：**搬**头部预取的 Wi-Fi 门控；**记队列不盲做**全屏截图（BACKLOG **AF-01**，
+  取帧/相册可见/分享权限三条都要设备）；**不搬**液态玻璃命名预设（`GlassConfig` 只有
+  material 三档 + strength 两个可调量，给两个参数做预设系统是无收益抽象）、
+  直播弹幕面板多模式换行（bbspace 没有模式选择）、RSS / MessageAppScaffold（无对应物）。
+- **D4 本体**：`prefetchSwipeQueue` 原来只把 `isUnmetered` 交给 `prefetchCount`，
+  于是"蜂窝 + 预取开关开着" = 每次停稳给邻居页发 playurl 预取**外加一整份 gRPC 详情**。
+  详情比 playurl 贵一个量级，买到的只是"翻过去标题不空一拍"。新增纯策略
+  `SwipePrefetchPolicy.shouldWarmDetail(isUnmetered)`，详情预热只在非计量网络做，
+  playurl 预取留在闸门外（蜂窝照走，功能面不缩）。网络状态一次预取只读一次，
+  日志补 `unmetered=… detailWarm=…`。
+- **+3 单测**（蜂窝不热详情 / 闸门不许顺手杀 playurl / 接线形态守卫）；
+  新守卫做过故意改坏的证明（`if (warmDetail)` → `if (true)` → FAILED，还原后绿）。
+- 全量 `testDebugUnitTest` + `:app:assembleDebug` BUILD SUCCESSFUL / 0 失败；
+  feature:video **101** 单测（`--rerun` 真跑）。
+
+## 批次 U2+ · （阻塞）需要真机：L4-23~L4-28 走查后才能继续推 C-好看区
 
 
