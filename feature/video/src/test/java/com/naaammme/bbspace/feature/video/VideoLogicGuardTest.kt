@@ -703,20 +703,27 @@ class VideoLogicGuardTest {
     @Test
     fun swipeWaitsFirstFrameBehindLoadingVeil() {
         val pager = codeOf("player/PortraitSwipePager.kt")
+        val waitPolicy = codeOf("SwipeWaitPolicy.kt")
         assertTrue(
             "「等首帧」必须是**粘滞**状态：换视频（SW-03 起为类型化 currentId，旧字符串 " +
                 "currentKey 与之同拍变化）进入等待，直到这一支真的出帧才退出。" +
                 "直接取 `!hasRenderedFirstFrame` 的瞬时值是错的 —— 换视频后的头几十毫秒里" +
                 "它仍是上一支的 true（finishVideoPlayback 先发布新 ids、后 stopForReuse 归零），" +
-                "加载层会先卸载再挂上，中间那一帧就是真机看到的「黑屏 + 大暂停键」。" +
-                "**失败不再撤掉加载层**（本轮 C10 改动）：撤掉会露出「纯黑 + 中央播放键」像卡死，" +
-                "而错误详情只在播放器侧栏里、连播页面上看不到；改成留着加载层并切成错误态 + 重试。",
+                "加载层会先卸载再挂上，中间那一帧就是真机看到的「黑屏 + 大暂停键」。\n" +
+                "SW-11 起**何时撤**交给 SwipeWaitPolicy 纯判据（retireVeil），旧断言 " +
+                "「if (firstFrameRendered) waitingKey = null」随之换形：默认 " +
+                "MIN_VEIL_VISIBLE_MS_DEFAULT=0 时策略退化为首帧即撤，逐帧同拍（编译期判据）。",
             countMatching(pager, """var\s+waitingKey\s+by\s+remember""") == 1 &&
                 countMatching(pager, """val\s+waitingFirstFrame\s*=\s*waitingKey != null""") == 1 &&
                 countMatching(pager, """LaunchedEffect\(currentId\)""") == 1 &&
+                countMatching(pager, """if \(retireVeil\) waitingKey = null""") == 1 &&
                 countMatching(
                     pager,
-                    """if \(firstFrameRendered\) waitingKey = null"""
+                    """SwipeWaitPolicy\.retireDelayMs\("""
+                ) == 1 &&
+                countMatching(
+                    waitPolicy,
+                    """const val MIN_VEIL_VISIBLE_MS_DEFAULT = 0L"""
                 ) == 1
         )
         val pane = codeOf("player/VideoPlayerPane.kt")

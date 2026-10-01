@@ -55,6 +55,9 @@ import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
+import com.naaammme.bbspace.core.swipe.SwipeWaitPolicy
+import kotlinx.coroutines.delay
 import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.shouldAutoAdvanceToNextSwipePage
@@ -278,12 +281,36 @@ internal fun PortraitSwipePager(
     val playbackFailed = playbackState.error != null
     // 粘滞键类型化（SW-03）：数据类相等语义与旧字符串完全同拍（同视频同键）。
     var waitingKey by remember { mutableStateOf<SwipeId?>(null) }
+    // veil 本轮展示的起点（SW-11）：随切页重置，供"只补足、不新增等待"判据用。
+    var waitingSinceMs by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(currentId) {
         // 首次组合同样置位：锚点视频还没出帧时，一样该看到加载层而不是黑屏
         waitingKey = currentId
+        waitingSinceMs = android.os.SystemClock.elapsedRealtime()
     }
-    LaunchedEffect(firstFrameRendered) {
-        if (firstFrameRendered) waitingKey = null
+    // veil 退场（SW-11）：走 SwipeWaitPolicy 的纯判据。默认
+    // MIN_VEIL_VISIBLE_MS_DEFAULT = 0 → 首帧一到位 delay=0 立即撤，
+    // 与旧行为（首帧即撤）逐帧同拍；真机确认"快网仍闪"后调大常量即开启。
+    var retireVeil by remember { mutableStateOf(false) }
+    LaunchedEffect(firstFrameRendered, waitingKey, playbackFailed) {
+        val delayMs = SwipeWaitPolicy.retireDelayMs(
+            firstFrameRendered = firstFrameRendered,
+            visibleSinceMs = waitingSinceMs,
+            nowMs = android.os.SystemClock.elapsedRealtime(),
+            minVisibleMs = SwipeWaitPolicy.MIN_VEIL_VISIBLE_MS_DEFAULT,
+            playbackFailed = playbackFailed
+        )
+        when {
+            delayMs == null -> retireVeil = false
+            delayMs <= 0L -> retireVeil = true
+            else -> {
+                delay(delayMs)
+                retireVeil = true
+            }
+        }
+    }
+    LaunchedEffect(retireVeil) {
+        if (retireVeil) waitingKey = null
     }
     val waitingFirstFrame = waitingKey != null
     // 遮掩时间线（真机反馈「感觉就是盖了一层遮罩」）：必须能量出
