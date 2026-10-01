@@ -1224,6 +1224,7 @@ class VideoLogicGuardTest {
     @Test
     fun swipeSessionShowsPersistentInfoLine() {
         val pane = codeOf("player/VideoPlayerPane.kt")
+        val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
             "常驻信息必须与进度条同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。" +
                 "BiliPai 手法：读本作用域已收集的 state，调用点不得重复 collectAsStateWithLifecycle。",
@@ -1237,24 +1238,29 @@ class VideoLogicGuardTest {
                 ) == 0 &&
                 countMatching(pane, """val titleText = title\?\.takeIf\(String::isNotBlank\) \?: return""") == 1
         )
+        val infoLine = blockBody(pane, "private fun SwipeSessionInfoLine(")
         assertTrue(
-            "常驻信息必须只读（连播时任何可点区域都会和上下滑抢手指）；" +
-                "v2 层级：UP 一行在上、标题最多两行（旧版一行省略读不全长标题）；间距走 BiliSpacing。",
-            blockBody(pane, "private fun SwipeSessionInfoLine(").let { body ->
-                body.none { it.contains("pointerInput") || it.contains("clickable") } &&
-                    body.none { it.contains(".dp") } &&
-                    body.count { it.contains("maxLines = 2") } == 1 &&
-                    body.count { it.contains("maxLines = 1") } == 1 &&
-                    body.any { it.contains("BiliSpacing.lg") }
-            }
+            "底部信息层 v2→v3（SW-21）：作者行（头像 + @名）→ 标题（两行可展开）→ 话题 chip。\n" +
+                "⚠️ 不变式反转：旧断言是「整层只读、不许 clickable」；任务书 SW-21 明确要求" +
+                "「只让展开/关注/chip 三个明确热区可点」，本次落地两个热区（作者行、标题），" +
+                "整层其余区域仍不消费触摸。dimension/间距必须走 token（不许 .dp 字面量）。",
+            infoLine.none { it.contains(".dp") } &&
+                infoLine.count { it.contains("clickable(") } == 2 &&
+                // @名 一行 + 话题 chip 一行（都是单行省略）
+                infoLine.count { it.contains("maxLines = 1") } == 2 &&
+                infoLine.count { it.contains("maxLines = if (expanded) Int.MAX_VALUE else 2") } == 1 &&
+                infoLine.any { it.contains("remember(resetKey)") } &&
+                infoLine.any { it.contains("BiliSpacing.lg") }
         )
         assertTrue(
-            "底部信息层 v2 必须成体系：渐变遮罩（SWIPE_BOTTOM_ZONE_FRACTION 分区 + SwipeBottomScrimBrush）" +
-                "托底；互动栏已提升为会话级单实例（pager 层，见 swipeSessionShowsActionRail），" +
-                "pane 里只许有互动栏的组件定义、不得再组合它。",
-            countMatching(pane, """SWIPE_BOTTOM_ZONE_FRACTION""") >= 2 &&
-                countMatching(pane, """SwipeBottomScrimBrush""") >= 2 &&
-                countMatching(pane, """SwipeSessionActionRail\(""") == 1
+            "互动栏 v2（SW-20）：头像在最上（点进空间）、点赞长按 = 一键三连、计数粘滞；" +
+                "头像/圆盘尺寸走 token（不新增 dp 字面量）。",
+            countMatching(pane, """private fun SwipeRailAvatar\(""") == 1 &&
+                countMatching(pane, """SwipeRailAvatar\(""") == 2 &&
+                countMatching(pane, """onLongClickLabel = "一键三连"""") == 1 &&
+                countMatching(pane, """combinedClickable\(""") == 1 &&
+                countMatching(pager, """onLongPressLike = viewModel::triple""") == 1 &&
+                countMatching(pager, """ownerFace = playbackState\.detail\?\.owner\?\.face""") == 1
         )
     }
 

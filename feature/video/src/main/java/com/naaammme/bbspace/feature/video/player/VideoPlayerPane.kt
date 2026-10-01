@@ -95,6 +95,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -145,6 +146,7 @@ import com.naaammme.bbspace.feature.video.formatPlaybackTime
 import com.naaammme.bbspace.feature.video.formatSpeed
 import com.naaammme.bbspace.feature.video.getAudioName
 import com.naaammme.bbspace.feature.video.getQualityName
+import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
 import com.naaammme.bbspace.core.swipe.SwipeSeekPolicy
 import kotlinx.coroutines.delay
@@ -444,6 +446,11 @@ internal fun VideoPlayerPane(
      * （用户注意力在进度条上，此时翻页等于把操作打断并丢弃）。
      */
     onSwipeScrubbingChange: (Boolean) -> Unit = {},
+    /**
+     * 进 UP 空间（SW-20/21：会话信息层的头像与 @名 共用这一出口）。
+     * `null` = 宿主不接（此时头像/@名退化为不可点，不做假入口）。
+     */
+    onOpenSpace: ((SpaceRoute) -> Unit)? = null,
     /**
      * 这一页的封面 URL（等首帧时的加载层用它铺底）。
      *
@@ -857,7 +864,24 @@ internal fun VideoPlayerPane(
                         // BiliPai 手法：读**本作用域已收集**的 state，不在调用点重复 collect。
                         SwipeSessionInfoLine(
                             title = state.detail?.title,
-                            owner = state.detail?.owner?.name
+                            owner = state.detail?.owner?.name,
+                            // SW-21：作者行头像/话题/进空间 + 换页收起标题（复位键 = 当前 aid）
+                            ownerFace = state.detail?.owner?.face,
+                            tags = state.detail?.tags.orEmpty(),
+                            onOpenSpace = onOpenSpace?.let { open ->
+                                state.detail?.owner?.mid?.takeIf { it > 0L }?.let { mid ->
+                                    {
+                                        open(
+                                            SpaceRoute(
+                                                mid = mid,
+                                                name = state.detail?.owner?.name,
+                                                fromViewAid = state.ids.aid.takeIf { it > 0L }
+                                            )
+                                        )
+                                    }
+                                }
+                            },
+                            resetKey = state.ids.aid.takeIf { it > 0L } ?: state.ids.bvid
                         )
                         // 会话内**常驻细进度条**（信息层第一阶段）。
                         //
@@ -1312,6 +1336,16 @@ internal fun SwipeSessionActionRail(
     shareBvid: String?,
     shareAid: Long,
     shareTitle: String?,
+    /**
+     * 点赞**长按**（SW-20）：一键三连（BiliPai「点赞（长按三连）」同款）。
+     * `null` = 不给这个入口（宿主没接）。
+     */
+    onLongPressLike: (() -> Unit)? = null,
+    /** UP 头像（SW-20）：`faceUrl` 为空时退化成玻璃圆盘底（不留空洞）。 */
+    ownerFace: String? = null,
+    ownerName: String? = null,
+    /** 点头像进 UP 空间（`null` = 宿主不接，头像退化为不可点）。 */
+    onOpenSpace: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1328,13 +1362,21 @@ internal fun SwipeSessionActionRail(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
     ) {
+        // UP 头像（SW-20，任务书 D-6/D-5：用"头像 → 主页"替代抖音的音乐碟片位置）
+        SwipeRailAvatar(
+            faceUrl = ownerFace,
+            ownerName = ownerName,
+            onClick = onOpenSpace
+        )
         // 现代短视频的互动栏：图标大、计数在图标**下方**、层间距均匀（抖音/B 站竖屏同款）
         SwipeRailAction(
             icon = Icons.Filled.Favorite,
             contentDescription = if (liked) "取消点赞" else "点赞",
             label = stickyLike,
             tint = if (liked) LikeHeartColor else Color.White,
-            onClick = onToggleLike
+            onClick = onToggleLike,
+            onLongClick = onLongPressLike,
+            onLongClickLabel = "一键三连"
         )
         if (onOpenComments != null) {
             SwipeRailAction(
@@ -1389,6 +1431,17 @@ private fun SwipeRailAction(
     label: String?,
     tint: Color,
     onClick: () -> Unit,
+    /**
+     * 长按（SW-20）：点赞长按 = **一键三连**（对齐 BiliPai
+     * `PortraitInteractionBar.kt:76-142` 的"点赞（长按三连）"）。
+     * `null` = 这一项没有长按语义（不给"按了没反应"的长按）。
+     */
+    onLongClick: (() -> Unit)? = null,
+    /**
+     * 长按在无障碍里的动作名（TalkBack 会读"长按可三连"这类提示）。
+     * 只有 [onLongClick] 非空时有意义。
+     */
+    onLongClickLabel: String? = null,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -1396,17 +1449,21 @@ private fun SwipeRailAction(
                 .size(SwipeRailDiscSize)
                 .clip(CircleShape)
                 .background(SwipeRailGlassBrush)
-                .border(1.dp, PlayerPlayButtonBorder, CircleShape),
+                .border(1.dp, PlayerPlayButtonBorder, CircleShape)
+                .combinedClickable(
+                    onClickLabel = contentDescription,
+                    onLongClickLabel = if (onLongClick != null) onLongClickLabel else null,
+                    onLongClick = onLongClick,
+                    onClick = onClick
+                ),
             contentAlignment = Alignment.Center
         ) {
-            IconButton(onClick = onClick) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = contentDescription,
-                    tint = tint,
-                    modifier = Modifier.size(SwipeRailIconSize)
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier.size(SwipeRailIconSize)
+            )
         }
         label?.takeIf(String::isNotBlank)?.let { count ->
             Text(
@@ -1416,6 +1473,44 @@ private fun SwipeRailAction(
                 maxLines = 1
             )
         }
+    }
+}
+
+/**
+ * 互动栏顶部的 **UP 头像**（SW-20）：现代短视频的心智是"头像 → 主页"
+ * （抖音的"音乐碟片"位置，bbspace 无 BGM 元数据，按任务书 D6 用头像替代）。
+ *
+ * 触摸目标走圆盘同一档 token（≥48dp）；点击进 UP 空间（`onOpenSpace`），
+ * 与底部信息层的 @名 同一出口。
+ */
+@Composable
+private fun SwipeRailAvatar(
+    faceUrl: String?,
+    ownerName: String?,
+    onClick: (() -> Unit)?,
+) {
+    Box(
+        modifier = Modifier
+            .size(SwipeRailDiscSize)
+            .clip(CircleShape)
+            .background(SwipeRailGlassBrush)
+            .border(1.dp, PlayerPlayButtonBorder, CircleShape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClickLabel = "打开 UP 主主页", onClick = onClick)
+                } else {
+                    Modifier
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        BiliAsyncImage(
+            url = faceUrl,
+            contentDescription = ownerName?.let { "@$it" },
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+        )
     }
 }
 
@@ -1459,7 +1554,7 @@ private val SwipeBottomScrimBrush = Brush.verticalGradient(
 private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
 
 /**
- * 会话内常驻信息：UP 名 + 标题（左下角，与互动栏同排、压在进度条之上）。
+ * 会话内常驻信息：头像 + UP 名 + 标题 + 话题（左下角，与互动栏同排、压在进度条之上）。
  *
  * v2 改版（用户反馈「大幅优化操作布局和 UI」）：
  * - **UP 名上置、标题在下**（抖音/B 站竖屏页同款的信息层级）——先知道"在看谁"，
@@ -1468,20 +1563,34 @@ private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
  *   为什么不能再卖出…"）永远读不全；
  * - 可读性交给底部的渐变遮罩（[SwipeBottomScrimBrush]），文字本身不加背板；
  *
- * 设计约束：
- * - **只读**（无点击、无 pointerInput）：连播时任何可点区域都会和上下滑抢手指；
- * - 间距/字号全部走 token（`BiliSpacing` + `MaterialTheme.typography`），
- *   不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）。
+ * v3 改版（SW-21，任务书 §SW-21）：
+ * - **作者行**：小头像（token 的 1 倍档 = 24dp）+ `@名`，整体可点 → 进 UP 空间
+ *   （与互动栏头像同一出口；mid 缺失时不接，也就不出现"点了没反应"）；
+ * - **标题可展开**：两行省略 → 点一下展开全文、再点收起（展开态随页复位，见 [resetKey]）；
+ * - **话题 chip**：详情自带 tags 的前 3 个，`#标签` 只读展示（点击需要话题路由，
+ *   仓内没有该出口 —— 宁可不做，也不做点了没反应的假 chip）；
+ * - 触摸热区**只有作者行与标题两处**：其余区域（含 chip 之间、文字行间）不消费触摸，
+ *   上下滑翻页照旧（旧版"整层只读"的不变式按任务书反转，守卫同批更新）。
+ *
+ * 设计约束：间距/字号全部走 token（`BiliSpacing` + `MaterialTheme.typography`），
+ * 不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）。头像尺寸用 token 加法表达。
  */
 @Composable
 private fun SwipeSessionInfoLine(
     title: String?,
     owner: String?,
+    ownerFace: String? = null,
+    tags: List<String> = emptyList(),
+    onOpenSpace: (() -> Unit)? = null,
+    /** 展开态复位键（传当前视频的 aid）：换页自动收起，避免"下一页仍是展开的"。 */
+    resetKey: Any? = null,
     modifier: Modifier = Modifier,
 ) {
     val titleText = title?.takeIf(String::isNotBlank) ?: return
     // 常驻件：跟随会话级防烧屏（静置变暗 + 缓慢像素漂移，见 SwipeChromeBurnIn）。
     val burnIn = LocalSwipeChromeBurnIn.current
+    // 展开态随页复位（SW-21）：resetKey 传当前视频的 aid
+    var expanded by remember(resetKey) { mutableStateOf(false) }
     Column(
         modifier = modifier
             .applyBurnIn(burnIn)
@@ -1492,22 +1601,58 @@ private fun SwipeSessionInfoLine(
             ),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
     ) {
-        owner?.takeIf(String::isNotBlank)?.let { name ->
-            Text(
-                text = "@$name",
-                color = Color.White.copy(alpha = 0.86f),
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        // 作者行（SW-21）：头像 + @名，整体一个热区 → 进 UP 空间
+        val authorRowModifier = if (onOpenSpace != null) {
+            Modifier.clickable(onClickLabel = "打开 UP 主主页", onClick = onOpenSpace)
+        } else {
+            Modifier
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            modifier = authorRowModifier
+        ) {
+            val name = owner?.takeIf(String::isNotBlank)
+            if (ownerFace != null || name != null) {
+                BiliAsyncImage(
+                    url = ownerFace,
+                    contentDescription = name?.let { "@$it" },
+                    modifier = Modifier
+                        .size(BiliSpacing.xxl)
+                        .clip(CircleShape),
+                    variant = BiliImageVariant.Avatar
+                )
+            }
+            name?.let {
+                Text(
+                    text = "@$it",
+                    color = Color.White.copy(alpha = 0.86f),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         Text(
             text = titleText,
             color = Color.White,
             style = MaterialTheme.typography.titleMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+            maxLines = if (expanded) Int.MAX_VALUE else 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.clickable(
+                onClickLabel = if (expanded) "收起标题" else "展开标题"
+            ) { expanded = !expanded }
         )
+        // 话题 chip（SW-21）：前 3 个，只读展示（无话题路由，不做假 chip）
+        tags.take(3).forEach { tag ->
+            Text(
+                text = "#$tag",
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 

@@ -57,6 +57,7 @@ import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
+import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.swipe.SwipeChromeBurnInPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeErrorPolicy
@@ -116,6 +117,8 @@ internal fun PortraitSwipePager(
     onToggleFull: () -> Unit,
     onBackClick: () -> Unit,
     onGoHome: () -> Unit,
+    /** 进 UP 空间（SW-20：互动栏头像 / 底部信息层 @名 的同一出口；`null` 时不接）。 */
+    onOpenSpace: ((SpaceRoute) -> Unit)? = null,
     onSwipeTo: (SwipeEntry) -> Unit,
     onNeedMore: () -> Unit = {},
     /**
@@ -436,6 +439,8 @@ internal fun PortraitSwipePager(
                     // SW-13：失败文案按类型给"人话"（网络/取流/解码）
                     swipeErrorText = swipeErrorKind?.let(SwipeErrorPolicy::messageOf),
                     onRetrySwipe = onRetryPlayback,
+                    // SW-21：底部信息层的头像/@名 → UP 空间（与互动栏头像同一出口）
+                    onOpenSpace = onOpenSpace,
                     // SW-15：进度条拖动状态 → 抑制自动翻页 + 算作一次交互（防烧屏回满亮）
                     onSwipeScrubbingChange = { scrubbing ->
                         scrubbingProgress = scrubbing
@@ -475,8 +480,7 @@ internal fun PortraitSwipePager(
             )
         }
 
-        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感；v6 去掉翻页闪烁）──────
-        // 点赞/评论/分享**只此一份**、钉在页面层之上：
+        // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感；v6 去掉翻页闪烁）──────        // 点赞/评论/分享**只此一份**、钉在页面层之上：
         // - 上下滑时它不再跟着整页"滑走再滑回来"（用户反馈的"整体向上调动"），
         //   原地换数据（BiliPai 手法：覆盖层是**纯参数组件**，数据用本层**已收集**
         //   的 playbackState 传入，不在调用点重复 collect——一次订阅、多处读值）；
@@ -487,6 +491,8 @@ internal fun PortraitSwipePager(
         //   v6 去掉了 `!waitingFirstFrame`——翻页 veil 每次会亮 ~0.5s，带上它等于
         //   "每次下滑互动栏先消失再出现"（用户反馈的体验问题）。常驻件的常驻性
         //   优先于"加载层期间让位"；计数的短暂缺失由 rail 内部的粘滞值兜住。
+        // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接
+        val ownerMid = playbackState.detail?.owner?.mid
         AnimatedVisibility(
             visible = !playbackSheetVisible && !showComments && !showFavSheet,
             enter = fadeIn(),
@@ -502,6 +508,24 @@ internal fun PortraitSwipePager(
                     showComments = true
                     // 防烧屏：打开面板也算交互 → 常驻件回满亮（下同）
                     lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                },
+                // SW-20：点赞长按 = 一键三连（结果经 VM.msg → VideoScreen 的 Toast 提示）
+                onLongPressLike = viewModel::triple,
+                // SW-20：UP 头像 → 主页（`onOpenSpace` 由 VideoScreen 传入；mid 为 0 时不接）
+                ownerFace = playbackState.detail?.owner?.face,
+                ownerName = playbackState.detail?.owner?.name,
+                onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
+                    onOpenSpace?.let { open ->
+                        {
+                            open(
+                                SpaceRoute(
+                                    mid = mid,
+                                    name = playbackState.detail?.owner?.name,
+                                    fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
+                                )
+                            )
+                        }
+                    }
                 },
                 faved = playbackState.detail?.userState?.faved == true,
                 favText = playbackState.detail?.stat?.fav,

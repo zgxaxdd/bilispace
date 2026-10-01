@@ -529,6 +529,8 @@ fun VideoScreen(
                             },
                             onBackClick = handleBack,
                             onGoHome = onGoHome,
+                            // SW-20：会话内头像/@名 → UP 空间（与详情页同一出口）
+                            onOpenSpace = onOpenSpace,
                             onSwipeTo = viewModel::openSwipeTarget,
                             onNeedMore = viewModel::loadMoreSwipeQueue,
                             // 相邻页预取：拖动 25% 偏移 / 停稳各触发一次（按网络与开关定量）
