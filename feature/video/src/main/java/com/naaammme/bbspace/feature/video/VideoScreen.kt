@@ -8,6 +8,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -172,7 +174,15 @@ fun VideoScreen(
     coverBackdropLarge: Boolean = false,
     // 刷视频模式（首页顶栏入口）：常驻全屏上下滑，没有紧凑态——返回键/「全屏」钮
     // 都是关闭页面；会话锚点/队列由 story 流（bootstrapStorySession）负责。
-    storyMode: Boolean = false
+    storyMode: Boolean = false,
+    /**
+     * 退出 story 模式（需求 3：刷视频会话里点「还原」应当进到**当前这支**的详情页）。
+     *
+     * 为什么不能只调 `onBack()`：story 模式下这一页是"顶栏入口直开"的，`onBack()` 会把
+     * **整个详情页**关掉（用户拿不到详情/评论）；正确语义是"退出会话、露出详情页"。
+     * 传 `null` 时退化成老行为（`onBack()`），保证覆盖层路径不受影响。
+     */
+    onExitStoryMode: (() -> Unit)? = null
 ) {
     val videoState by viewModel.videoState.collectAsStateWithLifecycle()
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle(initialValue = PlayerSettingsState())
@@ -247,9 +257,16 @@ fun VideoScreen(
         durationMillis = if (anim.reduceMotion) 1 else anim.morph,
         easing = anim.morphEasing
     )
-    val aspectSpec = tween<Float>(
-        durationMillis = if (anim.reduceMotion) 1 else anim.medium,
-        easing = anim.standard
+    // 播放框展开（16:9 基准 → 贴合竖屏比例）用**临界阻尼弹簧**，不再用 tween：
+    // 这段形变的距离极大（竖屏手机上从约 1/4 屏高长到近满屏宽的高度），
+    // 200ms tween + 缓入缓动起步有迟滞、结束急停，真机读感是"猛地一跳"；
+    // 弹簧起步即有速度、落地渐进收敛（无过冲），视觉时长 ~350-400ms，连贯得多。
+    // stiffness 用 Low 档而不是 MediumLow：距离越长越要把时间摊开。
+    // reduceMotion 不走弹簧（弹簧时长不可控），在下面的 effect 里直接 snapTo。
+    val aspectSpec = spring<Float>(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessLow,
+        visibilityThreshold = 0.001f
     )
     // 详情列表状态提升到本层：下滑手势要用它判断「列表还能不能向下滚」——
     // 能滚 = 手势让位给列表（详情区正常滚动）；不能滚 = 已在简介区顶边，
@@ -304,18 +321,24 @@ fun VideoScreen(
     // 键里带 videoState.detail：detail 晚到（快速滑进全屏时详情尚未返回）也能补开
     // 会话；以 swipeAnchor == null 为判据，刷视频过程中 detail 不断变化也不会重置锚点
     // ——锚点必须稳定在「进入全屏那一刻的视频」，翻回页 0 才能回到起点。
-    // 启用判据取**进入时**的 isPortraitVideo，并在整个会话内保持——中途刷到横屏视频
-    // 不能让 pager 消失（会打断进行中的滑动），页面内容自行 FIT 适配。
+    // 启用判据与画幅无关（横屏视频也能进，会话内锁竖屏 → letterbox 呈现），但**必须
+    // 携带简介区的显式下滑请求**（swipeModeRequested）：「全屏」按钮只进全屏、不开会话；
+    // 简介区顶边下滑提交（pullDownToFullscreen 的 commit 分支）才是唯一入口。
     // 队列为空（相关推荐没有可刷的）时不启用，保持单视频全屏的现状。
     //
     // 刷视频模式（effectiveStoryMode）下本 effect 全程不接管会话：锚点/队列由
     // VideoDetailActivity 的 bootstrapStorySession（story 流）负责，swipeSessionActive
     // 常驻 true。
     var swipeSessionActive by rememberSaveable { mutableStateOf(storyMode) }
+    // 「用户明确要刷视频」的一次性请求：仅由简介区边缘下滑提交置位，离开全屏即复位。
+    // 放在本层而不是 VM：它描述的是"这次进全屏的来路"，与 VM 里跨全屏往返的锚点/队列
+    // 生命周期本来就不同——按钮进全屏不得复用上一次手势的请求。
+    var swipeModeRequested by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(fullOn, videoState.detail) {
         if (!fullOn) {
             swipeSessionActive = false
             viewModel.clearSwipeSession()
+            swipeModeRequested = false
             return@LaunchedEffect
         }
         if (effectiveStoryMode) {
@@ -324,15 +347,14 @@ fun VideoScreen(
         }
         if (viewModel.swipeAnchor.value == null) {
             viewModel.beginSwipeSession()
-            // 启用判据：**不再限制竖屏**（用户需求 4：横屏视频也要能进刷视频模式）。
-            // 会话内仍然锁竖屏，于是横屏视频在竖屏全屏里以 letterbox 呈现 —— 与"以竖屏
-            // 全屏方式显示播放内容"的要求一致；需要满屏时顶栏还有手动「横屏」胶囊。
-            // 队列为空（相关推荐没有可刷的）时仍不启用，保持单视频全屏的现状。
-            swipeSessionActive = viewModel.swipeQueue.value.isNotEmpty()
+            // 启用判据：**显式请求 && 队列非空**。画幅不参与——横屏视频同样可进，
+            // 会话内仍锁竖屏 → letterbox 呈现，需要满屏时顶栏还有手动「横屏」胶囊；
+            // 「全屏」按钮不携带请求 → 只进全屏（R3）。队列为空仍不启用，保持单视频全屏。
+            swipeSessionActive = swipeModeRequested && viewModel.swipeQueue.value.isNotEmpty()
             android.util.Log.i(
                 "PortraitSwipe",
-                "activate: portrait=$isPortraitVideo queue=${viewModel.swipeQueue.value.size} " +
-                    "active=$swipeSessionActive"
+                "activate: requested=$swipeModeRequested portrait=$isPortraitVideo " +
+                    "queue=${viewModel.swipeQueue.value.size} active=$swipeSessionActive"
             )
         }
     }
@@ -408,15 +430,22 @@ fun VideoScreen(
         settingsState.playback.autoRotateFullscreen,
         isPortraitVideo,
         portraitSwipeActive,
-        swipeLandscape
+        swipeLandscape,
+        swipeModeRequested
     ) {
         act?.requestedOrientation = when {
             // 手动横屏优先于竖屏锁：用户点名要看满屏，就给满屏
             swipeLandscape && portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            // 下滑请求在场时**不走**「单视频全屏自动横屏」：会话激活比 fullOn 晚一拍
+            // （fullOn 先翻真，swipeSessionActive 要等下一次重组才翻真），这个空窗里
+            // 若转到横屏、会话激活后又锁回竖屏，就是真机看到的「先横屏、再切回刷视频」
+            // 闪跳。请求在场保持 UNSPECIFIED（紧凑态本来就是竖持，方向无变化），
+            // 随后 portraitSwipeActive 接管锁竖屏。
             fullOn &&
                 settingsState.playback.autoRotateFullscreen &&
-                !isPortraitVideo -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                !isPortraitVideo &&
+                !swipeModeRequested -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         // **必须在离开组合时复位**。这个 effect 的 key 里有 fullOn，但 VideoScreen
@@ -487,10 +516,13 @@ fun VideoScreen(
                             viewModel = viewModel,
                             isFull = fullOn,
                             onToggleFull = {
-                                // 刷视频模式没有「退出全屏」态，该钮 = 关闭页面；
-                                // 详情全屏路径才是形变回缩
+                                // 刷视频模式没有「退出全屏」态：
+                                // - story 入口（顶栏直开）→ 退出 story 模式、露出**当前这支**的详情页
+                                //   （需求 3；`onExitStoryMode` 为 null 时退化回关闭整页）
+                                // - 详情全屏路径 → 形变回缩到详情页（本来就是对的）
                                 if (effectiveStoryMode) {
-                                    onBack()
+                                    val exit = onExitStoryMode
+                                    if (exit != null) exit() else onBack()
                                 } else if (fullOn) {
                                     exitFullscreen()
                                 }
@@ -698,11 +730,17 @@ fun VideoScreen(
 
                 // 目标比例偏离 16:9 基准时播放一次比例过渡（同屏切分P/切清晰度
                 // 导致目标变化时重播）；横向视频比例更宽时同理收窄。
+                // reduceMotion（动效速度=关）：弹簧时长不可控，直接 snap 到终点。
                 LaunchedEffect(baseVideoPx, targetVideoPx) {
-                    aspectMorph.animateTo(
-                        targetValue = if (abs(targetVideoPx - baseVideoPx) > 1f) 1f else 0f,
-                        animationSpec = aspectSpec
-                    )
+                    val target = if (abs(targetVideoPx - baseVideoPx) > 1f) 1f else 0f
+                    if (anim.reduceMotion) {
+                        aspectMorph.snapTo(target)
+                    } else {
+                        aspectMorph.animateTo(
+                            targetValue = target,
+                            animationSpec = aspectSpec
+                        )
+                    }
                 }
 
                 // 形变高度：布局期求值（见 playerMorphHeight 的 KDoc），每帧只重新
@@ -733,6 +771,11 @@ fun VideoScreen(
                             onSettle = { commit ->
                                 scope.launch {
                                     if (commit) {
+                                        // 简介区顶边下滑提交 = 刷视频模式的唯一显式入口：
+                                        // 置位请求再进全屏，会话启用交给上面的 effect；
+                                        // 「全屏」按钮不经过这里，因此只进全屏（R3）。
+                                        swipeModeRequested = true
+                                        android.util.Log.i("PortraitSwipe", "enter: via=introPull")
                                         fullscreenMorph.animateTo(1f, morphSpec)
                                         isFull = true
                                     } else {

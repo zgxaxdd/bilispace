@@ -177,7 +177,10 @@ class VideoDetailActivity : ComponentActivity() {
                         hostExpanded = true,
                         coverBackdropUrl = pendingCoverUrl,
                         coverBackdropLarge = pendingCoverLarge,
-                        storyMode = pendingStoryMode
+                        storyMode = pendingStoryMode,
+                        // 需求 3：刷视频会话里点「还原」→ 退出 story 模式、露出**当前这支**的详情页
+                        // （原来的行为是 onBack() 直接关掉整页，用户拿不到详情/评论）。
+                        onExitStoryMode = { pendingStoryMode = false }
                     )
                 }
             }

@@ -508,6 +508,82 @@ class VideoLogicGuardTest {
         )
     }
 
+    // ── 刷视频入口：简介区边缘下滑（不新增控件；全屏按钮不连播）────────────────
+
+    /**
+     * 横屏视频补齐刷视频入口（2026-09-29 交接书）的写法不变式：
+     *
+     * 1. **R1 不新增控件**：上一轮曾在播放器顶栏加过「刷视频」胶囊（PlayerPillChip），
+     *    已按新方案删除——入口一律不得再以控件形态回到播放器 UI；
+     * 2. **R2 唯一触发**：会话启用必须携带 `swipeModeRequested`——简介区顶边下滑提交时
+     *    置位（`pullDownToFullscreen` 的 commit 分支是唯一置位点），离开全屏即复位；
+     * 3. **R3 全屏按钮不连播**：启用判据 = 显式请求 && 队列非空，且与画幅无关
+     *    （isPortraitVideo 不得回到判据里——它另有顶栏「横屏」胶囊与方向 effect 的用途）；
+     * 4. **A7/A8 手势边界**：下滑手势只挂在详情布局上且保留 `canListScrollDown` 让位
+     *    判据（简介能滚就不接管，普通滚动不得误进连播）；播放器面板不得挂该手势；
+     *    会话内 pager 仍以 swipePagingActive = true 组合播放器（播放器手势语义不变）。
+     */
+    @Test
+    fun swipeModeEntryIsIntroEdgePullOnly() {
+        val screen = codeOf("VideoScreen.kt")
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "播放器顶栏不得有「刷视频」控件（R1：UI 与改动前一致）。" +
+                "上一轮的 PlayerPillChip 入口已删，回来即违规。",
+            countMatching(pane, """text\s*=\s*"刷视频"""") == 0 &&
+                countMatching(pane, """onEnterSwipeMode""") == 0
+        )
+        assertTrue(
+            "刷视频请求必须是一次性状态（rememberSaveable），仅描述「这次进全屏的来路」。",
+            countMatching(screen, """var\s+swipeModeRequested\s+by\s+rememberSaveable""") == 1
+        )
+        assertTrue(
+            "会话启用判据必须是「显式下滑请求 && 队列非空」（R3：全屏按钮只进全屏），" +
+                "且激活日志要带上 requested 便于真机核对入口来路。",
+            countMatching(
+                screen,
+                """swipeSessionActive\s*=\s*swipeModeRequested\s*&&\s*viewModel\.swipeQueue\.value\.isNotEmpty\(\)"""
+            ) == 1 &&
+                countMatching(screen, """activate: requested=""") == 1
+        )
+        assertTrue(
+            "启用判据那一行不得引用 isPortraitVideo（画幅不参与会话启用，横屏同样可进）。",
+            !screen.first { it.contains("swipeSessionActive = swipeModeRequested") }
+                .contains("isPortraitVideo")
+        )
+        assertTrue(
+            "下滑请求必须一次性：离开全屏（!fullOn 分支）复位，按钮进全屏不得复用上一次手势的请求。",
+            countMatching(screen, """swipeModeRequested = false""") == 1
+        )
+        assertTrue(
+            "唯一置位点必须在简介区下滑手势的提交分支里（R2）：手势只许定义 + 竖排详情布局" +
+                "一处挂载（多挂一个分支就多一个触发点），置位语句与 via=introPull 日志都随 commit 走。",
+            countMatching(screen, """pullDownToFullscreen\(""") == 2 &&
+                countMatching(screen, """swipeModeRequested = true""") == 1 &&
+                countMatching(screen, """enter: via=introPull""") == 1
+        )
+        run {
+            val gestureAt = screen.indexOfFirst { it.contains(".pullDownToFullscreen(") }
+            val requestAt = screen.indexOfFirst { it.contains("swipeModeRequested = true") }
+            assertTrue(
+                "置位语句必须写在 pullDownToFullscreen 的接线之内（onSettle 的 commit 分支），" +
+                    "不能挪到别的入口上。",
+                gestureAt in 0 until requestAt
+            )
+        }
+        assertTrue(
+            "手势边界（A7/A8）：让位判据 canListScrollDown 必须还在（简介能滚就不接管）；" +
+                "播放器面板不得挂这个手势；会话内 pager 仍以 swipePagingActive = true " +
+                "组合播放器（播放器手势语义不变）。",
+            countMatching(
+                screen,
+                """canListScrollDown\s*=\s*\{ detailListState\.canScrollBackward \}"""
+            ) == 1 &&
+                countMatching(pane, """pullDownToFullscreen""") == 0 &&
+                countMatching(codeOf("player/PortraitSwipePager.kt"), """swipePagingActive = true""") == 1
+        )
+    }
+
     // ── 方向：竖屏刷视频会话期间锁竖屏（真机反馈"每次下滑都有旋转动画"）────────────
 
     /**
@@ -794,10 +870,19 @@ class VideoLogicGuardTest {
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
             "会话内常驻细进度条必须存在、且判据是 `swipePagingActive && !swipeWaitingFirstFrame`" +
-                "（等首帧时整屏是加载层，进度条浮在上面会显得脏）。",
-            countMatching(pane, """if \(swipePagingActive && !swipeWaitingFirstFrame\) \{""") == 1 &&
+                "（用户定稿「常显」：控制条出现也不隐藏；等首帧时整屏是加载层）。" +
+                "控制条出现时信息层必须整体上移让位（graphicsLayer 位移，零重组）——" +
+                "否则控制条的进度滑条顶进标题/玻璃圆盘。",
+            countMatching(
+                pane,
+                """if \(swipePagingActive && !swipeWaitingFirstFrame\) \{"""
+            ) == 1 &&
                 countMatching(pane, """private fun SwipeProgressLine\(""") == 1 &&
-                countMatching(pane, """SWIPE_PROGRESS_TRACK_FRACTION""") >= 2
+                countMatching(pane, """SWIPE_PROGRESS_TRACK_FRACTION""") >= 2 &&
+                countMatching(
+                    pane,
+                    """translationY = if \(showCtrl\) -ctrlBarHeightPx\.toFloat\(\) else 0f"""
+                ) == 1
         )
         assertTrue(
             "进度条尺寸必须走比例而不是 dp 字面量（DesignTokenLintTest 的棘轮会判红），" +
@@ -851,32 +936,45 @@ class VideoLogicGuardTest {
     }
 
     /**
-     * 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
+     * 会话内常驻信息（信息层第二阶段；v2 底部信息层改版）：标题 + UP。
      *
-     * 连播时控件 2 秒自动隐藏，用户连"在看谁的作品"都不知道；BiliPai 的竖屏页默认常驻
-     * 信息区（`PortraitFullscreenOverlay.kt:194-394`）。这里钉：门控与进度条一致、
-     * 单行省略、只读（不许有 pointerInput/clickable）、间距走 token。
+     * v2 定稿（用户反馈「大幅优化操作布局和 UI」）：UP 名上置、标题放宽两行、
+     * 与互动栏同排收进底部信息层（渐变遮罩 + Row(信息·互动栏) + 进度条）。
      */
     @Test
     fun swipeSessionShowsPersistentInfoLine() {
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
-            "常驻信息必须与进度条同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。",
+            "常驻信息必须与进度条同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。" +
+                "BiliPai 手法：读本作用域已收集的 state，调用点不得重复 collectAsStateWithLifecycle。",
             countMatching(pane, """private fun SwipeSessionInfoLine\(""") == 1 &&
                 countMatching(pane, """SwipeSessionInfoLine\(""") == 2 &&
-                countMatching(pane, """title = viewModel\.videoState\.collectAsStateWithLifecycle\(\)\.value\.detail\?\.title""") == 1 &&
-                countMatching(pane, """owner = viewModel\.videoState\.collectAsStateWithLifecycle\(\)\.value\.detail\?\.owner\?\.name""") == 1 &&
+                countMatching(pane, """title = state\.detail\?\.title""") == 1 &&
+                countMatching(pane, """owner = state\.detail\?\.owner\?\.name""") == 1 &&
+                countMatching(
+                    pane,
+                    """title = viewModel\.videoState\.collectAsStateWithLifecycle"""
+                ) == 0 &&
                 countMatching(pane, """val titleText = title\?\.takeIf\(String::isNotBlank\) \?: return""") == 1
         )
         assertTrue(
-            "常驻信息必须只读（连播时任何可点区域都会和上下滑抢手指），" +
-                "且标题/UP 都是单行省略（长标题不许把画面推高）、间距走 BiliSpacing。",
+            "常驻信息必须只读（连播时任何可点区域都会和上下滑抢手指）；" +
+                "v2 层级：UP 一行在上、标题最多两行（旧版一行省略读不全长标题）；间距走 BiliSpacing。",
             blockBody(pane, "private fun SwipeSessionInfoLine(").let { body ->
                 body.none { it.contains("pointerInput") || it.contains("clickable") } &&
                     body.none { it.contains(".dp") } &&
-                    body.count { it.contains("maxLines = 1") } == 2 &&
+                    body.count { it.contains("maxLines = 2") } == 1 &&
+                    body.count { it.contains("maxLines = 1") } == 1 &&
                     body.any { it.contains("BiliSpacing.lg") }
             }
+        )
+        assertTrue(
+            "底部信息层 v2 必须成体系：渐变遮罩（SWIPE_BOTTOM_ZONE_FRACTION 分区 + SwipeBottomScrimBrush）" +
+                "托底；互动栏已提升为会话级单实例（pager 层，见 swipeSessionShowsActionRail），" +
+                "pane 里只许有互动栏的组件定义、不得再组合它。",
+            countMatching(pane, """SWIPE_BOTTOM_ZONE_FRACTION""") >= 2 &&
+                countMatching(pane, """SwipeBottomScrimBrush""") >= 2 &&
+                countMatching(pane, """SwipeSessionActionRail\(""") == 1
         )
     }
 
@@ -919,30 +1017,100 @@ class VideoLogicGuardTest {
     @Test
     fun swipeSessionShowsActionRail() {
         val pane = codeOf("player/VideoPlayerPane.kt")
+        val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
             "互动栏必须接上真实状态与计数（userState.liked / stat.like）、" +
                 "点赞走 viewModel.toggleLike，分享走 ShareUtils.videoUrl + shareText" +
-                "（与详情页同一套链接构造）—— 不许自己造本地状态或另写一套分享。",
-            countMatching(pane, """private fun SwipeSessionActionRail\(""") == 1 &&
-                countMatching(pane, """value\.detail\?\.userState\?\.liked == true""") == 1 &&
-                countMatching(pane, """value\.detail\?\.stat\?\.like""") == 1 &&
-                countMatching(pane, """onToggleLike = viewModel::toggleLike""") == 1 &&
+                "（与详情页同一套链接构造）—— 不许自己造本地状态或另写一套分享。" +
+                "组件定义在 pane 文件（与控制件玻璃同语言），调用点在 pager；" +
+                "BiliPai 手法：数据用本层已收集的 playbackState 传入，调用点不得重复 collect。",
+            countMatching(pane, """internal fun SwipeSessionActionRail\(""") == 1 &&
                 countMatching(pane, """ShareUtils\.videoUrl\(shareBvid, shareAid, page = 0\)""") == 1 &&
                 countMatching(pane, """ShareUtils\.shareText\(context, shareTitle, url\)""") == 1 &&
-                countMatching(pane, """contentDescription = "分享"""") == 1
+                countMatching(pane, """contentDescription = "分享"""") == 1 &&
+                countMatching(pager, """SwipeSessionActionRail\(""") == 1 &&
+                countMatching(pager, """liked = playbackState\.detail\?\.userState\?\.liked == true""") == 1 &&
+                countMatching(pager, """likeText = playbackState\.detail\?\.stat\?\.like""") == 1 &&
+                countMatching(pager, """onToggleLike = viewModel::toggleLike""") == 1 &&
+                countMatching(
+                    pager,
+                    """playbackState\.detail\?\.title,\s*$"""
+                ) >= 1
         )
         assertTrue(
-            "互动栏必须排在加载层之前（加载层是 Box 最后一个子节点），" +
-                "且尺寸/间距走 token（不新增 dp 字面量）。",
-            blockBody(pane, "private fun SwipeSessionActionRail(").let { body ->
-                body.none { it.contains(".dp") }
-            } &&
-                run {
-                    val railAt = pane.indexOfFirst { it.contains("SwipeSessionActionRail(") && !it.contains("private fun") }
-                    val veilAt = pane.indexOfFirst { it.trimStart().startsWith("SwipeWaitVeil(") }
-                    railAt >= 0 && veilAt >= 0 && railAt < veilAt
-                }
+            "互动栏必须是**会话级单实例、常驻页面层之上**（用户定稿）：pane 里不得再调用" +
+                "（pane 每页一个，互动栏会跟着整页滑走再滑回来——用户反馈的「整体向上调动」）；" +
+                "显隐走 AnimatedVisibility 淡入淡出（不许\"啪一下\"弹出）；" +
+                "门控 = 等首帧隐藏 + 播放设置侧栏让位 + 评论卡片让位。",
+            countMatching(pane, """SwipeSessionActionRail\(""") == 1 &&
+                countMatching(
+                    pager,
+                    """visible = !waitingFirstFrame && !playbackSheetVisible && !showComments"""
+                ) == 1 &&
+                countMatching(
+                    pager,
+                    """onPlaybackSheetVisibilityChange = \{ playbackSheetVisible = it \}"""
+                ) == 1
         )
+        assertTrue(
+            "性能定稿（用户反馈「使用体验很卡」）：互动栏是**常驻**控件，不许用逐帧采样的真背景" +
+                "模糊——圆盘必须是静态玻璃画（SwipeRailGlassBrush 渐变 + 描边，零逐帧成本）；" +
+                "pager 层不得出现任何 playerControlGlass（玻璃管线收敛回 pane 的控制条 chrome）；" +
+                "pane 回传玻璃上下文的 onVideoGlassContext 管线必须已移除。",
+            countMatching(pager, """playerControlGlass\(""") == 0 &&
+                countMatching(pager, """onVideoGlassContext""") == 0 &&
+                countMatching(pane, """SwipeRailGlassBrush""") >= 2 &&
+                blockBody(pane, "private fun SwipeRailAction(")
+                    .none { it.contains("playerControlGlass") }
+        )
+        run {
+            val pagerAt = pager.indexOfFirst { it.contains("VerticalPager(") }
+            val railAt = pager.indexOfFirst { it.contains("SwipeSessionActionRail(") }
+            assertTrue(
+                "互动栏必须排在 VerticalPager 之后（z 在页面层之上，钉住不随页面位移）。",
+                pagerAt in 0 until railAt
+            )
+        }
+        assertTrue(
+            "互动栏动作是**液态玻璃观感的静态画**（用户定稿「液态玻璃」+「降性能消耗」的交集）：\n" +
+                "白色三段渐变（SwipeRailGlassBrush）+ 白描边，观感与磨砂玻璃一致但零逐帧成本；\n" +
+                "圆盘尺寸走 token 1.75 倍档；真背景模糊只允许长在 showCtrl 门控的控制条 chrome 里。",
+            countMatching(pane, """SwipeRailGlassBrush""") >= 2 &&
+                countMatching(pane, """SwipeRailDiscSize""") >= 2 &&
+                countMatching(pane, """PlayerPlayButtonBorder, CircleShape""") >= 2
+        )
+    }
+
+    /**
+     * 会话内评论悬浮卡片（v5 定稿）：**主题实底面板 + 贴底顶部圆角**。
+     *
+     * 收敛史：v1 主题亮色 surface 铺在视频上读作"白补丁"→ v2 强制深色（被质疑
+     * 「为什么默认深色」）→ v3 真液态玻璃（大面逐帧 RenderEffect，评论滚动期间
+     * 持续吃 GPU，且"磨砂板上浮白卡"双层观感奇怪）→ v5 终版：主题 surface 实底
+     * 面板（浅/深主题自适应）、条目自然融合、零模糊成本。形状 remember 一次。
+     */
+    @Test
+    fun swipeCommentCardUsesThemedSurfaceSheet() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "评论卡片必须是**主题实底面板**：color = colorScheme.surface、contentColor = onSurface" +
+                "（不强制深色：darkColorScheme 计数为 0；不做背景模糊：pager 内 playerControlGlass " +
+                "计数为 0）；只用 sheetTop 顶部圆角，且形状必须 remember（不许每次重组重建）。",
+            countMatching(pager, """color = MaterialTheme\.colorScheme\.surface,""") == 1 &&
+                countMatching(pager, """contentColor = MaterialTheme\.colorScheme\.onSurface""") == 1 &&
+                countMatching(pager, """darkColorScheme\(""") == 0 &&
+                countMatching(pager, """playerControlGlass\(""") == 0 &&
+                countMatching(pager, """BiliRadius\.sheetTop""") >= 2 &&
+                countMatching(pager, """val commentCardShape = remember""") == 1
+        )
+        run {
+            val surfaceAt = pager.indexOfFirst { it.contains("Surface(") }
+            val panelAt = pager.indexOfFirst { it.contains("CommentPanel(") }
+            assertTrue(
+                "CommentPanel 必须在面板 Surface 之内组合。",
+                surfaceAt in 0 until panelAt
+            )
+        }
     }
 
     /**
