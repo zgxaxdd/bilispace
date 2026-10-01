@@ -33,7 +33,9 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -143,7 +145,9 @@ import com.naaammme.bbspace.feature.video.formatPlaybackTime
 import com.naaammme.bbspace.feature.video.formatSpeed
 import com.naaammme.bbspace.feature.video.getAudioName
 import com.naaammme.bbspace.feature.video.getQualityName
+import com.naaammme.bbspace.feature.video.swipe.SwipeHandoffTiming
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -962,6 +966,12 @@ internal fun VideoPlayerPane(
  *
  * 淡出用 [Animatable] + `graphicsLayer` 读值：动画期间零重组（同 `CoverSettleBackdrop`）。
  * `mounted` 单独记：淡出结束后整层从组合里摘掉，不在后台留一个常驻粒子循环。
+ *
+ * ## 交接**分两段**退场（2026-10-01 改，对齐 BiliPai v0.2.3 的时序形状）
+ * 原先整层（封面 + 暗遮罩 + 粒子）共用一个 alpha 一起淡出，淡到一半就是
+ * 「半张暗遮罩压在半条画面上」—— 比交接两端都暗，真机读作"翻页闪一下黑"。
+ * 现在：暗层先退 → 干净封面保持不透明一拍 → 封面与画面交叉淡化，同时 1.02→1.0 落定收缩。
+ * 时长一律从动效令牌推导（见 [SwipeHandoffTiming]），用户的「动效速度」设置照样作用其上。
  */
 @Composable
 private fun SwipeWaitVeil(
@@ -986,87 +996,129 @@ private fun SwipeWaitVeil(
 ) {
     // 初值就按 visible 落位：进入全屏/打开 story 时本来就在等首帧，加载层必须**首帧就在**，
     // 否则会先露一帧黑（或上一支视频的最后一帧）再盖上——那正是要修掉的闪。
-    val alpha = remember { Animatable(if (visible) 1f else 0f) }
+    val anim = LocalAnimations.current
+    val timing = remember(anim) {
+        SwipeHandoffTiming.resolve(
+            shortMs = anim.short,
+            mediumMs = anim.medium,
+            reduceMotion = anim.reduceMotion
+        )
+    }
+    // **内容（封面）与非内容（暗遮罩 + 粒子）走两条 alpha**。原先它们是同一层、共用一个
+    // alpha 一起淡出，于是淡到一半时是"半张暗遮罩压在半条画面上"—— 比交接两端都暗，
+    // 真机读作"翻页闪一下黑"。暗遮罩在"还在等"的时候必要（白粒子要在浅色封面上读得清），
+    // 但它不该跟着内容一起退。时序见 [SwipeHandoffTiming]。
+    val coverAlpha = remember { Animatable(if (visible) 1f else 0f) }
+    val chromeAlpha = remember { Animatable(if (visible) 1f else 0f) }
+    // 落定收缩的进度 0→1（只被乘进 scale，不是独立的动画目标）。
+    val settle = remember { Animatable(0f) }
     var mounted by remember { mutableStateOf(visible) }
-    val fadeSpec = tween<Float>(durationMillis = LocalAnimations.current.medium)
+    // 暗层退完就把粒子从组合里摘掉：它带常驻无限动画，让它空转正好占掉交接那几帧的预算。
+    var chromeGone by remember { mutableStateOf(false) }
 
     LaunchedEffect(visible) {
         if (visible) {
             mounted = true
-            alpha.snapTo(1f)
+            chromeGone = false
+            coverAlpha.snapTo(1f)
+            chromeAlpha.snapTo(1f)
+            settle.snapTo(0f)
         } else if (mounted) {
-            alpha.animateTo(0f, fadeSpec)
+            // 1) 暗遮罩 + 粒子先退 → 2) 干净封面再停留一拍（刚出帧的画面常常偏暗，
+            // 立刻 dissolve 会读成"闪"）→ 3) 封面与画面交叉淡化，同时做落定收缩。
+            chromeAlpha.animateTo(0f, tween(timing.chromeFadeMs))
+            chromeGone = true
+            if (timing.coverHoldMs > 0) delay(timing.coverHoldMs.toLong())
+            launch { settle.animateTo(1f, tween(timing.coverFadeMs)) }
+            coverAlpha.animateTo(0f, tween(timing.coverFadeMs))
             mounted = false
         }
     }
     if (!mounted) return
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .graphicsLayer { this.alpha = alpha.value },
+        modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         if (!failed && !coverUrl.isNullOrBlank()) {
             // 封面铺底：与封面页同款（不裁切 + Fit 居中），整段过渡里"看到的是同一张图"
-            BiliAsyncImage(
-                url = coverUrl,
-                contentDescription = null,
-                variant = BiliImageVariant.PlayerPreview,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = coverAlpha.value
+                        val scale = 1f + (timing.settleScale - 1f) * (1f - settle.value)
+                        scaleX = scale
+                        scaleY = scale
+                    }
+            ) {
+                BiliAsyncImage(
+                    url = coverUrl,
+                    contentDescription = null,
+                    variant = BiliImageVariant.PlayerPreview,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    // 轻遮罩：比原来的不透明渐变浅得多 —— 有封面时它只负责"压暗 + 提示在加载"；
-                    // 没有封面时（封面缺失/失败）自动退化成深色底（下面的兜底色）。
-                    if (failed || coverUrl.isNullOrBlank()) {
-                        Brush.verticalGradient(listOf(WaitVeilTopColor, WaitVeilBottomColor))
-                    } else {
-                        Brush.verticalGradient(
-                            listOf(
-                                WaitVeilScrimTopColor,
-                                WaitVeilScrimBottomColor
-                            )
-                        )
-                    }
-                )
-        )
-        if (failed) {
-            // 失败态：图标 + 文案 + 重试。整层只有按钮可点，其余区域不消费触摸
-            // （刷视频的上下滑与返回手势照常可用）。
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(VeilErrorSpacing)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Warning,
-                    contentDescription = null,
-                    tint = WaitVeilErrorTint,
-                    modifier = Modifier.size(VeilErrorIconSize)
-                )
-                Text(
-                    text = "这一支加载失败了",
-                    color = WaitVeilErrorTint,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                if (onRetry != null) {
-                    TextButton(onClick = onRetry) { Text("重试") }
-                }
-            }
-        } else {
-            BiliParticleLoader(
+                .graphicsLayer { alpha = chromeAlpha.value },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
                 modifier = Modifier
-                    // 有封面时用**小一档**的粒子（封面是主角，粒子只是"在加载"的提示）；
-                    // 没有封面时保持原来的大尺寸（它是唯一内容）。
-                    .fillMaxWidth(
-                        if (coverUrl.isNullOrBlank()) LOADER_WIDTH_FRACTION else VEIL_COVER_LOADER_WIDTH_FRACTION
+                    .fillMaxSize()
+                    .background(
+                        // 轻遮罩：比原来的不透明渐变浅得多 —— 有封面时它只负责"压暗 + 提示在加载"；
+                        // 没有封面时（封面缺失/失败）自动退化成深色底（下面的兜底色）。
+                        if (failed || coverUrl.isNullOrBlank()) {
+                            Brush.verticalGradient(listOf(WaitVeilTopColor, WaitVeilBottomColor))
+                        } else {
+                            Brush.verticalGradient(
+                                listOf(
+                                    WaitVeilScrimTopColor,
+                                    WaitVeilScrimBottomColor
+                                )
+                            )
+                        }
                     )
-                    .aspectRatio(1f)
             )
+            if (failed) {
+                // 失败态：图标 + 文案 + 重试。整层只有按钮可点，其余区域不消费触摸
+                // （刷视频的上下滑与返回手势照常可用）。
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(VeilErrorSpacing)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = WaitVeilErrorTint,
+                        modifier = Modifier.size(VeilErrorIconSize)
+                    )
+                    Text(
+                        text = "这一支加载失败了",
+                        color = WaitVeilErrorTint,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (onRetry != null) {
+                        TextButton(onClick = onRetry) { Text("重试") }
+                    }
+                }
+            } else if (!chromeGone) {
+                // 暗层一退完就摘掉粒子：它的常驻无限动画不该占交接那几帧的预算。
+                BiliParticleLoader(
+                    modifier = Modifier
+                        // 有封面时用**小一档**的粒子（封面是主角，粒子只是"在加载"的提示）；
+                        // 没有封面时保持原来的大尺寸（它是唯一内容）。
+                        .fillMaxWidth(
+                            if (coverUrl.isNullOrBlank()) LOADER_WIDTH_FRACTION else VEIL_COVER_LOADER_WIDTH_FRACTION
+                        )
+                        .aspectRatio(1f)
+                )
+            }
         }
     }
 }
@@ -1130,6 +1182,14 @@ internal fun SwipeSessionActionRail(
     replyText: String?,
     /** 打开评论（`null` = 当前场景还没有评论宿主，不显示评论按钮，避免假按钮）。 */
     onOpenComments: (() -> Unit)?,
+    /** 已收藏态 + 收藏数（`userState.faved` / `stat.fav`，与详情页同一份真值源）。 */
+    faved: Boolean,
+    favText: String?,
+    /**
+     * 打开收藏夹面板（`null` = 宿主不接，同评论按钮的口径：宁可少一个入口，
+     * 也不做点了没反应的假按钮）。会话与详情页共用 VM 上那套收藏夹状态机。
+     */
+    onOpenFavorite: (() -> Unit)? = null,
     shareBvid: String?,
     shareAid: Long,
     shareTitle: String?,
@@ -1156,6 +1216,17 @@ internal fun SwipeSessionActionRail(
                 label = replyText,
                 tint = Color.White,
                 onClick = onOpenComments
+            )
+        }
+        // 收藏（补齐 BiliPai 竖屏互动栏的 赞/评/藏/享 四件套里缺的那一件）。
+        // 与评论按钮同一口径：宿主不接（`null`）就整颗不出现，不做点了没反应的假按钮。
+        if (onOpenFavorite != null) {
+            SwipeRailAction(
+                icon = if (faved) Icons.Filled.Star else Icons.Outlined.Star,
+                contentDescription = if (faved) "取消收藏" else "收藏",
+                label = favText,
+                tint = if (faved) FavStarColor else Color.White,
+                onClick = onOpenFavorite
             )
         }
         SwipeRailAction(
@@ -1373,6 +1444,12 @@ private fun DoubleTapLikeHeart(
 }
 
 private val LikeHeartColor = Color(0xFFFF6B8B)
+
+/**
+ * 会话互动栏「已收藏」的星色：B 站收藏用的是暖黄而不是点赞的粉，两态必须能一眼分开
+ * （同一条互动栏里两颗同色实心星/心会被读成同一个动作）。
+ */
+private val FavStarColor = Color(0xFFFFD54D)
 
 @UnstableApi
 @Composable

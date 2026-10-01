@@ -47,8 +47,11 @@ import androidx.media3.common.Player
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
+import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.feature.video.VideoViewModel
+import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.feature.video.swipe.SwipeEntry
@@ -57,8 +60,10 @@ import com.naaammme.bbspace.feature.video.swipe.SwipeQueueTail
 import com.naaammme.bbspace.feature.video.swipe.shouldAutoAdvanceToNextSwipePage
 import com.naaammme.bbspace.feature.video.swipe.shouldExtendSwipeQueue
 import com.naaammme.bbspace.feature.video.swipe.swipeKey
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 竖屏全屏「上下滑切换视频」pager（BiliPai 上游 `PortraitVideoPager` 的 bbspace 化）。
@@ -298,8 +303,43 @@ internal fun PortraitSwipePager(
     // 播放设置侧栏（pane 内 ⋮ 面板）可见性：pane 内的面板盖不住 pane 之外的互动栏，
     // 侧栏打开时常驻互动栏要让位（见下方互动栏接线的门控）。
     var playbackSheetVisible by remember { mutableStateOf(false) }
+    // 会话内收藏（补齐互动栏 赞/评/藏/享）：宿主在这里，内容复用详情页那份
+    // `FavFolderSheetContent`；收藏夹状态机整个挂在 VM 上，会话不另存一份。
+    var showFavSheet by remember { mutableStateOf(false) }
+    val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
+    val favBottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    fun closeFavSheet() {
+        scope.launch {
+            try {
+                if (favBottomSheetState.isVisible) favBottomSheetState.hide()
+            } finally {
+                // `hide()` 是挂起点，而 scope 随宿主组合一起取消：收起动画没跑完就被杀时，
+                // 写在后面的 `showFavSheet = false` 不会执行 → 面板留在"已隐藏但还在组合里"。
+                // 详情页的 closeSheet 为此把状态落位放进 NonCancellable，这里同理。
+                withContext(NonCancellable) { showFavSheet = false }
+            }
+        }
+    }
+
+    // VM 侧提交成功 / 用户取消都会置 dismissRequest，会话宿主必须自己收（详情页同款）。
+    LaunchedEffect(favSheetState.dismissRequest) {
+        if (favSheetState.dismissRequest) {
+            viewModel.consumeFavDismiss()
+            closeFavSheet()
+        }
+    }
     Box(modifier = modifier) {
-        VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+        // `beyondViewportPageCount = 1`：**起滑之前**就把左右邻居页组合出来。
+        // 默认 0 时，邻居页要等手指拖动、它开始进入视口才建树 —— 于是"手指一动"那一帧
+        // 要同时做「组合整页 + 发封面请求 + 布局」，这正是滑动起手最容易被读成"顿一下"
+        // 的时刻。预组合一页的代价是两页静态封面（非播放器页只有图片 + 文字，
+        // 播放器节点仍然唯一，见本文件 KDoc），换来的是起手即有内容。
+        VerticalPager(
+            state = pagerState,
+            beyondViewportPageCount = 1,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
             val entry = pages.getOrNull(page) ?: return@VerticalPager
             if (entry.isCurrentVideo(currentBvid, currentAid)) {
                 VideoPlayerPane(
@@ -357,7 +397,7 @@ internal fun PortraitSwipePager(
         // - 显隐走 AnimatedVisibility 淡入淡出（BiliPai 同款），不再"啪一下"弹出；
         // - 门控：等首帧时整屏是加载层；侧栏/评论卡片打开时让位。
         AnimatedVisibility(
-            visible = !waitingFirstFrame && !playbackSheetVisible && !showComments,
+            visible = !waitingFirstFrame && !playbackSheetVisible && !showComments && !showFavSheet,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomEnd)
@@ -368,6 +408,14 @@ internal fun PortraitSwipePager(
                 onToggleLike = viewModel::toggleLike,
                 replyText = playbackState.detail?.stat?.reply,
                 onOpenComments = { showComments = true },
+                faved = playbackState.detail?.userState?.faved == true,
+                favText = playbackState.detail?.stat?.fav,
+                onOpenFavorite = {
+                    // 弹不弹由 `openFavSheet()` 的返回值决定：未登录时它只弹 toast 并返回
+                    // false，无条件弹就会把一层空白的"暂无收藏夹"面板盖在"请先登录"上面
+                    // （详情页实测踩过，见 VideoDetailPage 的同一判据）。
+                    if (viewModel.openFavSheet()) showFavSheet = true
+                },
                 shareBvid = playbackState.ids.bvid,
                 shareAid = playbackState.ids.aid,
                 shareTitle = playbackState.detail?.title,
@@ -421,6 +469,28 @@ internal fun PortraitSwipePager(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+        }
+    }
+
+    // 会话内收藏：**底部面板**，不是评论那样的悬浮卡。
+    // 区别在于交互性质：评论要"边看边刷"（盖住画面就失去上下文），而收藏夹是一次
+    // "选完即提交"的短表单 —— 与详情页同一形态，用户不必学两种样式。
+    // 形状/拉手/遮罩三件套也走同一出口（biliSheetShape / BiliSheetGrabber），
+    // 免得会话里的弹层与详情页差一个圆角半径。
+    if (showFavSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { closeFavSheet() },
+            sheetState = favBottomSheetState,
+            shape = biliSheetShape(),
+            scrimColor = Color.Black.copy(alpha = 0.40f),
+            dragHandle = { BiliSheetGrabber() }
+        ) {
+            FavFolderSheetContent(
+                state = favSheetState,
+                onToggle = viewModel::toggleFavFolder,
+                onCreateFolder = viewModel::createFolderInSheet,
+                onSubmit = viewModel::submitFav
+            )
         }
     }
 }

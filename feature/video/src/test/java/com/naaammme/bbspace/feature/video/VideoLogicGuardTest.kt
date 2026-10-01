@@ -732,6 +732,140 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * 刷视频「封面 → 画面」交接的**两段退场**（2026-10-01，对齐 BiliPai v0.2.3 的时序形状）。
+     *
+     * 这条守卫守的是"翻页闪一下黑"这个具体缺陷的形状，不是泛泛的"有没有动画"：
+     *
+     * 1. 内容（封面）与非内容（暗遮罩 + 粒子）必须是**两条 alpha**。整层共用一个 alpha
+     *    淡出 = 淡到一半时"半张暗遮罩压在半条画面上"，比交接两端都暗；
+     * 2. 顺序必须是**暗层先退完**，封面才开始交叉淡化（写反了缺陷就回来了）；
+     * 3. 粒子（常驻无限动画）必须随暗层一起摘掉 —— 它空转正好占掉交接那几帧的预算；
+     * 4. 时长必须来自动效令牌 + `reduceMotion` 分支，不许写死毫秒；
+     * 5. 邻居页必须**预组合**（`beyondViewportPageCount = 1`）：默认 0 时"手指一动"那一帧
+     *    要同时建树 + 发封面请求 + 布局，起手顿挫就是这么来的。
+     */
+    @Test
+    fun swipeHandoffRetiresChromeBeforeTheCoverDissolves() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        val veil = blockBody(pane, "private fun SwipeWaitVeil(")
+        assertTrue(
+            "封面与暗层必须各有自己的 alpha（各 1 处），回退成整层共用一个即违规。",
+            countMatching(pane, """val\s+coverAlpha\s*=\s*remember\s*\{\s*Animatable""") == 1 &&
+                countMatching(pane, """val\s+chromeAlpha\s*=\s*remember\s*\{\s*Animatable""") == 1
+        )
+        assertTrue(
+            "旧的单 alpha 形态不得回来：`val alpha = remember { Animatable(...) }` 一层带走全部。",
+            veil.none { Regex("""val\s+alpha\s*=\s*remember""").containsMatchIn(it) }
+        )
+        val chromeOut = veil.indexOfFirst { it.contains("chromeAlpha.animateTo(0f") }
+        val coverOut = veil.indexOfFirst { it.contains("coverAlpha.animateTo(0f") }
+        assertTrue(
+            "暗层退场必须**排在**封面淡化之前（顺序写反 = 暗层又被带进交接中段）。" +
+                "chromeAt=$chromeOut coverAt=$coverOut",
+            chromeOut >= 0 && coverOut >= 0 && chromeOut < coverOut
+        )
+        assertTrue(
+            "粒子要随暗层摘掉（常驻无限动画不许空转过渡期）。",
+            countMatching(veil, """else if \(!chromeGone\)""") == 1 &&
+                veil.any { it.contains("chromeGone = true") }
+        )
+        assertTrue(
+            "时序参数必须走纯策略 [SwipeHandoffTiming]（时长来自令牌、含 reduceMotion 分支），" +
+                "这样它才可 JVM 单测；写死毫秒等于把用户的「动效速度」设置关掉。",
+            countMatching(pane, """SwipeHandoffTiming\.resolve\(""") == 1 &&
+                countMatching(pane, """reduceMotion = anim\.reduceMotion""") == 1 &&
+                countMatching(pane, """shortMs = anim\.short""") == 1
+        )
+        assertTrue(
+            "两条 alpha 与落定缩放都要在 graphicsLayer 里读值（读在组合期 = 逐帧重组）。",
+            veil.count { it.contains("graphicsLayer {") } >= 2 &&
+                veil.any { it.contains("alpha = coverAlpha.value") } &&
+                veil.any { it.contains("alpha = chromeAlpha.value") }
+        )
+
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "上下滑 pager 必须预组合邻居页（beyondViewportPageCount = 1）。",
+            countMatching(pager, """beyondViewportPageCount = 1""") == 1
+        )
+    }
+
+    /**
+     * 轴仲裁接线（判据本身由 `PlayerDragAxisPolicyTest` 覆盖，这里只钉"真的接上了"）。
+     *
+     * 三条都是"看起来对、实际没生效"的形状：
+     * 1. 判据必须走 [PlayerDragAxisPolicy]，旧的 `abs(x) > abs(y)` 一过 slop 就锁轴的写法
+     *    不得回来（那正是"斜着上滑被吞"的根因）；
+     * 2. **未决期不许消费事件** —— 播放器在歧义窗口里吞掉位移，连播的起手就划不动，
+     *    加了宽限反而比不加更糟；锁定方向后才照旧全程消费（播放器手势语义不变）；
+     * 3. 宽限只在**会话**（passthrough）里给；详情页给宽限会与外层纵向列表双响应。
+     */
+    @Test
+    fun gestureAxisArbitrationUsesGraceOnlyInSwipeSessions() {
+        val ctrl = codeOf("player/VideoGestureController.kt")
+        assertTrue(
+            "轴判据必须来自 PlayerDragAxisPolicy.resolveIntent（可单测的纯函数）。",
+            countMatching(ctrl, """PlayerDragAxisPolicy\.resolveIntent\(""") == 1 &&
+                countMatching(ctrl, """intent == PlayerDragIntent\.HORIZONTAL""") == 1
+        )
+        assertTrue(
+            "旧判据不得回来：`abs(totalDelta.x) > abs(totalDelta.y)` 在 slop 处立即锁轴。",
+            ctrl.none { it.contains("abs(totalDelta.x) > abs(totalDelta.y)") } &&
+                ctrl.none { Regex("""if \(totalDelta\.getDistance\(\) >= slop\)""").containsMatchIn(it) }
+        )
+        assertTrue(
+            "未决期不消费：唯一的消费点必须带 `phase != Phase.Press` 前置条件。",
+            countMatching(ctrl, """if \(phase != Phase\.Press\) change\.consume\(\)""") == 1 &&
+                countMatching(ctrl, """^\s*change\.consume\(\)\s*$""") == 0
+        )
+        assertTrue(
+            "宽限倍数按场景取（会话=策略常量、详情页=1f 即不宽限），" +
+                "且 passthrough 只读一次（每个事件读两次会在中途改值时判据自相矛盾）。",
+            countMatching(ctrl, """PlayerDragAxisPolicy\.AMBIGUOUS_SLOP_MULTIPLIER""") == 1 &&
+                countMatching(ctrl, """if \(passthrough\) \{""") == 1 &&
+                countMatching(ctrl, """val passthrough = curVerticalDragPassthrough\(\)""") == 1
+        )
+    }
+
+    /**
+     * 会话内**收藏**（补齐 BiliPai 竖屏互动栏的 赞/评/藏/享）。
+     *
+     * 钉三条，都是"接了但接错"的形状：
+     * 1. 弹不弹必须由 `openFavSheet()` 的**返回值**决定 —— 未登录时它只弹 toast 并返回
+     *    false，无条件弹会把一层空白"暂无收藏夹"盖在"请先登录"上面（详情页实测踩过）；
+     * 2. 会话不另存收藏夹状态，必须读 VM 上那一份 `viewModel.favSheet`（两份真值源必然漂移）；
+     * 3. 面板在场时互动栏要让位（与侧栏/评论卡同一门控口径），且 VM 置 dismissRequest
+     *    时会话宿主必须自己收 —— 收起落位写在 NonCancellable 里（closeSheet 的同一条教训）。
+     */
+    @Test
+    fun swipeSessionOffersFavorite() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "互动栏必须有收藏动作，且宿主不接时整颗不出现（不做假按钮）。",
+            countMatching(pane, """if \(onOpenFavorite != null\) \{""") == 1 &&
+                countMatching(pane, """onOpenFavorite: \(\(\) -> Unit\)\? = null""") == 1
+        )
+        assertTrue(
+            "弹层开关只能由 openFavSheet() 的返回值驱动。",
+            countMatching(pager, """if \(viewModel\.openFavSheet\(\)\) showFavSheet = true""") == 1 &&
+                countMatching(pager, """showFavSheet = true""") == 1
+        )
+        assertTrue(
+            "收藏夹状态必须读 VM 那一份（`viewModel.favSheet`），并在 dismissRequest 时由宿主收。",
+            countMatching(pager, """by viewModel\.favSheet\.collectAsStateWithLifecycle\(\)""") == 1 &&
+                countMatching(pager, """viewModel\.consumeFavDismiss\(\)""") == 1 &&
+                countMatching(pager, """FavFolderSheetContent\(""") == 1
+        )
+        assertTrue(
+            "面板在场时互动栏必须让位；收起落位必须在 NonCancellable 里" +
+                "（hide() 是挂起点，宿主被取消时后面的赋值不会跑）。",
+            countMatching(pager, """&&\s*!showFavSheet""") == 1 &&
+                countMatching(pager, """withContext\(NonCancellable\) \{ showFavSheet = false \}""") == 1
+        )
+    }
+
+    /**
      * 会话锁竖屏（`portraitSwipeSessionLocksOrientation`）的**配套出口**：
      * 竖屏连播里刷到横屏视频时，用户必须有一个显式要横屏的入口——否则只能看 letterbox，
      * "锁竖屏"这条修复就成了功能倒退。BiliPai 同款（`onRotateToLandscape`）。

@@ -44,7 +44,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.icon.AppIcons
-import kotlin.math.abs
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -243,18 +242,36 @@ fun Modifier.videoGestures(
 
                     when (phase) {
                         Phase.Press -> {
-                            if (totalDelta.getDistance() >= slop) {
+                            // 轴仲裁（2026-10-01）：横向要**明显主导**才算 seek，
+                            // 竖向是否再给一段意图宽限则**分场景**：
+                            // - 连播会话（passthrough）：给宽限。旧写法在手指落地的自然竖向
+                            //   抖动上就把轴锁死，斜着上滑被读成横向 → 翻页被吞（不可逆）。
+                            // - 非会话（详情页）：不给。这里"未决不消费"会让外层纵向列表
+                            //   先接走手势，等我们再锁竖向就变成"列表滚 + 亮度动"双响应。
+                            val passthrough = curVerticalDragPassthrough()
+                            val intent = PlayerDragAxisPolicy.resolveIntent(
+                                totalX = totalDelta.x,
+                                totalY = totalDelta.y,
+                                touchSlop = slop,
+                                ambiguousSlopMultiplier =
+                                    if (passthrough) {
+                                        PlayerDragAxisPolicy.AMBIGUOUS_SLOP_MULTIPLIER
+                                    } else {
+                                        1f
+                                    }
+                            )
+                            if (intent != PlayerDragIntent.UNDECIDED) {
                                 // 已放大（缩放>1）时拖动让位给缩放平移层；单击/双击/长按不受影响
                                 if (curZoomActive()) {
                                     state.resetDrag()
                                     waitForAllUp()
                                     break
                                 }
-                                val isHorizontal = abs(totalDelta.x) > abs(totalDelta.y)
+                                val isHorizontal = intent == PlayerDragIntent.HORIZONTAL
                                 // 上下滑翻页会话激活：垂直拖动整体让位给 pager（不判定
                                 // 亮度/音量、全程不消费，pager 从 down 起自行追踪翻页）。
                                 // 这是「全屏刷视频时上下滑被亮度/音量抢走」的修复点。
-                                if (!isHorizontal && curVerticalDragPassthrough()) {
+                                if (!isHorizontal && passthrough) {
                                     state.resetDrag()
                                     waitForAllUp()
                                     break
@@ -303,7 +320,10 @@ fun Modifier.videoGestures(
                         }
                     }
 
-                    change.consume()
+                    // 方向一旦锁定（phase 不再是 Press）就照旧全程消费，播放器手势语义不变。
+                    // **未决期不消费**：连播会话的 pager 要能从起手就追踪翻页——这正是宽限期
+                    // 存在的意义；反过来，未决期一消费手势就被播放器吃掉（比旧版更糟）。
+                    if (phase != Phase.Press) change.consume()
                 }
             }
         }
