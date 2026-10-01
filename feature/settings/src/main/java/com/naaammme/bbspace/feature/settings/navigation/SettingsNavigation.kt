@@ -12,6 +12,7 @@ import com.naaammme.bbspace.feature.settings.errorlog.ErrorLogScreen
 import com.naaammme.bbspace.feature.settings.feed.FeedSettingsScreen
 import com.naaammme.bbspace.feature.settings.performance.PerformanceSettingsScreen
 import com.naaammme.bbspace.feature.settings.privacy.PrivacySettingsScreen
+import com.naaammme.bbspace.feature.settings.qoe.SwipeDiagnosticsScreen
 import com.naaammme.bbspace.feature.settings.sponsorblock.SponsorBlockSettingsScreen
 
 const val SETTINGS_ROUTE = "settings"
@@ -22,6 +23,7 @@ const val FEED_SETTINGS_ROUTE = "settings/feed"
 const val AUDIO_VIDEO_ROUTE = "settings/audio_video"
 const val SPONSOR_BLOCK_ROUTE = "settings/sponsor_block"
 const val ERROR_LOG_ROUTE = "settings/error_log"
+const val SWIPE_QOE_ROUTE = "settings/swipe_qoe"
 const val ABOUT_ROUTE = "settings/about"
 const val HOME_INTEREST_ROUTE = "home/interest"
 
@@ -38,6 +40,7 @@ fun NavGraphBuilder.settingsScreen(
             onNavigateToSponsorBlock = { navController.navigate(SPONSOR_BLOCK_ROUTE) },
             onNavigateToPrivacy = { navController.navigate(PRIVACY_ROUTE) },
             onNavigateToErrorLog = { navController.navigate(ERROR_LOG_ROUTE) },
+            onNavigateToSwipeQoe = { navController.navigate(SWIPE_QOE_ROUTE) },
             onNavigateToAbout = { navController.navigate(ABOUT_ROUTE) }
         )
     }
@@ -71,6 +74,10 @@ fun NavGraphBuilder.settingsScreen(
 
     composable(ERROR_LOG_ROUTE) {
         ErrorLogScreen(onBack = { navController.popBackStack() })
+    }
+
+    composable(SWIPE_QOE_ROUTE) {
+        SwipeDiagnosticsScreen(onBack = { navController.popBackStack() })
     }
 
     composable(ABOUT_ROUTE) {

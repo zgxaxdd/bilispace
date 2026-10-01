@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
@@ -47,6 +48,7 @@ import com.naaammme.bbspace.feature.settings.navigation.FEED_SETTINGS_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PRIVACY_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.SPONSOR_BLOCK_ROUTE
+import com.naaammme.bbspace.feature.settings.navigation.SWIPE_QOE_ROUTE
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +61,7 @@ fun SettingsScreen(
     onNavigateToSponsorBlock: () -> Unit,
     onNavigateToPrivacy: () -> Unit,
     onNavigateToErrorLog: () -> Unit,
+    onNavigateToSwipeQoe: () -> Unit,
     onNavigateToAbout: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -73,6 +76,7 @@ fun SettingsScreen(
         AUDIO_VIDEO_ROUTE to onNavigateToAudioVideo,
         SPONSOR_BLOCK_ROUTE to onNavigateToSponsorBlock,
         PRIVACY_ROUTE to onNavigateToPrivacy,
+        SWIPE_QOE_ROUTE to onNavigateToSwipeQoe,
     )
     val filtered = remember(query) {
         if (query.isBlank()) {
@@ -132,6 +136,12 @@ fun SettingsScreen(
                 title = "错误日志",
                 subtitle = "查看和导出应用错误记录",
                 onClick = onNavigateToErrorLog
+            ),
+            SettingsHomeItem(
+                icon = Icons.Default.Build,
+                title = "刷视频诊断",
+                subtitle = "本机首帧/翻页/补货指标，不上传",
+                onClick = onNavigateToSwipeQoe
             )
         )
 

@@ -43,6 +43,8 @@ import com.naaammme.bbspace.core.swipe.SwipePrefetchPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
 import com.naaammme.bbspace.core.swipe.model.SwipeId
+import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeEventType
+import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeHub
 import com.naaammme.bbspace.core.swipe.session.SwipeEntryVia
 import com.naaammme.bbspace.core.swipe.session.SwipeSessionController
 import com.naaammme.bbspace.core.swipe.session.SwipeSessionState
@@ -493,6 +495,8 @@ class VideoViewModel @Inject constructor(
             via = SwipeEntryVia.DetailPullDown,
             seedQueue = seedQueue
         )
+        // QoE（SW-06）：只记类型与来源标签，不含标题/UP/账号（§4.8 隐私口径）
+        SwipeQoeHub.record(SwipeQoeEventType.Enter, source = "detail")
         android.util.Log.i(
             "PortraitSwipe",
             "session: anchor=$bvid relates=${detail.relates.size} queue=${seedQueue.size} " +
@@ -503,6 +507,7 @@ class VideoViewModel @Inject constructor(
     /** 退出全屏时清会话：下次进入全屏重新锚定当时的视频（见 VideoScreen 的接线的判据）。 */
     fun clearSwipeSession() {
         swipeSession.exit()
+        SwipeQoeHub.record(SwipeQoeEventType.Exit)
     }
 
     // ===== 刷视频模式（首页顶栏入口 → Story 全屏，BiliPai StoryScreen 同款）=====
@@ -599,6 +604,8 @@ class VideoViewModel @Inject constructor(
             // 流到达（含失败传空 → Ready(0,0) 降级单视频）。锚点的标题/封面查找
             // （流内同视频条目优先）在状态机 seedArrived 内做，语义与旧版一致。
             swipeSession.seedArrived(incoming)
+            // QoE（SW-06）：来源标签 = 命中的数据源 id（home-feed / story）
+            SwipeQoeHub.record(SwipeQoeEventType.Enter, source = batch?.sourceId ?: "none")
             android.util.Log.i(
                 "PortraitSwipe",
                 "bootstrap: source=${batch?.sourceId} raw=${batch?.entries?.size} " +
@@ -680,6 +687,7 @@ class VideoViewModel @Inject constructor(
             )
             // 提示状态：补到东西就回到 Ready（不打扰），一条没补到就是"到尽头了"
             swipeSession.refillResult(appended = appended)
+            SwipeQoeHub.record(SwipeQoeEventType.Refill, durationMs = appended.toLong())
             loadingMoreSwipe = false
         }
     }
@@ -730,6 +738,7 @@ class VideoViewModel @Inject constructor(
                 available = pages.size - page - 1
             )
             if (count <= 0) return@launch
+            SwipeQoeHub.record(SwipeQoeEventType.Prefetch, durationMs = count.toLong())
             // 蜂窝下跳过"详情级别"的重预热（判据与理由见 SwipePrefetchPolicy）。
             // 与 count 同一次读网络，不在循环里反复问系统 —— 一次滑动里结论不会变。
             val warmDetail = SwipePrefetchPolicy.shouldWarmDetail(isUnmetered)
@@ -814,6 +823,22 @@ class VideoViewModel @Inject constructor(
     /** 翻页落定回执（pager 的 currentPage collect 调用）：状态机记账 Ready.page。 */
     fun onSwipePageChanged(page: Int) {
         swipeSession.pageChanged(page)
+        SwipeQoeHub.record(SwipeQoeEventType.Page)
+    }
+
+    init {
+        // QoE 首帧事件（SW-06）：hasRenderedFirstFrame 的**上升沿**记一条 FirstFrame，
+        // 与最近一条 Page/Enter 配对算页→帧耗时。放在 VM 而不是 pager：
+        // pager 的粘滞等待写法被守卫锁死（swipeWaitsFirstFrameBehindLoadingVeil），
+        // 不为埋点去动那三行。
+        viewModelScope.launch {
+            videoState
+                .map { it.hasRenderedFirstFrame }
+                .distinctUntilChanged()
+                .collect { rendered ->
+                    if (rendered) SwipeQoeHub.record(SwipeQoeEventType.FirstFrame)
+                }
+        }
     }
 
     /** 播完自动翻页回执（幂等键记账，随会话 exit 清空）。 */

@@ -12,6 +12,8 @@ dependencies {
     implementation(project(":core:settings"))
     implementation(project(":core:sponsorblock"))
     implementation(project(":core:designsystem"))
+    // 刷视频诊断页（SW-06）读 SwipeQoeHub/SwipeQoeMath（core:swipe，无 UI 依赖）
+    implementation(project(":core:swipe"))
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

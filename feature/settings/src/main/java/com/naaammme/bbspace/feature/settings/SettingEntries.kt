@@ -6,6 +6,7 @@ import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.AUDIO_VIDEO_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PRIVACY_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.SPONSOR_BLOCK_ROUTE
+import com.naaammme.bbspace.feature.settings.navigation.SWIPE_QOE_ROUTE
 
 data class SettingEntry(val title: String, val subtitle: String, val route: String)
 
@@ -52,6 +53,10 @@ val sponsorBlockEntries = listOf(
     SettingEntry("空降助手服务器", "社区片段数据来源地址", SPONSOR_BLOCK_ROUTE),
 )
 
+val swipeQoeEntries = listOf(
+    SettingEntry("刷视频诊断", "本机首帧/翻页/补货指标，不上传", SWIPE_QOE_ROUTE),
+)
+
 val allSettingEntries =
     appearanceEntries + performanceEntries + audioVideoEntries + feedEntries + privacyEntries +
-        sponsorBlockEntries
+        sponsorBlockEntries + swipeQoeEntries
