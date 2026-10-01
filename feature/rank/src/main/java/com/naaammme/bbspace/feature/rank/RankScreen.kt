@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.rememberScrollState
@@ -23,7 +25,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -34,8 +41,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
 import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
+import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.component.biliImageUrlForVariant
+import com.naaammme.bbspace.core.designsystem.color.rememberVideoCardCoverTint
+import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAdaptiveContentColors
+import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawSpec
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
 import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
@@ -47,6 +59,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.listCoverRatio
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.withFontSize
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
@@ -72,6 +85,13 @@ private val RankCardShape = RoundedCornerShape(BiliRadius.card)
  * 在 20~32dp 间漂移，且 CIRCULAR 档下 28dp 会在矮 chip 上裁成方角。
  */
 private val RankChipShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 封面块：只圆上两角，下沿直角，与信息区无缝拼接（推荐页 FeedCardCoverShape 同款）。 */
+private val RankCardCoverShape: Shape = BiliRadius.topRounded(BiliRadius.card)
+
+/** 封面取色采样尺寸：与信息流双列卡的封面预加载尺寸一致（640×480），命中同一份解码位图。 */
+private const val RANK_COVER_SAMPLE_WIDTH_PX = 640
+private const val RANK_COVER_SAMPLE_HEIGHT_PX = 480
 
 /**
  * 首页「排行」页：热门/分区排行榜（UGC rid）、PGC 季度排行、每周必看、入站必刷。
@@ -119,11 +139,13 @@ fun RankScreen(
         modifier = Modifier.fillMaxSize(),
         state = gridState,
         key = { _, item -> item.key },        contentType = { _, item -> item::class.simpleName },
+        // 边距与推荐页同口径（10/10/12）：推荐页注释里点名过"两处不同步就会出现
+        // 首页贴边、排行页留白这种不一致"，卡片同款之后边距也必须一致
         contentPadding = PaddingValues(
-            start = 4.dp,
+            start = 10.dp,
             top = topContentPadding,
-            end = 4.dp,
-            bottom = 4.dp
+            end = 10.dp,
+            bottom = 12.dp
         ),
         headerContent = {
             RankSelectors(
@@ -305,6 +327,36 @@ private fun RankVideoCard(
     val seamlessOpener = LocalSeamlessCardOpener.current
     val canSeamless = seamlessOpener != null && OplusViewSeamlessCompat.isVersionSupported()
 
+    // ── 推荐页同款视觉（用户需求：排行页 UI 与推荐页同步）────────────────────────
+    // 配方与 FeedCard 完全同源，取色/染色/文字色判据都来自 core/designsystem：
+    // 封面动态取色（rememberVideoCardCoverTint）→ 整卡染色底（resolveVideoCardAmbientDrawSpec）
+    // → 信息区封面同调微光 + 自适应文字色（resolveVideoCardAdaptiveContentColors，
+    // 浅色主题遇深色封面正文翻白）。排行卡只是数据源不同（无关注态/不感兴趣菜单）。
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val coverTint = rememberVideoCardCoverTint(
+        coverKey = item.cover.orEmpty(),
+        requestUrl = biliImageUrlForVariant(item.cover, BiliImageVariant.CardCover43),
+        sizePx = RANK_COVER_SAMPLE_WIDTH_PX to RANK_COVER_SAMPLE_HEIGHT_PX
+    )
+    val infoDrawSpec = resolveVideoCardAmbientDrawSpec(
+        coverTint = coverTint,
+        isDarkTheme = darkTheme,
+        defaultContainerColor = containerColor,
+        defaultBorderColor = Color.Transparent
+    )
+    val adaptiveColors = resolveVideoCardAdaptiveContentColors(
+        coverTint = coverTint,
+        isDarkTheme = darkTheme,
+        defaultOnSurface = MaterialTheme.colorScheme.onSurface,
+        defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    // 标题样式：withFontSize 自带 remember（@Composable 扩展，不能包进外层 remember）；
+    // 字号走 withFontSize（sp 字面量棘轮：不新增 18.sp 行高档），字重单独 copy 补上
+    val titleStyle = MaterialTheme.typography.bodyLarge
+        .withFontSize(14.sp)
+        .copy(fontWeight = FontWeight.Medium)
+
     BiliCardSurface(
         onClick = {
             if (
@@ -325,7 +377,9 @@ private fun RankVideoCard(
         },
         // 卡片外壳与封面同一语言（此前 shapes.large 与封面 card 是两套来源）
         shape = RankCardShape,
-        containerColor = Color.Transparent,
+        // 整卡染色底：有封面色时是与封面同调的色，无封面色时退 surfaceContainerLow
+        // （推荐页同款——不透明底色是染色"只兑一次白"的前提，见该卡同名注释）
+        containerColor = infoDrawSpec.containerColor,
         // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
         modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
     ) {
@@ -342,59 +396,97 @@ private fun RankVideoCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = RoundedCornerShape(BiliRadius.card),
+                // 封面只圆上两角，下沿直角与信息区无缝拼接（推荐页同款）
+                shape = RankCardCoverShape,
                 coverLarge = false,
                 coverFourThree = true,
                 modifier = Modifier.matchParentSize()
             ) {
+                // 角标对齐推荐页卡面：播放数左上、时长右下
+                item.view.takeIf { it > 0L }?.let { view ->
+                    RankCoverBadge(
+                        text = formatRankCount(view),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(BiliSpacing.sm)
+                    )
+                }
                 item.durationSec.takeIf { it > 0L }?.let { duration ->
                     RankCoverBadge(
                         text = formatRankDuration(duration),
                         modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(6.dp)
+                            .align(Alignment.BottomEnd)
+                            .padding(BiliSpacing.sm)
                     )
                 }
             }
         }
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        // 信息区：只叠封面同调的竖向渐变微光（FeedCard infoModifier 同款；
+        // 发丝描边省去——0.5.dp 是被冻结的 dp 字面量，视觉收益接近于零）
+        Column(
+            modifier = Modifier
+                .then(
+                    if (coverTint != null && infoDrawSpec.coverGlowAlpha > 0f) {
+                        Modifier.drawWithCache {
+                            val brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    coverTint.copy(alpha = infoDrawSpec.coverGlowAlpha),
+                                    coverTint.copy(alpha = infoDrawSpec.coverGlowAlpha * 0.35f),
+                                    Color.Transparent
+                                ),
+                                startY = 0f,
+                                endY = size.height * 0.85f
+                            )
+                            onDrawBehind { drawRect(brush) }
+                        }
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
             Text(
                 text = item.title,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge.withFontSize(14.sp),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = buildString {
-                    append(formatRankCount(item.view))
-                    append(" 播放 · ")
-                    append(formatRankCount(item.danmaku))
-                    append(" 弹幕")
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp)
+                // 浅色主题 + 深色封面时翻白（推荐页同款可读性兜底）
+                color = adaptiveColors.titleColor,
+                style = titleStyle
             )
-            if (item.ownerName.isNotBlank()) {
-                Text(
-                    text = item.ownerName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .padding(top = 2.dp)
-                        .then(
-                            if (spaceRoute != null) {
-                                Modifier.clickable { onOpenSpace(spaceRoute) }
-                            } else {
-                                Modifier
-                            }
-                        )
-                )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (item.ownerName.isNotBlank()) {
+                    Text(
+                        text = item.ownerName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = adaptiveColors.subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(
+                                if (spaceRoute != null) {
+                                    Modifier.clickable { onOpenSpace(spaceRoute) }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                    )
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+                item.tname?.takeIf { it.isNotBlank() }?.let { tname ->
+                    Text(
+                        text = tname,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = adaptiveColors.subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -423,6 +515,31 @@ private fun RankPgcCard(
     )
     val seamlessOpener = LocalSeamlessCardOpener.current
 
+    // 推荐页同款视觉（与 RankVideoCard 同一配方，见那边注释）
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val coverTint = rememberVideoCardCoverTint(
+        coverKey = item.cover.orEmpty(),
+        requestUrl = biliImageUrlForVariant(item.cover, BiliImageVariant.CardCover43),
+        sizePx = RANK_COVER_SAMPLE_WIDTH_PX to RANK_COVER_SAMPLE_HEIGHT_PX
+    )
+    val infoDrawSpec = resolveVideoCardAmbientDrawSpec(
+        coverTint = coverTint,
+        isDarkTheme = darkTheme,
+        defaultContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        defaultBorderColor = Color.Transparent
+    )
+    val adaptiveColors = resolveVideoCardAdaptiveContentColors(
+        coverTint = coverTint,
+        isDarkTheme = darkTheme,
+        defaultOnSurface = MaterialTheme.colorScheme.onSurface,
+        defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    // 标题样式：withFontSize 自带 remember（@Composable 扩展，不能包进外层 remember）；
+    // 字号走 withFontSize（sp 字面量棘轮：不新增 18.sp 行高档），字重单独 copy 补上
+    val titleStyle = MaterialTheme.typography.bodyLarge
+        .withFontSize(14.sp)
+        .copy(fontWeight = FontWeight.Medium)
+
     BiliCardSurface(
         onClick = {
             val currentTarget = target ?: return@BiliCardSurface
@@ -443,7 +560,7 @@ private fun RankPgcCard(
         },
         enabled = target != null,
         shape = RankCardShape,
-        containerColor = Color.Transparent,
+        containerColor = infoDrawSpec.containerColor,
         // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
         modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
     ) {
@@ -455,7 +572,7 @@ private fun RankPgcCard(
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
-                shape = RoundedCornerShape(BiliRadius.card),
+                shape = RankCardCoverShape,
                 coverLarge = false,
                 coverFourThree = true,
                 modifier = Modifier.matchParentSize()
@@ -464,20 +581,42 @@ private fun RankPgcCard(
                     RankCoverBadge(
                         text = indexShow,
                         modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(6.dp)
+                            .align(Alignment.BottomEnd)
+                            .padding(BiliSpacing.sm)
                     )
                 }
             }
         }
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(
+            modifier = Modifier
+                .then(
+                    if (coverTint != null && infoDrawSpec.coverGlowAlpha > 0f) {
+                        Modifier.drawWithCache {
+                            val brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    coverTint.copy(alpha = infoDrawSpec.coverGlowAlpha),
+                                    coverTint.copy(alpha = infoDrawSpec.coverGlowAlpha * 0.35f),
+                                    Color.Transparent
+                                ),
+                                startY = 0f,
+                                endY = size.height * 0.85f
+                            )
+                            onDrawBehind { drawRect(brush) }
+                        }
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
             Text(
                 text = item.title,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge.withFontSize(14.sp),
-                color = MaterialTheme.colorScheme.onSurface
+                color = adaptiveColors.titleColor,
+                style = titleStyle
             )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = buildString {
                     append(formatRankCount(item.follow))
@@ -485,11 +624,10 @@ private fun RankPgcCard(
                     append(formatRankCount(item.view))
                     append(" 播放")
                 },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                color = adaptiveColors.subtitleColor,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp)
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
