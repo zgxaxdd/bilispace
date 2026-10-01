@@ -147,6 +147,9 @@ import com.naaammme.bbspace.feature.video.formatSpeed
 import com.naaammme.bbspace.feature.video.getAudioName
 import com.naaammme.bbspace.feature.video.getQualityName
 import com.naaammme.bbspace.core.model.SpaceRoute
+import com.naaammme.bbspace.core.swipe.SwipeHeartBurstPolicy
+import com.naaammme.bbspace.core.swipe.SwipeLoadPhasePolicy
+import com.naaammme.bbspace.core.swipe.SwipeMarqueePolicy
 import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
 import com.naaammme.bbspace.core.swipe.SwipeSeekPolicy
 import kotlinx.coroutines.delay
@@ -868,6 +871,7 @@ internal fun VideoPlayerPane(
                             // SW-21：作者行头像/话题/进空间 + 换页收起标题（复位键 = 当前 aid）
                             ownerFace = state.detail?.owner?.face,
                             tags = state.detail?.tags.orEmpty(),
+                            seasonTitle = state.detail?.season?.title,
                             onOpenSpace = onOpenSpace?.let { open ->
                                 state.detail?.owner?.mid?.takeIf { it > 0L }?.let { mid ->
                                     {
@@ -926,10 +930,18 @@ internal fun VideoPlayerPane(
             // 放在最后 = 盖住视频/弹幕/手势 HUD/中央播放键/上下控制栏；
             // 失败时它切成"错误 + 重试"态（只有按钮消费触摸），
             // 其余情况自身不带 pointerInput，上下滑翻页照常。
-            SwipeWaitVeil(
-                visible = swipeWaitingFirstFrame,
-                coverUrl = swipeCoverUrl,
+            // SW-34：三态由**一个判据**派生（失败优先 → 等首帧(有/无封面) → 隐藏），
+            // 不再让 veil 收两个各自派生的布尔（那种写法允许 visible=false 而 failed=true
+            // 的非法组合）。veil 内部的时序与渲染顺序未变。
+            val loadPhase = SwipeLoadPhasePolicy.resolve(
+                waitingFirstFrame = swipeWaitingFirstFrame,
                 failed = swipeFailed,
+                hasCover = !swipeCoverUrl.isNullOrBlank()
+            )
+            SwipeWaitVeil(
+                visible = SwipeLoadPhasePolicy.isVeilVisible(loadPhase),
+                coverUrl = swipeCoverUrl,
+                failed = SwipeLoadPhasePolicy.isError(loadPhase),
                 errorText = swipeErrorText,
                 onRetry = onRetrySwipe
             )
@@ -1466,14 +1478,43 @@ private fun SwipeRailAction(
             )
         }
         label?.takeIf(String::isNotBlank)?.let { count ->
-            Text(
-                text = count,
-                color = Color.White.copy(alpha = 0.88f),
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1
-            )
+            SwipeRailCount(label = count, reduceMotion = LocalAnimations.current.reduceMotion)
         }
     }
+}
+
+/**
+ * 互动栏计数（SW-30 的"计数滚动"）：数值变化时**上浮淡入**（旧值不重播，
+ * 只让新值"滚进来"），比硬换字有质感；`reduceMotion` 时直接换字。
+ *
+ * 读值在 graphicsLayer（绘制阶段），不进重组。
+ */
+@Composable
+private fun SwipeRailCount(label: String, reduceMotion: Boolean) {
+    var shown by remember { mutableStateOf(label) }
+    val roll = remember { Animatable(1f) }
+    LaunchedEffect(label) {
+        if (label != shown) {
+            shown = label
+            if (!reduceMotion) {
+                roll.snapTo(0f)
+                roll.animateTo(1f, tween(durationMillis = 260))
+            }
+        }
+    }
+    Text(
+        text = shown,
+        color = Color.White.copy(alpha = 0.88f),
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 1,
+        modifier = Modifier.graphicsLayer {
+            if (!reduceMotion) {
+                // 滚动中的上浮位移（token 的 1 倍档）
+                translationY = (1f - roll.value) * BiliSpacing.sm.toPx()
+                alpha = 0.35f + 0.65f * roll.value
+            }
+        }
+    )
 }
 
 /**
@@ -1581,6 +1622,8 @@ private fun SwipeSessionInfoLine(
     owner: String?,
     ownerFace: String? = null,
     tags: List<String> = emptyList(),
+    /** 合集名（SW-32；null = 这支不属于任何合集，不显示 chip）。 */
+    seasonTitle: String? = null,
     onOpenSpace: (() -> Unit)? = null,
     /** 展开态复位键（传当前视频的 aid）：换页自动收起，避免"下一页仍是展开的"。 */
     resetKey: Any? = null,
@@ -1624,12 +1667,10 @@ private fun SwipeSessionInfoLine(
                 )
             }
             name?.let {
-                Text(
+                SwipeMarqueeText(
                     text = "@$it",
                     color = Color.White.copy(alpha = 0.86f),
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
         }
@@ -1653,7 +1694,67 @@ private fun SwipeSessionInfoLine(
                 overflow = TextOverflow.Ellipsis
             )
         }
+        // 合集 chip（SW-32）：详情带 season 时显示合集名（只读；点击需要合集路由，不做假入口）
+        seasonTitle?.takeIf(String::isNotBlank)?.let { title ->
+            Text(
+                text = "合集 · $title",
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
+}
+
+/**
+ * 单行**跑马灯**文案（SW-32）：只在真的超宽时滚动（判据 [SwipeMarqueePolicy] +
+ * `TextLayoutResult.hasVisualOverflow`），两端各停留一拍再往返；`reduceMotion` 不滚。
+ *
+ * 实现纪律：用 `Animatable` 驱动（**不新增 `rememberInfiniteTransition`**，守帧预算棘轮）；
+ * 位移只在 `graphicsLayer` 里读（绘制阶段，不触发重组）。
+ */
+@Composable
+private fun SwipeMarqueeText(
+    text: String,
+    color: Color,
+    style: androidx.compose.ui.text.TextStyle,
+) {
+    val reduceMotion = LocalAnimations.current.reduceMotion
+    var containerWidthPx by remember { mutableStateOf(0f) }
+    var textWidthPx by remember { mutableStateOf(0f) }
+    var hasOverflow by remember { mutableStateOf(false) }
+    val marquee = SwipeMarqueePolicy.shouldMarquee(textWidthPx, containerWidthPx, reduceMotion) && hasOverflow
+    val offset = remember { Animatable(0f) }
+    val distance = SwipeMarqueePolicy.travelDistancePx(textWidthPx, containerWidthPx)
+    LaunchedEffect(marquee, distance, text) {
+        if (!marquee || distance <= 0f) {
+            offset.snapTo(0f)
+            return@LaunchedEffect
+        }
+        val travel = SwipeMarqueePolicy.travelDurationMs(distance)
+        // 停留 → 滚到末尾 → 再停留 → 回起点（往返匀速，两端都有停顿）
+        while (true) {
+            delay(SwipeMarqueePolicy.HOLD_MS)
+            offset.animateTo(-distance, tween(durationMillis = travel.toInt(), easing = LinearEasing))
+            delay(SwipeMarqueePolicy.HOLD_MS)
+            offset.animateTo(0f, tween(durationMillis = travel.toInt(), easing = LinearEasing))
+        }
+    }
+    Text(
+        text = text,
+        color = color,
+        style = style,
+        maxLines = 1,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { result ->
+            textWidthPx = result.size.width.toFloat()
+            hasOverflow = result.hasVisualOverflow || result.lineCount > 1
+        },
+        modifier = Modifier
+            .onSizeChanged { containerWidthPx = it.width.toFloat() }
+            .graphicsLayer { translationX = offset.value }
+    )
 }
 
 private val SwipeProgressTrackColor = Color.White.copy(alpha = 0.20f)
@@ -1691,32 +1792,65 @@ private fun DoubleTapLikeHeart(
     modifier: Modifier = Modifier
 ) {
     if (token == 0L) return
+    val anim = LocalAnimations.current
+    // SW-30：粒子版爱心。粒子参数由 token（种子）决定 —— 同一次点赞可复现、不同次不重复。
+    // reduceMotion：不取粒子、主心也不缩放上浮，只"亮一下就收"（静态心）。
+    val useBurst = !anim.reduceMotion
+    val particles = remember(token) { if (useBurst) SwipeHeartBurstPolicy.particles(token) else emptyList() }
     var visible by remember(token) { mutableStateOf(true) }
-    val scale = remember(token) { Animatable(0.4f) }
-    val alpha = remember(token) { Animatable(1f) }
-    val rise = remember(token) { Animatable(0f) }
+    val progress = remember(token) { Animatable(0f) }
     LaunchedEffect(token) {
-        scale.animateTo(1.2f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
-        rise.animateTo(1f, tween(durationMillis = 420))
-        alpha.animateTo(0f, tween(durationMillis = 200))
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = if (useBurst) anim.long * 2 else anim.short)
+        )
         visible = false
     }
     if (!visible) return
-    Icon(
-        imageVector = Icons.Default.Favorite,
-        contentDescription = "点赞",
-        tint = LikeHeartColor,
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale.value
-                scaleY = scale.value
-                this.alpha = alpha.value
-                translationX = position.x - 28.dp.toPx()
-                translationY = position.y - 28.dp.toPx() - rise.value * 56.dp.toPx()
-            }
-            .size(56.dp)
-    )
+    Box(modifier = modifier.fillMaxSize()) {
+        particles.forEach { particle ->
+            Icon(
+                imageVector = Icons.Default.Favorite,
+                contentDescription = null,
+                tint = LikeHeartColor.copy(alpha = 0.9f),
+                modifier = Modifier
+                    .size(BiliSpacing.xl)
+                    .graphicsLayer {
+                        val p = progress.value
+                        val (dxFraction, dyFraction) = SwipeHeartBurstPolicy.particleOffset(particle, p)
+                        // 位移按屏幕短边比例（粒子只在小范围内散开，不随屏宽失真）
+                        val referPx = minOf(size.width, size.height)
+                        val particleScale = particle.scale * (0.8f + 0.4f * p)
+                        scaleX = particleScale
+                        scaleY = particleScale
+                        alpha = SwipeHeartBurstPolicy.particleAlpha(p)
+                        translationX = position.x + dxFraction * referPx - size.width / 2f
+                        translationY = position.y + dyFraction * referPx - size.height / 2f
+                    }
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.Favorite,
+            contentDescription = "点赞",
+            tint = LikeHeartColor,
+            modifier = Modifier
+                .size(HeartSize)
+                .graphicsLayer {
+                    val p = progress.value
+                    val heartScale = if (useBurst) SwipeHeartBurstPolicy.mainHeartScale(p) else 1f
+                    scaleX = heartScale
+                    scaleY = heartScale
+                    alpha = if (useBurst) SwipeHeartBurstPolicy.mainHeartAlpha(p) else 1f
+                    translationX = position.x - size.width / 2f
+                    translationY = position.y - size.height / 2f -
+                        if (useBurst) p * BiliSpacing.xxxl.toPx() else 0f
+                }
+        )
+    }
 }
+
+/** 主心尺寸（与旧实现一致：56dp，走 spacing token 的 1.75 倍档，不新增 dp 字面量）。 */
+private val HeartSize = BiliSpacing.xxxl * 1.75f
 
 private val LikeHeartColor = Color(0xFFFF6B8B)
 

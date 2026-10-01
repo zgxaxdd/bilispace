@@ -475,6 +475,37 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * SW-30 动效质感（粒子爱心 + 计数滚动）的写法不变式：
+     * 数值来自纯策略（种子确定性）、读值只在 graphicsLayer、reduceMotion 必须退化。
+     */
+    @Test
+    fun swipeAnimationQualityIsSeededAndDegrades() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        val policy = codeOf("SwipeHeartBurstPolicy.kt")
+        assertTrue(
+            "双击爱心 = 种子粒子版（同一次点赞可复现、不同次不重复）：粒子/主心都由 " +
+                "SwipeHeartBurstPolicy 给值，读值在 graphicsLayer；" +
+                "reduceMotion（动画速度=关）不取粒子、主心不缩放上浮。",
+            countMatching(pane, """SwipeHeartBurstPolicy\.particles\(""") == 1 &&
+                countMatching(pane, """SwipeHeartBurstPolicy\.mainHeartScale\(""") == 1 &&
+                countMatching(pane, """val useBurst = !anim\.reduceMotion""") == 1 &&
+                countMatching(policy, """const val PARTICLE_COUNT""") == 1 &&
+                countMatching(policy, """const val MAX_DISTANCE_FRACTION""") == 1
+        )
+        assertTrue(
+            "计数滚动：计数变化时新值上浮淡入（Animatable + graphicsLayer），" +
+                "reduceMotion 时直接换字（不做位移/淡入）。",
+            countMatching(pane, """private fun SwipeRailCount\(""") == 1 &&
+                countMatching(pane, """SwipeRailCount\(""") == 2 &&
+                countMatching(pane, """roll\.animateTo\(1f, tween\(durationMillis = 260\)\)""") == 1 &&
+                countMatching(
+                    pane,
+                    """translationY = \(1f - roll\.value\) \* BiliSpacing\.sm\.toPx\(\)"""
+                ) == 1
+        )
+    }
+
+    /**
      * SW-10 翻页动效的写法不变式：数值全部来自纯策略、读值只在 graphicsLayer
      * （绘制阶段读取 → 不触发重组）、越界阻尼走 nestedScroll 的未消费位移 + 松手回弹、
      * reduceMotion 时不接阻尼且策略退化。
@@ -787,10 +818,20 @@ class VideoLogicGuardTest {
                 "判据只允许用 swipeWaitingFirstFrame —— 不许再与 swipePagingActive 相与：" +
                 "story 入口在锚点就位前走的是「单播放器」分支（没有 pager），" +
                 "那条路上 swipePagingActive 恒 false，相与等于那段黑屏没有加载层。" +
-                "失败态必须真的接上（swipeFailed / onRetrySwipe 传进加载层，且加载层里有重试分支）。",
+                "失败态必须真的接上（onRetrySwipe 传进加载层，且加载层里有重试分支）。\n" +
+                "SW-34 收口：visible/failed 不再各自派生，统一由 SwipeLoadPhasePolicy.resolve " +
+                "（失败优先 → 等首帧(有/无封面) → 隐藏）判三态后派生——旧断言直读两个布尔，" +
+                "新断言盯「判据单一来源 + 两个派生助手」，veil 内部时序与渲染顺序未变。",
             countMatching(pane, """private fun SwipeWaitVeil\(""") == 1 &&
-                countMatching(pane, """visible = swipeWaitingFirstFrame,""") == 1 &&
-                countMatching(pane, """failed = swipeFailed,""") == 1 &&
+                countMatching(pane, """SwipeLoadPhasePolicy\.resolve\(""") == 1 &&
+                countMatching(
+                    pane,
+                    """visible = SwipeLoadPhasePolicy\.isVeilVisible\(loadPhase\)"""
+                ) == 1 &&
+                countMatching(
+                    pane,
+                    """failed = SwipeLoadPhasePolicy\.isError\(loadPhase\)"""
+                ) == 1 &&
                 countMatching(pane, """onRetry = onRetrySwipe""") == 1 &&
                 countMatching(pane, """if \(failed\) \{""") == 1 &&
                 countMatching(pane, """TextButton\(onClick = onRetry\)""") == 1 &&

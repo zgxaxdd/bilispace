@@ -492,9 +492,43 @@ fun VideoScreen(
 
         when {
             !hostExpanded || fullOn -> {
+                // SW-33：**详情 → 全屏**的进场过渡（200–280ms 淡入 + 极轻微缩放）。
+                // 首页卡片 → 刷视频走的是 OPPO 无缝 morph（既有路径）；这里补的是
+                // 详情页按下全屏时的"瞬时硬切"。reduceMotion 时瞬时到位（无动画）。
+                val animations = LocalAnimations.current
+                val fullEntryAnim = remember { Animatable(if (fullOn) 1f else 0f) }
+                LaunchedEffect(fullOn) {
+                    if (!fullOn) {
+                        // 离开全屏复位：下次进场重新播一遍
+                        fullEntryAnim.snapTo(0f)
+                        return@LaunchedEffect
+                    }
+                    if (animations.reduceMotion) {
+                        fullEntryAnim.snapTo(1f)
+                        return@LaunchedEffect
+                    }
+                    fullEntryAnim.snapTo(0f)
+                    fullEntryAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(
+                            // 200–280ms：短于一次滑动、长于"闪一下"，读作"铺满"而不是"跳"
+                            durationMillis = (animations.medium + animations.short)
+                                .coerceIn(200, 280)
+                        )
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .graphicsLayer {
+                            if (fullOn) {
+                                val p = fullEntryAnim.value
+                                alpha = 0.55f + 0.45f * p
+                                val s = 0.985f + 0.015f * p
+                                scaleX = s
+                                scaleY = s
+                            }
+                        }
                         .onGloballyPositioned {
                             coverBackdropFrame = BackdropFrame(it.boundsInWindow(), RectangleShape)
                         }
