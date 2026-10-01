@@ -186,32 +186,41 @@ object VideoCardCoverColorStore {
                 // 只回收我们自己造的那张；软件位图路径返回的是入参本身，不归我们管
                 if (sampled !== bitmap && !sampled.isRecycled) sampled.recycle()
             }
+        }.onFailure {
+            // 取色失败的表现是"卡片没颜色"这种**静默降级**：不崩、不报错、单测也照绿。
+            // 没有这行日志就只能靠人眼发现（2026-10-01 的真机回归就是这么踩到的）。
+            android.util.Log.w("VideoCardCoverColor", "封面取色失败：${it.message}", it)
         }.getOrNull()
     }
 
     /**
-     * HARDWARE 位图 → [PALETTE_SAMPLE_PX]² 的 ARGB_8888 小样；软件位图原样返回
-     * （palette 内部本就会按 `resizeBitmapArea` 缩放，没必要再套一层）。
-     * 造不出小图（尺寸非法/内存吃紧）时返回 null，调用方按"取不到色"降级。
+     * HARDWARE 位图 → 小尺寸软件位图；软件位图原样返回。
+     *
+     * **必须走 [Bitmap.copy]**：HARDWARE 位图不支持读像素，也**不允许画进软件 Canvas**
+     * （`Canvas.drawBitmap` 会抛 `Software rendering doesn't support hardware bitmaps`）。
+     * 2026-10-01 有一轮改动想用"画进 96×96 小图"绕开整尺寸复制，结果在真机上把整条取色
+     * 打成了静默失败（卡片染色全丢）—— 这条注释就是那次事故的结论，别再试第二次。
+     *
+     * 真正能拿到的收益在这里：复制出来的整尺寸 ARGB_8888（640×480≈1.2MB、960×540≈2.1MB）
+     * 用完**立刻 recycle**，不再等 GC —— 旧写法最大的问题不是峰值，而是生命周期。
+     * 峰值不变，但滚动时同时存活的这种大块从"一堆"变成"零"。
      */
     private fun sampleIntoSoftwareBitmap(source: Bitmap): Bitmap? {
         val hardware = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             source.config == Bitmap.Config.HARDWARE
         if (!hardware) return source
-        return runCatching {
-            val small = Bitmap.createBitmap(
-                PALETTE_SAMPLE_PX, PALETTE_SAMPLE_PX, Bitmap.Config.ARGB_8888
-            )
-            // isFilterBitmap：缩放走双线性而不是就近取整，避免小样里出现马赛克状假主色
-            val paint = android.graphics.Paint().apply { isFilterBitmap = true }
-            android.graphics.Canvas(small).drawBitmap(
-                source,
-                null,
-                android.graphics.Rect(0, 0, PALETTE_SAMPLE_PX, PALETTE_SAMPLE_PX),
-                paint
-            )
-            small
+        val full = runCatching { source.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
+            ?: return null
+        val small = runCatching {
+            Bitmap.createScaledBitmap(full, PALETTE_SAMPLE_PX, PALETTE_SAMPLE_PX, true)
         }.getOrNull()
+        return if (small != null && small !== full) {
+            if (!full.isRecycled) full.recycle()
+            small
+        } else {
+            // 缩放失败就用整图继续（palette 内部自己会 resize），交给调用方在 finally 里回收
+            full
+        }
     }
 
     /**

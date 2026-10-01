@@ -5,19 +5,27 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 封面**动态取色**的分配结构守卫（2026-10-01，对照 BiliPai `8cfc4246b`）。
+ * 封面**动态取色**的分配与降级结构守卫。
  *
- * ## 它守的缺陷
- * `VideoCardCoverColorStore.extractRepresentativeColor` 原先为了读 HARDWARE 位图的像素，
- * 按**封面原尺寸** `copy(ARGB_8888)` 一份软件位图并且不回收：
- * 640×480 ≈1.2MB、960×540 ≈2.1MB，每张染色卡片一次。它不是泄漏（GC 会收），
- * 但滚动时持续制造大对象 → GC 停顿正好落在滚动帧上，症状是"滚动偶发掉帧"，
- * 而代码看上去完全正常。改法是降采样到 96² 小样并在 finally 里 recycle。
+ * ## 它守的东西（含一次真机回归的教训）
+ * 推荐页/排行页卡片按封面主色做动态染色。取色要读像素，而 Coil3 默认解出的是
+ * **HARDWARE 位图**（不能读像素、也不能画进软件 Canvas），唯一受支持的转换是
+ * `copy(ARGB_8888)` —— 那是一份与封面同尺寸的大块（640×480≈1.2MB、960×540≈2.1MB）。
+ * 于是这里有三条不变式：
+ * 1. 转换必须走 `copy`，**不许**改用软件 Canvas 画（平台会抛，外层 `runCatching`
+ *    会把异常吞成“没有颜色”）；
+ * 2. 大块必须**立刻 recycle**、palette 只吃小样 —— 真正伤滚动的是这些大块的**存活时长**，
+ *    不是峰值（旧写法只能等 GC 什么时候心情好）；
+ * 3. 取色失败必须**留日志**：它的症状是“卡片没染色”这种静默降级，不崩、不进日志、
+ *    JVM 单测也照绿。
  *
  * ## 为什么用扫源码而不是跑行为
  * JVM 单测里 `android.graphics.Bitmap` 被 stub（`isReturnDefaultValues = true`），
- * 这条路**跑不出行为差异**（这也是本仓 `resolveRepresentativeSwatch` 为什么把
- * framework 的 `colorToHSV` 换成纯 Kotlin 版本的同一个理由）。所以钉写法。
+ * 上面三条在 JVM 上**跑不出行为差异**（`resolveRepresentativeSwatch` 把 framework 的
+ * `colorToHSV` 换成纯 Kotlin 版本，正是同一个理由）。所以钉写法。
+ * ⚠️ 但**结构守卫钉不住“平台到底允不允许”这类事实**：2026-10-01 本文件第一条就写反过
+ * （写成“永远不许出现 copy”），把实现推向一个只在真机上炸的方案，380+ 单测全绿。
+ * 改完取色必须真机看一眼染色。
  *
  * ## 防假绿
  * 每个断言前都先确认目标函数体真的取到了（取不到直接 AssertionError），
@@ -86,34 +94,65 @@ class CoverTintAllocationStructureTest {
 
     private val store = "color${File.separator}VideoCardCoverColorStore.kt"
 
-    /** ① 旧缺陷形态：按封面尺寸整张复制，且无人回收。 */
+    /**
+     * ① HARDWARE 位图只能 `copy()` 转换，不许画进软件 Canvas。
+     *
+     * 这条断言在 2026-10-01 写反过一次（当时写成“永远不许出现 copy”），
+     * 于是实现被推去用 `Canvas.drawBitmap(硬件位图)` —— 平台上不允许，
+     * 真机上整条取色静默失败、卡片染色全丢。规则以现在的形态为准。
+     */
     @Test
-    fun coverTintNeverCopiesAFullSizedSoftwareBitmap() {
-        val lines = sourceOf(store)
-        val copyCount = lines.count { Regex("""\.copy\(\s*Bitmap\.Config""").containsMatchIn(it) }
+    fun hardwareBitmapIsConvertedByCopyNotByDrawingToASoftwareCanvas() {
+        val body = blockBody(sourceOf(store), "private fun sampleIntoSoftwareBitmap(")
         assertTrue(
-            "取色路径里不得出现 `bitmap.copy(Bitmap.Config…)`：那是**按封面原尺寸**复制" +
-                "软件位图（640×480≈1.2MB、960×540≈2.1MB）且不回收，滚动时持续制造大对象。" +
-                "正确做法见 sampleIntoSoftwareBitmap（降采样小样 + finally recycle）。当前 $copyCount 处。",
-            copyCount == 0
+            "HARDWARE 位图必须用 copy(ARGB_8888) 转换（唯一受支持的路径）。",
+            body.count { Regex("""\.copy\(\s*Bitmap\.Config""").containsMatchIn(it) } >= 1
+        )
+        assertTrue(
+            "取色路径里不许出现把位图画进软件 Canvas 的写法：" +
+                "Canvas.drawBitmap 对 HARDWARE 位图会抛 “Software rendering doesn't support " +
+                "hardware bitmaps”，而外层 runCatching 会把它吞成“没有颜色”。",
+            body.none { it.contains("Canvas(") } &&
+                sourceOf(store).none { it.contains("drawBitmap(") }
         )
     }
 
-    /** ② 我们造的小图必须被回收，而且是在 finally 里（palette 抛异常也要回收）。 */
+    /** ② 整尺寸复制要立刻归还（真正的问题是生命周期，不是峰值），palette 只吃小样。 */
     @Test
-    fun paletteSampleIsRecycledInFinallyAndNeverTheCaller() {
-        val body = blockBody(sourceOf(store), "internal fun extractRepresentativeColor(")
-        val finallyAt = body.indexOfFirst { it.contains("} finally {") }
-        val recycleAt = body.indexOfFirst { it.contains(".recycle()") }
+    fun fullSizedCopyIsRecycledImmediatelyAndPaletteGetsTheSmallSample() {
+        val body = blockBody(sourceOf(store), "private fun sampleIntoSoftwareBitmap(")
         assertTrue(
-            "小样必须在 finally 里 recycle（palette.generate() 抛异常时也要收）。" +
-                "finally@$finallyAt recycle@$recycleAt",
-            finallyAt in 0 until recycleAt
+            "复制出的整尺寸 ARGB_8888（1.2~2.1MB）必须在拿到小样后立刻 recycle，" +
+                "并且 palette 用的是 createScaledBitmap 的小样。",
+            body.any { Regex("""full\.recycle\(\)""").containsMatchIn(it) } &&
+                body.any {
+                    Regex("""createScaledBitmap\(\s*full\s*,\s*PALETTE_SAMPLE_PX""").containsMatchIn(it)
+                }
         )
         assertTrue(
-            "只许回收自己造的那张：软件位图路径返回的是**调用方的**位图（Coil 缓存里的），" +
-                "误回收会让后续封面显示成空白。",
-            body.any { Regex("""sampled\s*!==\s*bitmap""").containsMatchIn(it) }
+            "缩放失败时不许把整图也回收掉（palette 会拿到已回收的位图）——" +
+                "必须走“返回整图、交给调用方回收”的分支。",
+            body.any { Regex("""small\s*!==\s*full""").containsMatchIn(it) }
+        )
+        val extract = blockBody(sourceOf(store), "internal fun extractRepresentativeColor(")
+        val finallyAt = extract.indexOfFirst { it.contains("} finally {") }
+        val recycleAt = extract.indexOfFirst { it.contains(".recycle()") }
+        assertTrue(
+            "小样在 finally 里回收（palette.generate() 抛异常也要收），" +
+                "且只回收自己造的那张（软件位图路径返回的是 Coil 缓存里的位图，误回收会让封面变空白）。",
+            finallyAt in 0 until recycleAt &&
+                extract.any { Regex("""sampled\s*!==\s*bitmap""").containsMatchIn(it) }
+        )
+    }
+
+    /** ③ 取色失败必须留痕 —— 否则“丢染色”只能靠人眼发现。 */
+    @Test
+    fun extractionFailureIsLoggedNotSwallowed() {
+        val body = blockBody(sourceOf(store), "internal fun extractRepresentativeColor(")
+        assertTrue(
+            "取色失败不许被 runCatching 静默吞掉：它的症状是“卡片没有颜色”，" +
+                "不崩、不进日志、JVM 单测也照绿（2026-10-01 的真机回归就是这么漏过去的）。",
+            body.any { it.contains(".onFailure") } && body.any { it.contains("Log.w(") }
         )
     }
 
