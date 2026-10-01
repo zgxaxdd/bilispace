@@ -473,7 +473,10 @@ class VideoViewModel @Inject constructor(
             title = detail.title,
             cover = detail.cover.orEmpty(),
             author = detail.owner?.name,
-            durationText = null
+            durationText = null,
+            ownerMid = detail.owner?.mid?.takeIf { it > 0L },
+            durationSec = detail.durationSec,
+            dimension = detail.dimension
         )
         val seedQueue = appendSwipeEntries(
             existing = emptyList(),

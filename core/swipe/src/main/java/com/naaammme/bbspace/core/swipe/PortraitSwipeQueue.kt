@@ -1,8 +1,10 @@
 package com.naaammme.bbspace.core.swipe
 
 import androidx.compose.runtime.Immutable
+import com.naaammme.bbspace.core.model.FeedDislikeContext
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.StoryFeedItem
+import com.naaammme.bbspace.core.model.VideoDimension
 import com.naaammme.bbspace.core.model.VideoRelate
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
@@ -24,12 +26,26 @@ import com.naaammme.bbspace.core.swipe.model.SwipeId
 /** 滑动队列条目：页 0（锚点 = 进入全屏时的视频）与后续页共用。 */
 @Immutable
 data class SwipeEntry(
-    val target: com.naaammme.bbspace.core.model.VideoTarget.Ugc,
+    val target: VideoTarget.Ugc,
     val bvid: String,
     val title: String,
     val cover: String,
     val author: String?,
     val durationText: String?,
+    /**
+     * UP 主 mid（SW-04）。feed 源（`args.up_id`）与 story 源（`authorMid`）有；
+     * **relate 源没有**——关注按钮（SW-20）按 null 隐藏，不做假按钮。
+     */
+    val ownerMid: Long? = null,
+    /** 时长原始秒数（SW-04）；时长文本（[durationText]）之外的第二表示，供判据用。 */
+    val durationSec: Long? = null,
+    /** 画幅（SW-04）；feed/story 源未核实带不带尺寸，拿不到就 null（"未知放过"，SW-40）。 */
+    val dimension: VideoDimension? = null,
+    /**
+     * 负反馈上下文（SW-04/SW-24）：**仅 feed 源有**（relate/story 上游无此通道）。
+     * null 时"不感兴趣"入口隐藏。
+     */
+    val dislikeContext: FeedDislikeContext? = null,
 ) {
     val displayAuthor: String? get() = author?.takeIf(String::isNotBlank)
 
@@ -92,7 +108,11 @@ fun swipeEntriesFromRelates(relates: List<VideoRelate>): List<SwipeEntry> =
                 title = relate.title,
                 cover = relate.cover,
                 author = relate.author,
-                durationText = relate.durationText
+                durationText = relate.durationText,
+                // relate 卡没有 UP mid（SW-04 核实结论）；时长/画幅是 proto 已有字段的接出
+                ownerMid = null,
+                durationSec = relate.durationSec,
+                dimension = relate.dimension
             )
         }
     }
@@ -112,7 +132,11 @@ fun swipeEntryFromStory(item: StoryFeedItem): SwipeEntry? {
         title = item.title,
         cover = item.cover,
         author = item.author,
-        durationText = item.durationSec.takeIf { it > 0L }?.let(::formatSwipeDuration)
+        durationText = item.durationSec.takeIf { it > 0L }?.let(::formatSwipeDuration),
+        ownerMid = item.authorMid.takeIf { it > 0L },
+        durationSec = item.durationSec.takeIf { it > 0L },
+        // story 卡的 dimension 有则带、无则 null（"未知放过"，SW-40）；dislikeContext 无通道
+        dimension = item.dimension
     )
 }
 
@@ -127,7 +151,10 @@ fun swipeEntryFromFeedItem(item: FeedItem): SwipeEntry? {
         title = item.title,
         cover = item.cover,
         author = item.args?.upName,
-        durationText = null
+        durationText = null,
+        // feed 源有 UP mid（args.up_id）与负反馈通道；时长/尺寸待核实，留 null
+        ownerMid = item.args?.upId?.takeIf { it > 0L },
+        dislikeContext = item.dislikeContext
     )
 }
 

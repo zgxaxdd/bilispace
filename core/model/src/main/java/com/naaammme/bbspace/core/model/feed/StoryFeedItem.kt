@@ -20,5 +20,10 @@ data class StoryFeedItem(
     val author: String?,
     val authorMid: Long,
     /** 时长（秒）；接口原始单位即秒。 */
-    val durationSec: Long
+    val durationSec: Long,
+    /**
+     * 画幅（SW-04）：story 响应卡片上的 `dimension{width,height,rotate}`，有则解析，
+     * 无则 null（"未知放过"，SW-40 不猜）。
+     */
+    val dimension: VideoDimension? = null
 )

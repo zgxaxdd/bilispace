@@ -3,6 +3,7 @@ package com.naaammme.bbspace.core.feed
 import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.BiliConstants
 import com.naaammme.bbspace.core.model.StoryFeedItem
+import com.naaammme.bbspace.core.model.VideoDimension
 import com.naaammme.bbspace.infra.network.BiliRestClient
 import com.naaammme.bbspace.infra.network.BiliRestParamBuilder
 import com.naaammme.bbspace.infra.network.BiliRestProfile
@@ -80,6 +81,15 @@ class StoryFeedRepository @Inject constructor(
                 val bvid = playerArgs.optString("bvid")
                 if (bvid.isBlank()) continue
                 val owner = card.optJSONObject("owner")
+                // 画幅（SW-04）：卡片上的 dimension{width,height,rotate} 有则解析、
+                // 无则 null——VideoDimension.from 自带"宽高非正 → null"的兜底。
+                val dimension = card.optJSONObject("dimension")?.let { dim ->
+                    VideoDimension.from(
+                        width = dim.optLong("width"),
+                        height = dim.optLong("height"),
+                        rotate = dim.optLong("rotate")
+                    )
+                }
                 add(
                     StoryFeedItem(
                         aid = playerArgs.optLong("aid"),
@@ -89,7 +99,8 @@ class StoryFeedRepository @Inject constructor(
                         cover = card.optString("cover"),
                         author = owner?.optString("name")?.takeIf(String::isNotBlank),
                         authorMid = owner?.optLong("mid") ?: 0L,
-                        durationSec = card.optLong("duration")
+                        durationSec = card.optLong("duration"),
+                        dimension = dimension
                     )
                 )
             }

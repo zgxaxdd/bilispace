@@ -1,7 +1,10 @@
 package com.naaammme.bbspace.core.swipe
 
+import com.naaammme.bbspace.core.model.FeedArgs
+import com.naaammme.bbspace.core.model.FeedDislikeContext
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.StoryFeedItem
+import com.naaammme.bbspace.core.model.VideoDimension
 import com.naaammme.bbspace.core.model.VideoRelate
 import com.naaammme.bbspace.core.model.VideoTarget
 import org.junit.Assert.assertEquals
@@ -34,7 +37,9 @@ class PortraitSwipeQueueTest {
         title: String = "t",
         cover: String = "c",
         author: String? = null,
-        aid: Long = 0L
+        aid: Long = 0L,
+        durationSec: Long? = null,
+        dimension: VideoDimension? = null
     ) = VideoRelate(
         target = VideoTarget.Ugc(aid = aid, cid = 0L, bvid = bvid),
         title = title,
@@ -43,7 +48,9 @@ class PortraitSwipeQueueTest {
         durationText = null,
         viewText = null,
         danmakuText = null,
-        reason = null
+        reason = null,
+        durationSec = durationSec,
+        dimension = dimension
     )
 
     @Test
@@ -294,6 +301,81 @@ class PortraitSwipeQueueTest {
         assertEquals("", entries[0].bvid)
         assertEquals("aid:${Long.MAX_VALUE}", entries[0].legacyKey())
         assertTrue(entries[0].isCurrentVideo(null, Long.MAX_VALUE))
+    }
+
+    // ── SW-04：条目模型补全（三源映射的字段齐全性）───────────────────────────
+
+    @Test
+    fun `条目映射 - relate 源接出时长秒与画幅、mid 缺失为 null（SW-04）`() {
+        val entries = swipeEntriesFromRelates(
+            listOf(
+                relate(
+                    "BV1relate",
+                    durationSec = 181L,
+                    dimension = VideoDimension(width = 1080, height = 1920, rotate = 0)
+                )
+            )
+        )
+        assertEquals(1, entries.size)
+        assertEquals(181L, entries[0].durationSec)
+        assertEquals(VideoDimension(1080, 1920, 0), entries[0].dimension)
+        // relate 卡没有 UP mid：关注按钮（SW-20）按 null 隐藏，不做假按钮
+        assertEquals(null, entries[0].ownerMid)
+        assertEquals(null, entries[0].dislikeContext)
+    }
+
+    @Test
+    fun `条目映射 - 画幅缺失时兜底为 null 走未知放过（SW-04）`() {
+        val entries = swipeEntriesFromRelates(listOf(relate("BV1ok", durationSec = null)))
+        assertEquals(1, entries.size)
+        assertEquals(null, entries[0].dimension)
+        assertEquals(null, entries[0].durationSec)
+    }
+
+    @Test
+    fun `条目映射 - feed 源接出 UP mid 与负反馈上下文（SW-04）`() {
+        val dislike = FeedDislikeContext(
+            id = "1",
+            goto = "av",
+            useHdProfile = true,
+            spmid = "333.1",
+            fromSpmid = "333.2",
+            fromModule = null,
+            trackId = null,
+            reportData = null,
+            mid = 42L,
+            rid = 7L,
+            tagId = null
+        )
+        val item = feedItem(target = VideoTarget.Ugc(aid = 2L, cid = 62_131L, bvid = null)).copy(
+            args = FeedArgs(upId = 42L, upName = "UP主", tid = 0, tname = null, aid = 2L),
+            dislikeContext = dislike
+        )
+        val entry = swipeEntryFromFeedItem(item)
+        assertEquals(42L, entry?.ownerMid)
+        assertEquals(dislike, entry?.dislikeContext)
+        // feed 源时长/画幅待核实（App 流 JSON 未 dump），必须留 null 走"未知放过"
+        assertEquals(null, entry?.durationSec)
+        assertEquals(null, entry?.dimension)
+    }
+
+    @Test
+    fun `条目映射 - story 源接出 UP mid 与时长秒（SW-04）`() {
+        val story = swipeEntryFromStory(
+            StoryFeedItem(
+                aid = 170_001L,
+                cid = 279_786L,
+                bvid = "BV17x411w7KC",
+                title = "t",
+                cover = "c",
+                author = "UP",
+                authorMid = 9L,
+                durationSec = 65L
+            )
+        )
+        assertEquals(9L, story?.ownerMid)
+        assertEquals(65L, story?.durationSec)
+        assertEquals(null, story?.dimension)
     }
 
     private fun feedItem(target: VideoTarget?): FeedItem = FeedItem(

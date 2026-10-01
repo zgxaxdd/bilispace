@@ -93,7 +93,10 @@ class SwipeSessionController {
         _anchor.value = seed.copy(
             title = info?.title.orEmpty(),
             cover = info?.cover.orEmpty(),
-            author = info?.author
+            author = info?.author,
+            ownerMid = info?.ownerMid,
+            durationSec = info?.durationSec,
+            dimension = info?.dimension
         )
         _queue.value = appendSwipeEntries(
             existing = emptyList(),

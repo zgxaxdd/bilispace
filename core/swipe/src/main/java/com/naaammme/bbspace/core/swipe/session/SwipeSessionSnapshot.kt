@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.core.swipe.session
 
+import com.naaammme.bbspace.core.model.VideoDimension
 import com.naaammme.bbspace.core.model.VideoSrc
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.swipe.SwipeEntry
@@ -43,10 +44,20 @@ private const val KEY_TITLE = "title"
 private const val KEY_COVER = "cover"
 private const val KEY_AUTHOR = "author"
 private const val KEY_DURATION_TEXT = "durationText"
+private const val KEY_OWNER_MID = "ownerMid"
+private const val KEY_DURATION_SEC = "durationSec"
+private const val KEY_DIM_WIDTH = "dimWidth"
+private const val KEY_DIM_HEIGHT = "dimHeight"
+private const val KEY_DIM_ROTATE = "dimRotate"
 private const val KEY_SRC_FROM = "srcFrom"
 private const val KEY_SRC_SPMID = "srcSpmid"
 private const val KEY_SRC_TRACK = "srcTrack"
 private const val KEY_SRC_FLOW = "srcFlow"
+
+// ⚠️ dislikeContext（SW-04 字段）**刻意不进快照**：它的 reportData/trackId 是
+// KB 级长串，整队列落盘会把 SavedStateHandle 撑大一个量级。恢复后的会话里
+// 该字段为 null → SW-24 的"不感兴趣"入口按既有规格隐藏（null = 不做假按钮），
+// 语义自洽；SW-24 接手时若要恢复负反馈入口，须连同 SavedStateHandle 容量一起评估。
 
 /** 防御上限：快照异常膨胀时不至于把 SavedStateHandle 撑爆（正常队列几十条封顶）。 */
 private const val MAX_SNAPSHOT_QUEUE = 200
@@ -89,6 +100,13 @@ private fun SwipeEntry.toJsonObject(): JsonObject = buildJsonObject {
     put(KEY_COVER, cover)
     author?.let { put(KEY_AUTHOR, it) }
     durationText?.let { put(KEY_DURATION_TEXT, it) }
+    ownerMid?.let { put(KEY_OWNER_MID, it) }
+    durationSec?.let { put(KEY_DURATION_SEC, it) }
+    dimension?.let {
+        put(KEY_DIM_WIDTH, it.width)
+        put(KEY_DIM_HEIGHT, it.height)
+        put(KEY_DIM_ROTATE, it.rotate)
+    }
     put(KEY_SRC_FROM, target.src.from)
     put(KEY_SRC_SPMID, target.src.fromSpmid)
     target.src.trackId?.let { put(KEY_SRC_TRACK, it) }
@@ -107,13 +125,23 @@ private fun JsonObject.toSwipeEntry(): SwipeEntry? {
         trackId = this[KEY_SRC_TRACK]?.jsonPrimitive?.contentOrNull,
         reportFlowData = this[KEY_SRC_FLOW]?.jsonPrimitive?.contentOrNull
     )
+    val dimWidth = this[KEY_DIM_WIDTH]?.jsonPrimitive?.intOrNull ?: 0
+    val dimHeight = this[KEY_DIM_HEIGHT]?.jsonPrimitive?.intOrNull ?: 0
+    val dimRotate = this[KEY_DIM_ROTATE]?.jsonPrimitive?.intOrNull ?: 0
     return SwipeEntry(
         target = VideoTarget.Ugc(aid = aid, cid = cid, bvid = bvid.takeIf(String::isNotEmpty), src = src),
         bvid = bvid,
         title = this[KEY_TITLE]?.jsonPrimitive?.contentOrNull.orEmpty(),
         cover = this[KEY_COVER]?.jsonPrimitive?.contentOrNull.orEmpty(),
         author = this[KEY_AUTHOR]?.jsonPrimitive?.contentOrNull,
-        durationText = this[KEY_DURATION_TEXT]?.jsonPrimitive?.contentOrNull
+        durationText = this[KEY_DURATION_TEXT]?.jsonPrimitive?.contentOrNull,
+        ownerMid = this[KEY_OWNER_MID]?.jsonPrimitive?.longOrNull?.takeIf { it > 0L },
+        durationSec = this[KEY_DURATION_SEC]?.jsonPrimitive?.longOrNull?.takeIf { it > 0L },
+        dimension = VideoDimension.from(
+            width = dimWidth.toLong(),
+            height = dimHeight.toLong(),
+            rotate = dimRotate.toLong()
+        )
     )
 }
 

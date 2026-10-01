@@ -2,6 +2,7 @@ package com.naaammme.bbspace.core.video
 
 import com.bapis.bilibili.app.archive.middleware.v1.PlayerArgs
 import com.bapis.bilibili.app.archive.middleware.v1.QnPolicy
+import com.bapis.bilibili.app.viewunite.common.Dimension as ViewUniteDimension
 import com.bapis.bilibili.app.viewunite.common.Module
 import com.bapis.bilibili.app.viewunite.common.RelateCard
 import com.bapis.bilibili.app.viewunite.common.ViewEpisode
@@ -20,6 +21,7 @@ import com.naaammme.bbspace.core.model.PlayBiz
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
 import com.naaammme.bbspace.core.model.VideoDetail
 import com.naaammme.bbspace.core.model.VideoDetailResult
+import com.naaammme.bbspace.core.model.VideoDimension
 import com.naaammme.bbspace.core.model.VideoOwner
 import com.naaammme.bbspace.core.model.VideoPagePart
 import com.naaammme.bbspace.core.model.VideoRelate
@@ -210,7 +212,12 @@ class VideoDetailRepository @Inject constructor(
                 pages = parsePages(reply),
                 relates = relates,
                 userState = mapUserState(reply),
-                copyright = reply.arc.copyright.takeIf { it > 0 }
+                copyright = reply.arc.copyright.takeIf { it > 0 },
+                // viewunite.v1.Arc 有 duration（秒）；dimension 在 viewunite 链路不存在
+                // （旧 API view.v1 的 ViewReply.dimension=36 不在本管线），恒 null 由
+                // SW-40 播放后回填。
+                durationSec = reply.arc.duration.takeIf { it > 0L },
+                dimension = null
             ),
             ids = ids,
             biz = biz
@@ -394,10 +401,18 @@ class VideoDetailRepository @Inject constructor(
                     card.av.rcmdReason.text.takeIf(String::isNotBlank)
                 } else {
                     null
-                }
+                },
+                // SW-04：proto 里已有、此前没解析的两个字段——时长（秒）与画幅。
+                // 解析失败（<= 0 / 宽高非法）一律 null，走"未知放过"的下游策略。
+                durationSec = card.av.duration.takeIf { it > 0L },
+                dimension = card.av.dimension.toVideoDimension()
             )
         }
     }
+
+    /** viewunite relate 卡的画幅（`RelateAVCard.dimension`）→ 模型；非法值 null。 */
+    private fun ViewUniteDimension.toVideoDimension(): VideoDimension? =
+        VideoDimension.from(width = width, height = height, rotate = rotate)
 
     private fun resolveIds(
         requestIds: VideoRequestIds,

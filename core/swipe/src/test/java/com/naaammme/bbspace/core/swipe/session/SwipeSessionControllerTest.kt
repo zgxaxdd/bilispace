@@ -280,7 +280,10 @@ class SwipeSessionControllerTest {
                 title = "只有 aid 的 relate 卡",
                 cover = "c",
                 author = "UP",
-                durationText = "1:02:03"
+                durationText = "1:02:03",
+                ownerMid = 777L,
+                durationSec = 3723L,
+                dimension = com.naaammme.bbspace.core.model.VideoDimension(1080, 1920, 0)
             )
         )
         val snapshot = SwipeSessionSnapshot(
@@ -297,8 +300,12 @@ class SwipeSessionControllerTest {
         assertEquals(7, parsed?.page)
         assertEquals(anchor, parsed?.anchor)
         assertEquals(queue, parsed?.queue)
-        // src 无损（openSwipeTarget 的短路判据依赖它）
+        // src 无损（openSwipeTarget 的短路判据依赖它）；SW-04 字段一并无损往返
         assertEquals(src, parsed?.anchor?.target?.src)
+        assertEquals(777L, parsed?.queue?.first()?.ownerMid)
+        assertEquals(3723L, parsed?.queue?.first()?.durationSec)
+        assertEquals(1080, parsed?.queue?.first()?.dimension?.width)
+        assertEquals(1920, parsed?.queue?.first()?.dimension?.height)
     }
 
     @Test
