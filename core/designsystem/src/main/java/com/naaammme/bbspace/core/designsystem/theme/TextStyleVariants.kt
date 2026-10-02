@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
@@ -39,3 +40,21 @@ fun TextStyle.withTextColor(color: Color): TextStyle = remember(this, color) { c
  */
 @Composable
 fun boldBodyMedium(): TextStyle = MaterialTheme.typography.bodyMedium.asBold()
+
+/**
+ * 会话常驻计数（SW-30）：`labelSmall` + **柔和文字阴影**。
+ *
+ * 用途：竖屏连播的互动栏计数没有底衬，靠阴影在任何画面上保持可读
+ * （对标 BiliPai 竖屏栏 `labelSmall + shadow(黑 50%, blur 8)`）。
+ * 放这里而不是调用点内联 `copy(`：棘轮（`DesignTokenLintTest`）把业务层内联
+ * copy 钉成 0，且 `remember` 保证同一基样式只算一次。
+ */
+@Composable
+fun softShadowLabelSmall(): TextStyle {
+    // MaterialTheme.typography 是组合期读取，必须先在组合里取值、再以它为键 remember
+    // （与 asBold/withFontSize 的写法一致）
+    val base = MaterialTheme.typography.labelSmall
+    return remember(base) {
+        base.copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.5f), blurRadius = 8f))
+    }
+}

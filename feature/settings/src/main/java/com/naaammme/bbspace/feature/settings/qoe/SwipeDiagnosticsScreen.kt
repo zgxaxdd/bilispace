@@ -33,8 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeEventType
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeHub
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeMath
@@ -101,8 +101,8 @@ fun SwipeDiagnosticsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(BiliSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 item { MetricCard("概览", overviewLines(snapshot)) }
                 item { MetricCard("事件计数", counterLines(snapshot)) }
@@ -145,7 +145,7 @@ private fun MetricCard(title: String, rows: List<Pair<String, String>>) {
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.md)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
@@ -155,7 +155,7 @@ private fun MetricCard(title: String, rows: List<Pair<String, String>>) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = if (index == 0) 8.dp else 4.dp),
+                        .padding(top = if (index == 0) BiliSpacing.sm else BiliSpacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {

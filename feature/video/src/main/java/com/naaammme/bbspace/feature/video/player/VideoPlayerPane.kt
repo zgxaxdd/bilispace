@@ -26,17 +26,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
@@ -45,7 +41,6 @@ import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -56,8 +51,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -141,6 +134,7 @@ import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.theme.softShadowLabelSmall
 import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
@@ -1519,14 +1513,10 @@ private fun SwipeRailCount(label: String, reduceMotion: Boolean) {
     Text(
         text = shown,
         color = Color.White,
-        style = MaterialTheme.typography.labelSmall.copy(
-            // 现代短视频的通用做法（对标 BiliPai `labelSmall + shadow(黑 50%, blur 8)`）：
-            // 计数没有底衬，靠**文字阴影**在任何画面上保持可读——比再垫一层圆盘轻。
-            shadow = androidx.compose.ui.graphics.Shadow(
-                color = Color.Black.copy(alpha = 0.5f),
-                blurRadius = 8f
-            )
-        ),
+        // 现代短视频的通用做法（对标 BiliPai `labelSmall + shadow(黑 50%, blur 8)`）：
+        // 计数没有底衬，靠**文字阴影**在任何画面上保持可读——比再垫一层圆盘轻。
+        // 走 designsystem 的**具名出口**（棘轮：业务层不许内联 `typography.x.copy(`）。
+        style = softShadowLabelSmall(),
         maxLines = 1,
         modifier = Modifier.graphicsLayer {
             if (!reduceMotion) {

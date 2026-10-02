@@ -3,7 +3,6 @@ package com.naaammme.bbspace.feature.video.swipesource
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.feed.FeedRepository
 import com.naaammme.bbspace.core.feed.StoryFeedRepository
-import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.source.SwipeCursor
 import com.naaammme.bbspace.core.swipe.source.SwipeSource
 import com.naaammme.bbspace.core.swipe.source.SwipeSourceBatch

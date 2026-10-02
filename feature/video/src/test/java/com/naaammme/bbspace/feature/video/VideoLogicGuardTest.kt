@@ -212,7 +212,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun cancellationSwallowingIsClosed() {
-        for (name in listOf("StreamPlaybackSessionImpl.kt", "VodDanmakuSession.kt")) {
+        for (name in listOf("StreamPlaybackSessionImpl.kt", "VodDanmakuSession.kt", "PortraitSwipePager.kt")) {
             val lines = codeOf(name)
             assertTrue(
                 "$name 里不该再有包挂起调用的 runCatching（应使用 runCatchingCancellable）",
@@ -489,7 +489,7 @@ class VideoLogicGuardTest {
             countMatching(pager, """BackHandler\(enabled = backAction != SwipeBackPolicy\.Action\.PassThrough\)""") == 1 &&
                 countMatching(pager, """SwipeBackPolicy\.resolve\(""") == 1 &&
                 countMatching(pager, """SwipeBackPolicy\.Action\.CloseSheet ->""") == 1 &&
-                countMatching(pager, """showMoreSheet -> showMoreSheet = false""") == 1 &&
+                countMatching(pager, """showMoreSheet -> closeMoreSheet\(\)""") == 1 &&
                 countMatching(pager, """showComments -> showComments = false""") == 1 &&
                 countMatching(pager, """showFavSheet -> closeFavSheet\(\)""") == 1 &&
                 countMatching(pager, """delay\(SwipeBackPolicy\.SHEET_CLOSE_GRACE_MS\)""") == 1 &&
@@ -1553,7 +1553,12 @@ class VideoLogicGuardTest {
                 countMatching(pane, """SwipeRailIconSize""") >= 2 &&
                 blockBody(pane, "private fun SwipeRailAction(")
                     .none { it.contains(".border(") || it.contains("Brush") } &&
-                countMatching(pane, """blurRadius = 8f""") == 1 &&
+                // 计数阴影走 designsystem 的**具名出口**（棘轮：业务层不许内联 typography.copy）
+                countMatching(pane, """style = softShadowLabelSmall\(\)""") == 1 &&
+                countMatching(
+                    codeOf("TextStyleVariants.kt"),
+                    """fun softShadowLabelSmall\("""
+                ) == 1 &&
                 countMatching(pane, """label = stickyLike \?: "点赞"""") == 1 &&
                 countMatching(pane, """label = stickyReply \?: "评论"""") == 1 &&
                 countMatching(pane, """label = stickyFav \?: "收藏"""") == 1

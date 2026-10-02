@@ -76,7 +76,6 @@ import com.naaammme.bbspace.core.swipe.SwipeBackPolicy
 import com.naaammme.bbspace.core.swipe.SwipeChromeBurnInPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeErrorPolicy
-import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
 import com.naaammme.bbspace.core.swipe.SwipePageTransformPolicy
 import com.naaammme.bbspace.core.swipe.SwipeWaitPolicy
 import kotlinx.coroutines.delay
@@ -423,6 +422,21 @@ internal fun PortraitSwipePager(
         }
     }
 
+    /**
+     * 收起「更多」面板（与 [closeFavSheet] 同一套纪律）：
+     * **不包 `runCatching`** —— 它会连 `CancellationException` 一起吞掉（本仓纪律：
+     * 挂起调用一律走可取消版本）；状态落位放 `NonCancellable`，宿主被取消也收得掉。
+     */
+    fun closeMoreSheet() {
+        scope.launch {
+            try {
+                if (moreSheetState.isVisible) moreSheetState.hide()
+            } finally {
+                withContext(NonCancellable) { showMoreSheet = false }
+            }
+        }
+    }
+
     // ── 会话内 back 优先级（用户反馈：看完评论顺手侧滑 → 直接退出到推荐页）──────────
     // 面板开着 → 只关面板；面板刚关（宽限窗口内）→ 吞掉这一次（顺手滑不该带走会话）；
     // 否则放行给宿主（story 退出 / 全屏回缩）。
@@ -450,7 +464,7 @@ internal fun PortraitSwipePager(
         when (backAction) {
             SwipeBackPolicy.Action.CloseSheet -> {
                 when {
-                    showMoreSheet -> showMoreSheet = false
+                    showMoreSheet -> closeMoreSheet()
                     showComments -> showComments = false
                     showFavSheet -> closeFavSheet()
                 }
@@ -591,8 +605,23 @@ internal fun PortraitSwipePager(
         // 每次亮 ~0.5s → 整块"消失再出现"，与互动栏同款毛病。常驻件就该常驻——
         // 它在加载层之上（与互动栏同一 z 关系）。
         // 块内高度也已恒定（粘滞标题/保底两行/话题单行预留），不会再靠内容高度把它顶动。
-        // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接
-        val ownerMid = playbackState.detail?.owner?.mid
+        // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接。
+        // **构建一次、两处共用**：原先互动栏与底部信息层各自拼一遍 SpaceRoute（重复代码）。
+        val openOwnerSpace: (() -> Unit)? = playbackState.detail?.owner?.mid
+            ?.takeIf { it > 0L }
+            ?.let { mid ->
+                onOpenSpace?.let { open ->
+                    {
+                        open(
+                            SpaceRoute(
+                                mid = mid,
+                                name = playbackState.detail?.owner?.name,
+                                fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
+                            )
+                        )
+                    }
+                }
+            }
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -615,19 +644,7 @@ internal fun PortraitSwipePager(
                     owner = playbackState.detail?.owner?.name,
                     tags = playbackState.detail?.tags.orEmpty(),
                     seasonTitle = playbackState.detail?.season?.title,
-                    onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
-                        onOpenSpace?.let { open ->
-                            {
-                                open(
-                                    SpaceRoute(
-                                        mid = mid,
-                                        name = playbackState.detail?.owner?.name,
-                                        fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
-                                    )
-                                )
-                            }
-                        }
-                    },
+                    onOpenSpace = openOwnerSpace,
                     resetKey = playbackState.ids.aid.takeIf { it > 0L }
                         ?: playbackState.ids.bvid
                 )
@@ -678,26 +695,14 @@ internal fun PortraitSwipePager(
                 },
                 // SW-20：点赞长按 = 一键三连（结果经 VM.msg → VideoScreen 的 Toast 提示）
                 onLongPressLike = viewModel::triple,
-                // SW-20：UP 头像 → 主页（`onOpenSpace` 由 VideoScreen 传入；mid 为 0 时不接）
+                // SW-20：UP 头像 → 主页（与底部信息层 @名 共用同一个出口，见 openOwnerSpace）
                 ownerFace = playbackState.detail?.owner?.face,
                 ownerName = playbackState.detail?.owner?.name,
+                onOpenSpace = openOwnerSpace,
                 // SW-24：更多面板（不感兴趣/弹幕开关/复制链接/系统分享）
                 onOpenMore = {
                     showMoreSheet = true
                     lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
-                },
-                onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
-                    onOpenSpace?.let { open ->
-                        {
-                            open(
-                                SpaceRoute(
-                                    mid = mid,
-                                    name = playbackState.detail?.owner?.name,
-                                    fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
-                                )
-                            )
-                        }
-                    }
                 },
                 faved = playbackState.detail?.userState?.faved == true,
                 favText = playbackState.detail?.stat?.fav,
@@ -793,12 +798,7 @@ internal fun PortraitSwipePager(
     if (showMoreSheet) {
         val currentEntry = pages.getOrNull(pagerState.currentPage)
         ModalBottomSheet(
-            onDismissRequest = {
-                scope.launch {
-                    runCatching { moreSheetState.hide() }
-                    showMoreSheet = false
-                }
-            },
+            onDismissRequest = { closeMoreSheet() },
             sheetState = moreSheetState,
             shape = biliSheetShape(),
             scrimColor = Color.Black.copy(alpha = 0.40f),
