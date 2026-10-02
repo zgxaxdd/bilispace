@@ -540,6 +540,9 @@ class VideoLogicGuardTest {
                 countMatching(pager, """text = "弹幕开关"""") == 1 &&
                 countMatching(pager, """text = "复制链接"""") == 1 &&
                 countMatching(pager, """text = "系统分享"""") == 1 &&
+                // 2026-10-03（PT-06）：拉黑该 UP —— 直连既有 gRPC 拉黑能力（UpBlocker），
+                // ownerMid > 0 才显示；二次确认后才对被拉黑账号实际生效（见 BlockedUpWiringTest）
+                countMatching(pager, """text = "拉黑该 UP 主"""") == 1 &&
                 countMatching(pager, """if \(canUndoDislike\) \{""") == 1 &&
                 countMatching(pager, """举报""") == 0
         )

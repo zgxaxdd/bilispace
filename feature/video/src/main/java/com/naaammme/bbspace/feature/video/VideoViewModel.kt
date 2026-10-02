@@ -9,6 +9,8 @@ import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
+import com.naaammme.bbspace.core.common.relation.UpBlocker
+import com.naaammme.bbspace.feature.video.blocked.BlockedUpStore
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.feed.FeedDislikeRepository
 import com.naaammme.bbspace.core.feed.FeedRepository
@@ -162,6 +164,9 @@ class VideoViewModel @Inject constructor(
     private val feedDislikeRepository: FeedDislikeRepository,
     /** 跨会话「已推记忆」（SW-05）：推荐流/story 流给过的视频不再进新会话。 */
     private val seenStore: SwipeSeenStore,
+    /** PT-06：刷视频「拉黑该 UP」——本地名单 + 既有 gRPC 拉黑能力（经 UpBlocker 接口）。 */
+    private val blockedUpStore: BlockedUpStore,
+    private val upBlocker: UpBlocker,
     /** 预取条数按网络类型决定（WiFi 才多预）。 */
     private val networkTypeProvider: NetworkTypeProvider
 ) : ViewModel() {
@@ -1027,6 +1032,39 @@ class VideoViewModel @Inject constructor(
                 }
         }
         return true
+    }
+
+    /**
+     * PT-06：刷视频「拉黑该 UP」。**本地先生效、再异步同步，失败不回滚本地**——
+     * 名单（[blockedUpStore]）立即可见/可撤销；gRPC（[upBlocker] → 既有
+     * `SpaceRepository.modifyBlacklist`）失败只记日志，不打断用户。
+     * `mid <= 0` 的来源（story/relate 无 ownerMid）直接忽略——不做假入口。
+     */
+    fun blockSwipeUp(mid: Long) {
+        if (mid <= 0L) return
+        viewModelScope.launch {
+            blockedUpStore.add(mid)
+            runCatchingCancellable { upBlocker.modifyBlacklist(mid, isBlack = true) }
+                .onSuccess {
+                    blockedUpStore.markSynced(mid)
+                    Logger.d(TAG) { "拉黑已同步 mid=$mid" }
+                }
+                .onFailure { e ->
+                    Logger.w(TAG) { "拉黑同步失败 mid=$mid msg=${e.message}（本地保留）" }
+                }
+        }
+    }
+
+    /** PT-06：撤销拉黑（本地名单移除 + 服务端解除）。 */
+    fun unblockSwipeUp(mid: Long) {
+        if (mid <= 0L) return
+        viewModelScope.launch {
+            blockedUpStore.remove(mid)
+            runCatchingCancellable { upBlocker.modifyBlacklist(mid, isBlack = false) }
+                .onFailure { e ->
+                    Logger.w(TAG) { "解除拉黑失败 mid=$mid msg=${e.message}" }
+                }
+        }
     }
 
     /** 撤回「不感兴趣」：取消上报 + 把条目插回原位置。 */
