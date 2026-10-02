@@ -60,6 +60,17 @@ class VideoDetailRepository @Inject constructor(
             size > CACHE_MAX_ENTRIES
     }
 
+    /**
+     * 整清详情缓存（AP-04：trim 分级表 BACKGROUND 及以上档的登记出口）。
+     *
+     * 这里装的是**整份详情**（含 relates/season，重对象），重建要走完整网络往返，
+     * 所以只在"已在后台且吃紧"档清空；UI_HIDDEN 保可视内容的判断见
+     * `MemoryTrimPolicy.NetCacheAction` 的分级理由。
+     */
+    fun clearDetailCache() {
+        synchronized(cache) { cache.clear() }
+    }
+
     /** 取缓存的上次详情（可能为 null；内容可能过期，仅作首帧渲染用）。 */
     fun peekCached(ids: VideoRequestIds): VideoDetailResult? =
         synchronized(cache) { cache[cacheKeyOf(ids.aid, ids.epId, ids.seasonId, ids.bvid)] }

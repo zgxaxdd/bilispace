@@ -27,8 +27,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
+import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonBreath
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
+import com.naaammme.bbspace.core.designsystem.component.rememberSkeletonBreathOrNull
 import com.naaammme.bbspace.core.model.HistoryTab
 import com.naaammme.bbspace.core.model.HistoryTarget
 import com.naaammme.bbspace.feature.history.component.HistoryItemCard
@@ -129,6 +131,9 @@ fun HistoryScreen(
                     }
 
                     else -> {
+                        // AP-15：呼吸时钟只在"加载更多骨架存在"时创建（骨架区消失即随组合
+                        // 销毁，不给常驻列表留无限动画）；动效关闭时为 null，骨架完全静止。
+                        val loadMoreBreath = if (state.isLoadingMore) rememberSkeletonBreathOrNull() else null
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
@@ -155,7 +160,10 @@ fun HistoryScreen(
                                     key = { index -> "history_loading_$index" },
                                     contentType = { "loading" }
                                 ) {
-                                    VideoListCardSkeleton()
+                                    // AP-15：注入共享呼吸 —— N 个骨架一个时钟
+                                    ProvideSkeletonBreath(breath = loadMoreBreath) {
+                                        VideoListCardSkeleton()
+                                    }
                                 }
                             }
 

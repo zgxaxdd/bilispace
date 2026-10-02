@@ -351,7 +351,10 @@ class ImRepository @Inject constructor(
         }
         val content = msg.parseContent()
         return ImMessage(
-            key = msg.msgKey,
+            // AP-11：msgKey 可能 ≤0（toSentMessage 已按此回落 cliMsgId —— 作者自证）。
+            // 这里回落到取负的 seqno：既不与真实 msgKey（正数域）撞 key，
+            // 也不会让多条 msgKey≤0 的消息共用 0 key —— 重复 key 会让 LazyColumn 崩溃。
+            key = msg.msgKey.takeIf { it > 0L } ?: -msg.msgSeqno,
             seqNo = msg.msgSeqno,
             senderUid = senderUid,
             receiverId = receiverId,

@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,7 +68,9 @@ internal sealed interface CommentReplyAction {
 internal fun CommentCard(
     reply: CommentReply,
     currentMid: Long,
-    busyReplyIds: Set<Long>,
+    // AP-19：卡片"自己查自己"——稳定闭包 + 派生读，busy 集合变化只让**自身状态翻转的
+    // 那张卡**重组，不再全可见卡片两轮重组（Set 是不稳定类型，换集合必失败相等性）。
+    isReplyBusy: (Long) -> Boolean,
     onAction: (CommentReplyAction) -> Unit
 ) {
     Card(
@@ -79,7 +82,7 @@ internal fun CommentCard(
             ReplyBody(
                 reply = reply,
                 currentMid = currentMid,
-                busyReplyIds = busyReplyIds,
+                isReplyBusy = isReplyBusy,
                 onAction = onAction,
                 modifier = Modifier.padding(BiliSpacing.lg)
             )
@@ -110,7 +113,8 @@ internal fun CommentCard(
 internal fun ThreadReplyCard(
     reply: CommentReply,
     currentMid: Long,
-    busyReplyIds: Set<Long>,
+    // AP-19：同 CommentCard —— 稳定闭包 + 派生读。
+    isReplyBusy: (Long) -> Boolean,
     onAction: (CommentReplyAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -124,7 +128,7 @@ internal fun ThreadReplyCard(
         ReplyBody(
             reply = reply,
             currentMid = currentMid,
-            busyReplyIds = busyReplyIds,
+            isReplyBusy = isReplyBusy,
             onAction = onAction,
             modifier = Modifier.padding(horizontal = BiliSpacing.md, vertical = 10.dp)
         )
@@ -136,10 +140,12 @@ internal fun ThreadReplyCard(
 private fun ReplyBody(
     reply: CommentReply,
     currentMid: Long,
-    busyReplyIds: Set<Long>,
+    isReplyBusy: (Long) -> Boolean,
     onAction: (CommentReplyAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // AP-19：派生读 —— derivedStateOf 做结构相等去重，只有本卡的 busy 翻转才失效本卡。
+    val replyBusy by remember(reply.rpid) { derivedStateOf { isReplyBusy(reply.rpid) } }
     val previewImages = remember(reply.pictures) {
         reply.pictures.map { picture ->
             PreviewImage(
@@ -251,7 +257,7 @@ private fun ReplyBody(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    val rateEnabled = reply.rpid !in busyReplyIds
+                    val rateEnabled = !replyBusy
                     ReplyRateButton(
                         contentDescription = "点踩",
                         selected = reply.disliked,
@@ -272,7 +278,7 @@ private fun ReplyBody(
                     Text("回复")
                 }
                 ReplyMenuButton(
-                    busy = reply.rpid in busyReplyIds,
+                    busy = replyBusy,
                     showCheck = isSelf,
                     canDelete = isSelf,
                     onCheck = { onAction(CommentReplyAction.Check(reply.rpid)) },

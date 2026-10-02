@@ -36,9 +36,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.model.LiveRoomPanelState
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.feature.live.component.LivePlaybackBody
 import com.naaammme.bbspace.feature.live.player.LivePlayerPane
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 fun LiveScreen(
@@ -48,8 +50,6 @@ fun LiveScreen(
 ) {
     val route by viewModel.route.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
-    val popularCount by viewModel.popularCount.collectAsStateWithLifecycle()
-    val roomPanel by viewModel.roomPanel.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle(initialValue = PlayerSettingsState())
     val owner = LocalLifecycleOwner.current
@@ -169,10 +169,12 @@ fun LiveScreen(
                         )
                     }
                     TopBarPanel(
-                        popularCount = popularCount,
-                        watchedText = roomPanel.watchedText,
-                        onlineRankText = roomPanel.onlineRankText,
-                        rankChangedText = roomPanel.rankChangedText,
+                        // AP-18：两个 StateFlow 下推到唯一消费者（TopBarPanel 叶子）内收集。
+                        // 原先顶层 collect 让每次人气/在线榜补丁（WATCHED_CHANGE 等
+                        // 三种 cmd）都重组整个 LiveScreen —— 连带 LivePlayerPane 与
+                        // 200 项消息 LazyColumn 的 item scope。
+                        popularCount = viewModel.popularCount,
+                        roomPanel = viewModel.roomPanel,
                         modifier = Modifier.padding(end = BiliSpacing.lg)
                     )
                 }
@@ -203,14 +205,18 @@ fun LiveScreen(
 
 @Composable
 private fun TopBarPanel(
-    popularCount: Long,
-    watchedText: String?,
-    onlineRankText: String?,
-    rankChangedText: String?,
+    // AP-18：改收 StateFlow 并在本叶子内收集 —— 补丁频率再高也只重组这个 Text。
+    popularCount: StateFlow<Long>,
+    roomPanel: StateFlow<LiveRoomPanelState>,
     modifier: Modifier = Modifier
 ) {
+    val popular by popularCount.collectAsStateWithLifecycle()
+    val panel by roomPanel.collectAsStateWithLifecycle()
+    val watchedText = panel.watchedText
+    val onlineRankText = panel.onlineRankText
+    val rankChangedText = panel.rankChangedText
     val parts = listOfNotNull(
-        popularCount.takeIf { it > 0L }?.let { "人气 $it" },
+        popular.takeIf { it > 0L }?.let { "人气 $it" },
         watchedText?.takeIf(String::isNotBlank),
         onlineRankText?.takeIf(String::isNotBlank),
         rankChangedText?.takeIf(String::isNotBlank)

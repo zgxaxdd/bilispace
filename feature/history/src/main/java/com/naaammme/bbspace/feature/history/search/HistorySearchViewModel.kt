@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.data.mergePagesUnique
 import com.naaammme.bbspace.core.history.HistoryRepository
 import com.naaammme.bbspace.core.model.HistoryItem
 import com.naaammme.bbspace.core.model.HistoryTab
@@ -110,7 +111,9 @@ class HistorySearchViewModel @Inject constructor(
                 nextPage = pageNo + 1
                 _uiState.update {
                     it.copy(
-                        items = if (reset) page.items else it.items + page.items,
+                        // AP-11：历史持续写入导致翻页窗口重叠，重复条目会让 LazyColumn
+                        // 重复 key 崩溃（范式：HistoryViewModel 的 distinctBy）
+                        items = mergePagesUnique(it.items, page.items, reset = reset) { item -> item.key },
                         isLoading = false,
                         isLoadingMore = false,
                         hasMore = page.hasMore,

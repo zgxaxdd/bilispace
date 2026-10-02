@@ -912,14 +912,22 @@ private fun GlassSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // AP-30：与同文件另 4 个滑杆同款"本地刻度 + 松手提交" —— 强度进的是
+                // LocalGlassConfig，原实现 onValueChange 直连 viewModel::updateGlassStrength
+                // 会**每拖动帧写一次设置并触发全站玻璃重组**（5 个滑杆里唯一漏掉的一个）。
+                var strengthDraft by remember(strength) { mutableFloatStateOf(strength) }
                 Slider(
-                    value = strength,
-                    onValueChange = onStrengthChange,
+                    value = strengthDraft,
+                    onValueChange = { strengthDraft = it },
+                    onValueChangeFinished = {
+                        if (kotlin.math.abs(strengthDraft - strength) < 0.01f) return@Slider
+                        onStrengthChange(strengthDraft)
+                    },
                     valueRange = 0.5f..2f,
                     steps = 5
                 )
                 Text(
-                    String.format(java.util.Locale.ROOT, "%.1f×", strength),
+                    String.format(java.util.Locale.ROOT, "%.1f×", strengthDraft),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -270,6 +270,11 @@ class ListAllocationStructureTest {
      * 找不到签名时抛异常——同样是为了避免"没扫到就算通过"。
      */
     private fun functionBody(lines: List<String>, signaturePrefix: String): List<String> {
+        // W23：内部按 trimStart() 比较，带缩进的前缀会静默失配、红得莫名其妙 —— 入口处直接拒绝。
+        require(!signaturePrefix.startsWith(" ") && !signaturePrefix.startsWith("\t")) {
+            "signaturePrefix 带了前导缩进（\"$signaturePrefix\"）：本 helper 对行做 trimStart() 比较，" +
+                "缩进会导致永不匹配。请传去掉缩进的签名。"
+        }
         val start = lines.indexOfFirst { it.trimStart().startsWith(signaturePrefix) }
         assertTrue(
             "找不到以 `$signaturePrefix` 开头的函数，无法验证其内部顺序。",
@@ -445,6 +450,70 @@ class ListAllocationStructureTest {
         assertTrue(
             "选区路径必须由带 key 的 remember 产出，否则本文件等于没修",
             countMatching(lines, """remember\(textLayoutResult, selection, text\.length\)""") == 1
+        )
+    }
+
+    // ── 形状分配的绕过形态（AP-29 ③ / W7 的覆盖面扩展）────────────────────────
+
+    /**
+     * 上限 = 制定日（2026-10-02）用**本仓扫描器**实测的计数（W24）：
+     * 具名实参 16 处、表达式体工厂 2 处（均在 `Radius.kt`，见下）。只许降。
+     */
+    private val maxNamedArgShapes = 16
+    private val maxFactoryFunctionShapes = 2
+
+    /**
+     * AP-29 ③：原 `shapeConstantsAreNeverBuiltInsideComposables` 只认
+     * "局部 `val = RoundedCornerShape(`"，两类常见的绕过形态全逃逸：
+     * (a) **具名实参** `shape = RoundedCornerShape(...)`；
+     * (b) **包一层表达式体函数** `fun x(...): Shape = RoundedCornerShape(...)`
+     *     （函数体是表达式，没有 `val` 行可匹配）。
+     * 两类同罪：每次调用/每次组合各分配一份 Shape。这里按实测基线冻结（只许减）。
+     *
+     * 有意保留（写在这里，不写豁免表）：`Radius.kt` 的 `topRounded/bottomRounded`
+     * 是**带参数的**文件级工厂（值随调用方变），归因在调用方 remember；`CoverExpand`
+     * 的逐帧动画角半径是绘制期必需值。
+     */
+    @Test
+    fun shapeAllocationBypassForms_areFrozenAtMeasuredBaseline() {
+        val namedArg = """\bshape\s*=\s*RoundedCornerShape\("""
+        val factory = """\bfun\s+\w+\([^)]*\)[^=]*=\s*(?!remember)RoundedCornerShape\("""
+        // W21 正反例自检
+        assertTrue(
+            "自检失败：具名实参形态抓不到",
+            countMatching(listOf("        shape = RoundedCornerShape(BiliRadius.card),"), namedArg) == 1
+        )
+        assertTrue(
+            "自检失败：包函数形态抓不到",
+            countMatching(listOf("fun dockCapsuleShape(): Shape = RoundedCornerShape(BiliRadius.dock)"), factory) == 1
+        )
+        assertTrue(
+            "自检失败：已 remember 的工厂不许被计",
+            countMatching(
+                listOf("internal fun dockCapsuleShape(): Shape = remember { RoundedCornerShape(BiliRadius.dock) }"),
+                factory
+            ) == 0
+        )
+
+        val namedArgSites = mainSources.flatMap { file ->
+            file.readLines().mapIndexedNotNull { index, line ->
+                if (countMatching(listOf(line), namedArg) > 0) "${file.name}:${index + 1}" else null
+            }
+        }
+        val factorySites = mainSources.flatMap { file ->
+            file.readLines().mapIndexedNotNull { index, line ->
+                if (countMatching(listOf(line), factory) > 0) "${file.name}:${index + 1}" else null
+            }
+        }
+        assertTrue(
+            "具名实参 `shape = RoundedCornerShape(` 当前 ${namedArgSites.size} 处，" +
+                "冻结上限 $maxNamedArgShapes：$namedArgSites",
+            namedArgSites.size <= maxNamedArgShapes
+        )
+        assertTrue(
+            "表达式体工厂 `fun … = RoundedCornerShape(`（无 remember）当前 ${factorySites.size} 处，" +
+                "冻结上限 $maxFactoryFunctionShapes：$factorySites",
+            factorySites.size <= maxFactoryFunctionShapes
         )
     }
 }

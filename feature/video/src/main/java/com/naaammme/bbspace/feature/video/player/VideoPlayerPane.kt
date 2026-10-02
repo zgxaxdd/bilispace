@@ -137,7 +137,11 @@ import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.softShadowLabelSmall
 import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
+import com.naaammme.bbspace.core.designsystem.glass.LocalGlassGuard
+import com.naaammme.bbspace.core.designsystem.glass.MotionTier
+import com.naaammme.bbspace.core.designsystem.glass.resolveGlassBudget
 import com.naaammme.bbspace.core.designsystem.glass.liquid.lens
 import com.naaammme.bbspace.core.designsystem.glass.liquid.vibrancy
 import com.naaammme.bbspace.feature.video.R
@@ -350,6 +354,25 @@ internal fun Modifier.playerControlGlass(
     val strength = LocalGlassConfig.current.strength.coerceIn(0.5f, 2f)
     val isLiquid = material == GlassMaterial.LIQUID
     if (!enabled || backdrop == null || material == GlassMaterial.OFF) {
+        return this.background(scrim, shape)
+    }
+    // AP-25：接入帧守卫与预算 —— 此前该链既不读 LocalGlassGuard 也不走
+    // resolveGlassBudget，是**出厂默认配置（MATERIAL + FROSTED、playerControlsBlur
+    // 默认 true）下唯一仍在跑的玻璃链**：守卫降级时 Dock/顶栏都停了，播放控件的
+    // 逐帧背板重录照跑。语义与 GlassEffect 的收口一致：降级档（maxBlurLevel<=0）
+    // 早退为纯底色；滑动/转场只停实时重录、不单独降模糊等级（Pulsing 教训）。
+    // 播放页没有滚动语义，isScrolling/isTransitionRunning 恒 false。
+    val guard = LocalGlassGuard.current
+    val budget = remember(guard.effectiveMotionTier, guard.forceLowBlurBudget) {
+        resolveGlassBudget(
+            surfaceType = GlassSurfaceType.OVERLAY,
+            motionTier = guard.effectiveMotionTier,
+            isScrolling = false,
+            isTransitionRunning = false,
+            forceLowBudget = guard.forceLowBlurBudget
+        )
+    }
+    if (budget.maxBlurLevel <= 0) {
         return this.background(scrim, shape)
     }
     val refractionDp = (shapeHeightPx / 3.5f).coerceIn(2f, 10f)
@@ -594,10 +617,16 @@ internal fun VideoPlayerPane(
         //   恢复播放时 LaunchedEffect 随 key 翻转重新起循环，最多落后一帧。
         // 播放页专用背板的 layerBackdrop 录制链本身保持常驻：节点只在被 tick 读
         // 失效时才重绘重录，不 tick 就没有录制成本，注册本身免费。
+        val glassGuard = LocalGlassGuard.current
         val videoGlassActive = showCtrl &&
             state.playWhenReady &&
             controlsBlur &&
-            controlsMaterial != GlassMaterial.OFF
+            controlsMaterial != GlassMaterial.OFF &&
+            // AP-25：守卫降级期间逐帧 tick 循环必须停 —— 消费端（playerControlGlass）
+            // 已早退为纯底色，继续逐帧唤醒帧时钟是纯浪费（判据纪律：不进 jank 指标
+            // 的空转同样是缺陷）。恢复档位时随 key 翻转重新起循环。
+            glassGuard.effectiveMotionTier != MotionTier.Reduced &&
+            !glassGuard.forceLowBlurBudget
         LaunchedEffect(videoGlassActive) {
             if (!videoGlassActive) return@LaunchedEffect
             while (true) {

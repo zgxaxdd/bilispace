@@ -174,8 +174,6 @@ class WatchLaterViewModel @Inject constructor(
                 splitKey = splitKey
             )
             val page = repo.fetchPage(tab, asc, reqCursor)
-            currentStartKey = page.cursor.startKey
-            splitKey = page.cursor.splitKey
             // 按 key 去重，避免翻页窗口重叠导致 LazyColumn 重复 key 崩溃
             val items = if (reset) {
                 page.items.distinctBy(WatchLaterItem::key)
@@ -184,13 +182,17 @@ class WatchLaterViewModel @Inject constructor(
             }
             cache[WatchLaterCacheKey(tab, asc)] = WatchLaterCache(
                 items = items,
-                nextStartKey = currentStartKey,
-                splitKey = splitKey,
+                nextStartKey = page.cursor.startKey,
+                splitKey = page.cursor.splitKey,
                 countText = page.countText,
                 hasMore = page.hasMore
             )
             _uiState.update {
                 if (it.tab != tab || it.asc != asc) return@update it
+                // AP-13：共享游标字段的赋值必须在 tab/asc 校验**之后** —— 慢响应晚到
+                // 时不得污染新 tab/新排序的翻页游标（表现：跳页/重复/漏项）。
+                currentStartKey = page.cursor.startKey
+                splitKey = page.cursor.splitKey
                 it.copy(
                     items = items,
                     countText = page.countText,

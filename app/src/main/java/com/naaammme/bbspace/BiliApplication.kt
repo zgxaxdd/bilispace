@@ -12,11 +12,15 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
+import com.naaammme.bbspace.core.playback.VideoPlayerRepository
+import com.naaammme.bbspace.core.video.VideoDetailRepository
+import com.naaammme.bbspace.infra.network.dns.BiliDns
 import com.naaammme.bbspace.memory.COVER_COLOR_HISTORY
 import com.naaammme.bbspace.memory.COVER_COLOR_VISIBLE_WINDOW
 import com.naaammme.bbspace.memory.CoverColorAction
 import com.naaammme.bbspace.memory.ImageCacheAction
 import com.naaammme.bbspace.memory.MemoryTrimPlan
+import com.naaammme.bbspace.memory.NetCacheAction
 import com.naaammme.bbspace.memory.SeamlessCoverAction
 import com.naaammme.bbspace.memory.TRIM_TO_RATIO
 import com.naaammme.bbspace.memory.imageCacheTrimTargetBytes
@@ -45,6 +49,23 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
     @Inject
     @Named("image")
     lateinit var imageOkHttpClient: OkHttpClient
+
+    /**
+     * AP-04 补登记的三个进程级自建缓存（详情 / 播放地址 / DNS）。
+     *
+     * **必须是 [dagger.Lazy]**：直接注入具体类型会把整条依赖链（grpc client →
+     * DeviceIdentity 的 SP 读盘 + binder IPC）提前拉进 `onCreate` 主线程 ——
+     * 那正是 AP-06 要消除的冷启开销。`Lazy.get()` 推迟到第一次 BACKGROUND 档
+     * trim（后台时刻，不在任何关键路径上）。
+     */
+    @Inject
+    lateinit var videoDetailRepository: dagger.Lazy<VideoDetailRepository>
+
+    @Inject
+    lateinit var videoPlayerRepository: dagger.Lazy<VideoPlayerRepository>
+
+    @Inject
+    lateinit var biliDns: dagger.Lazy<BiliDns>
 
     override fun onCreate() {
         super.onCreate()
@@ -167,6 +188,17 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
                 // 只留最近 1 条：下一次无缝打开大概率还是同一张卡
                 SeamlessCoverAction.TrimToRecent -> SeamlessCardOpener.trimCoverMemo(keep = 1)
                 SeamlessCoverAction.Clear -> SeamlessCardOpener.clearCoverMemo()
+            }
+            when (plan.netCaches) {
+                // P5 的坑：这里必须是 `-> Unit`，不许写 `-> return` ——
+                // 那会短路掉排在其后的所有新分支。
+                NetCacheAction.Keep -> Unit
+                NetCacheAction.Clear -> {
+                    videoDetailRepository.get().clearDetailCache()
+                    videoPlayerRepository.get().clearPlayUrlCache()
+                    biliDns.get().clearCache()
+                    Logger.d(TAG) { "已清理详情/播放地址/DNS 缓存（${plan.reason}）" }
+                }
             }
         } catch (e: Throwable) {
             Logger.w(TAG) { "onTrimMemory(${plan.reason}) 处理失败: ${e.message}" }

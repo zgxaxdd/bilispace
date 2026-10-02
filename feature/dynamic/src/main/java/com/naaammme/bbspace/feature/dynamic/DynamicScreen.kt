@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import androidx.compose.ui.graphics.Color
 import coil3.compose.AsyncImage
@@ -108,8 +109,22 @@ fun DynamicScreen(
         }
     }
 
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) viewModel.loadMore()
+    // AP-10：增长守卫 —— DynamicUiState.canLoadMore 的 getter 含 !isLoadingMore，
+    // 谓词随加载翻转会让 effect 反复重启；空页/全重复页（列表不增长）必须由
+    // 守卫挡住，"只有列表确实变长才允许下一次预取"。
+    val loadMoreGuard = remember { LoadMoreGrowthGuard() }
+    LaunchedEffect(state.items.size) {
+        loadMoreGuard.onItemLineChanged(state.items.size)
+    }
+
+    LaunchedEffect(shouldLoadMore, state.isLoading, state.isRefreshing, state.isLoadingMore) {
+        loadMoreGuard.onVisibility(
+            shouldLoadMore,
+            busy = state.isLoading || state.isRefreshing || state.isLoadingMore
+        )
+        if (shouldLoadMore && loadMoreGuard.tryAcquire()) {
+            viewModel.loadMore()
+        }
     }
 
     Scaffold(

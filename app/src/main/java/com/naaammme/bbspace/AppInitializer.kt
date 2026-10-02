@@ -197,11 +197,14 @@ class AppInitializer @Inject constructor(
                 .collect { shouldStart ->
                     val intent = Intent(context, PlaybackService::class.java)
                     // 该回调正常只随用户操作（打开/关闭播放）在前台触发；后台状态下的
-                    // 竞态重放会被系统拒绝 startService（Android 12+ 后台服务限制），
-                    // 属于无影响边缘——静默跳过，回到前台的下一次状态变化自会纠正
+                    // 竞态重放会被系统拒绝 startForegroundService（Android 12+ 后台服务
+                    // 限制），属于无影响边缘——静默跳过，回到前台的下一次状态变化自会纠正
                     runCatching {
                         if (shouldStart) {
-                            context.startService(intent)
+                            // AP-08：startForegroundService + onStartCommand 内的立即
+                            // startForeground 严格配对 —— 启动到通知发布之间服务不再以
+                            // "可回收的普通 started service"裸奔（后台播放中断面）。
+                            context.startForegroundService(intent)
                         } else {
                             context.stopService(intent)
                         }

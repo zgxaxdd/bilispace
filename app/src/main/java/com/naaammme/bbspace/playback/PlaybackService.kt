@@ -75,10 +75,36 @@ class PlaybackService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+        // AP-08：**立即**进入前台（与 startForegroundService 严格配对，5 秒约束）。
+        // 原实现只靠 PlayerNotificationManager 的通知发布回调（onNotificationPosted）
+        // 才 startForeground —— 从 startService 到通知发布之间这是一个**可被系统
+        // 回收的普通 started service**，后台播放存在中断面。此处先用一份极简通知
+        // 占位拿到前台状态；onCreate 已建好通知渠道（buildNotificationManager 在
+        // onCreate 先跑），manager 随后用同一 NOTIFICATION_ID 发布完整通知原地更新。
+        startForegroundImmediately()
         bindPlayer(playerEngine.player.value)
         updateActionMode()
         notificationManager?.invalidate()
         return START_NOT_STICKY
+    }
+
+    /**
+     * AP-08：进入前台的最短路径。[isForeground] 已置位时跳过（前台档位只升不降，
+     * 通知内容由 PlayerNotificationManager 的同 id 发布原地更新）。
+     */
+    private fun startForegroundImmediately() {
+        if (isForeground) return
+        val notification = androidx.core.app.NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setContentTitle(currentTitle())
+            .setContentIntent(createContentIntent())
+            .setVisibility(androidx.core.app.NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_TRANSPORT)
+            .setOngoing(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .build()
+        startForeground(NOTIFICATION_ID, notification)
+        isForeground = true
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -185,6 +211,10 @@ class PlaybackService : Service() {
             SingletonImageLoader.get(this@PlaybackService).enqueue(
                 ImageRequest.Builder(this@PlaybackService)
                     .data(coverUrl)
+                    // AP-22：enqueue 不经 Compose 约束测量，缺 size 会按原图尺寸整幅解码。
+                    // 512×512 覆盖通知大图标在最高密度档的显示需求；同一 URL 的通知请求
+                    // 从此共享同一个固定尺寸键（FINDINGS P1：键同源）。
+                    .size(NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_ICON_SIZE_PX)
                     .listener(
                         onSuccess = { _, result ->
                             callback.onBitmap(result.image.toBitmap())
@@ -288,5 +318,12 @@ class PlaybackService : Service() {
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "video_playback"
         const val CONTENT_REQ_OPEN = 1001
+
+        /**
+         * AP-22：通知大图标的目标解码尺寸（正方形）。
+         * MediaStyle 大图标最高密度档显示约 128dp（本机 560dpi ≈ 350px），512 留足余量；
+         * 不设 size 会按封面原图（常见 1280×720+）整幅解码，只为了一个 ~128dp 的图标。
+         */
+        const val NOTIFICATION_ICON_SIZE_PX = 512
     }
 }

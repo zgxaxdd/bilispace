@@ -181,6 +181,56 @@ class MemoryTrimPolicyTest {
         )
     }
 
+    /**
+     * AP-04 补登记的三个进程级自建缓存（详情 / 播放地址 / DNS）跟同一张分级表走。
+     *
+     * 分级理由（与 `NetCacheAction` KDoc 一一对应）：
+     * - UI_HIDDEN → **Keep**：界面刚不可见 ≠ 吃紧。详情重建是完整网络往返、
+     *   播放地址有 90s TTL 自愈、DNS 量小而价值在时延（后台播放重连仍受益）；
+     * - BACKGROUND / 不可见的 RUNNING_* / onLowMemory → **Clear**：后台且吃紧，
+     *   三者重建都可接受；
+     * - 可见的 RUNNING_* / 未知档 → Keep（宁可漏放，不可误清）。
+     */
+    @Test
+    fun netCachesFollowTheSameTiering() {
+        assertEquals(
+            "UI_HIDDEN 不许清详情/播放地址/DNS 缓存（分级理由见 NetCacheAction KDoc）",
+            NetCacheAction.Keep,
+            planTrimMemory(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN, uiVisible = false).netCaches
+        )
+        for (level in listOf(
+            ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
+            ComponentCallbacks2.TRIM_MEMORY_MODERATE,
+            ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        )) {
+            assertEquals(
+                "level=$level 应清空补登记的三个进程级缓存",
+                NetCacheAction.Clear,
+                planTrimMemory(level, uiVisible = false).netCaches
+            )
+        }
+        assertEquals(
+            "界面可见的 RUNNING_* 不该动",
+            NetCacheAction.Keep,
+            planTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW, uiVisible = true).netCaches
+        )
+        assertEquals(
+            "界面不可见的 RUNNING_* 应清",
+            NetCacheAction.Clear,
+            planTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW, uiVisible = false).netCaches
+        )
+        assertEquals(
+            "未知 level 不动",
+            NetCacheAction.Keep,
+            planTrimMemory(-1, uiVisible = true).netCaches
+        )
+        assertEquals(
+            "onLowMemory 与后台吃紧同档",
+            NetCacheAction.Clear,
+            planLowMemory().netCaches
+        )
+    }
+
     // ── 图片内存缓存的绝对预算（2026-10-01，对照 BiliPai `8cfc4246b`）──────────────
 
     @Test

@@ -94,11 +94,24 @@ val LocalGlassRefresher = androidx.compose.runtime.staticCompositionLocalOf<Glas
 /**
  * 玻璃消费端重采样观察：绘制期读 [GlassSourceRefresher.frame]，滚动帧触发本
  * 玻璃节点重绘（重新采样当帧背板）。必须挂在 glassEffect **外层**。
+ *
+ * [visible]（FL-06）：消费端可见性谓词 —— 已移出屏幕的玻璃面不再每滚动帧重采样
+ * （源侧有 [GlassSourceRefresher.tickGate]，消费侧此前**没有**，是不对称缺口）。
+ * 契约同 tickGate：**只做读取、不得有副作用**，在绘制期调用（读 snapshot state
+ * 不登记观察、不触发重组）。谓词为 false 时不读 [GlassSourceRefresher.frame]，
+ * 该节点不产生绘制失效、那一帧的重采样不会发生。
+ *
+ * 默认 `{ true }` 保持向后兼容（无可见性状态的调用方行为不变）。
  */
-fun Modifier.glassFrameRefresh(refresher: GlassSourceRefresher?): Modifier {
+fun Modifier.glassFrameRefresh(
+    refresher: GlassSourceRefresher?,
+    visible: () -> Boolean = { true }
+): Modifier {
     if (refresher == null) return this
     return drawWithContent {
-        refresher.frame
+        if (visible()) {
+            refresher.frame
+        }
         drawContent()
     }
 }

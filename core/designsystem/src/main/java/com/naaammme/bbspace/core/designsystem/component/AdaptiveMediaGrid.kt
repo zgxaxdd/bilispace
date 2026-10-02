@@ -160,94 +160,110 @@ fun <T> AdaptiveMediaGrid(
         onLoadMore()
     }
 
-    BiliPullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = onRefresh,
-        modifier = modifier
-    ) {
-        LazyVerticalStaggeredGrid(
-            state = gridState,
-            columns = StaggeredGridCells.Fixed(columns),
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
-            verticalItemSpacing = verticalSpacing,
-            contentPadding = contentPadding,
-            flingBehavior = effectiveFling
+    // FL-01：首屏骨架（loadingPlaceholderCount 个占位 item）共用**一个**呼吸时钟。
+    //
+    // ProvideSkeletonShimmer 用 `enabled` 跟随骨架分支：只有 items 为空且正在刷新
+    // （首屏骨架活跃）时才 provide，内容到位后随分支退出组合 —— 不给常驻列表留下
+    // 一条永不停止的无限动画（待机常驻动画数 = 可见骨架数）。reduceMotion（动效=关）
+    // 时不 provide，SkeletonBlock 完全静止（0 条动画）。
+    // 翻页骨架（loadMoreContent）只有 1 个 item，由单卡骨架自带的幂等 provider
+    // 自起一条，同样与可见元素数量一致。
+    //
+    // 注意不能用外层 Box 包裹 LazyVerticalStaggeredGrid —— 会切断列表的约束/测量链
+    // （此前正是这样把首页搞成只渲染前几条、后面白屏，见 Skeleton.kt
+    // VideoListSkeletonList 的注释）；ProvideSkeletonShimmer 是纯
+    // CompositionLocalProvider，无布局节点，不影响测量。
+    val showFirstLoadSkeleton = items.isEmpty() && isRefreshing
+    ProvideSkeletonShimmer(enabled = showFirstLoadSkeleton) {
+        BiliPullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            modifier = modifier
         ) {
-            when {
-                items.isEmpty() && isRefreshing -> {
-                    items(
-                        count = loadingPlaceholderCount,
-                        key = { index -> "loading_$index" },
-                        contentType = { "loading" }
-                    ) {
-                        loadingContent()
+            LazyVerticalStaggeredGrid(
+                state = gridState,
+                columns = StaggeredGridCells.Fixed(columns),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                verticalItemSpacing = verticalSpacing,
+                contentPadding = contentPadding,
+                flingBehavior = effectiveFling
+            ) {
+                when {
+                    items.isEmpty() && isRefreshing -> {
+                        items(
+                            count = loadingPlaceholderCount,
+                            key = { index -> "loading_$index" },
+                            contentType = { "loading" }
+                        ) {
+                            loadingContent()
+                        }
                     }
-                }
 
-                items.isEmpty() -> {
-                    when {
-                        // 错误必须优先于空态：否则传了 emptyContent 的调用方
-                        // （如排行页的"暂无内容"）会把真实失败掩盖成"暂无内容"，
-                        // 用户无从知道要重试、报什么错。
-                        !errorMessage.isNullOrBlank() -> {
+                    items.isEmpty() -> {
+                        when {
+                            // 错误必须优先于空态：否则传了 emptyContent 的调用方
+                            // （如排行页的"暂无内容"）会把真实失败掩盖成"暂无内容"，
+                            // 用户无从知道要重试、报什么错。
+                            !errorMessage.isNullOrBlank() -> {
+                                val err = errorMessage.orEmpty()
+                                item(
+                                    key = "error",
+                                    span = StaggeredGridItemSpan.FullLine,
+                                    contentType = "error"
+                                ) {
+                                    errorContent(err)
+                                }
+                            }
+
+                            emptyContent != null -> {
+                                item(
+                                    key = "empty",
+                                    span = StaggeredGridItemSpan.FullLine,
+                                    contentType = "empty"
+                                ) {
+                                    emptyContent()
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        if (!errorMessage.isNullOrBlank()) {
                             val err = errorMessage.orEmpty()
                             item(
                                 key = "error",
-                                span = StaggeredGridItemSpan.FullLine,
                                 contentType = "error"
                             ) {
                                 errorContent(err)
                             }
                         }
 
-                        emptyContent != null -> {
+                        if (headerContent != null) {
                             item(
-                                key = "empty",
-                                span = StaggeredGridItemSpan.FullLine,
-                                contentType = "empty"
+                                key = "header",
+                                contentType = "header",
+                                span = StaggeredGridItemSpan.FullLine
                             ) {
-                                emptyContent()
+                                headerContent()
                             }
                         }
-                    }
-                }
 
-                else -> {
-                    if (!errorMessage.isNullOrBlank()) {
-                        val err = errorMessage.orEmpty()
-                        item(
-                            key = "error",
-                            contentType = "error"
-                        ) {
-                            errorContent(err)
+                        items(
+                            count = items.size,
+                            key = { index -> key(index, items[index]) },
+                            contentType = { index -> contentType(index, items[index]) }
+                        ) { index ->
+                            itemContent(items[index])
                         }
-                    }
 
-                    if (headerContent != null) {
-                        item(
-                            key = "header",
-                            contentType = "header",
-                            span = StaggeredGridItemSpan.FullLine
-                        ) {
-                            headerContent()
-                        }
-                    }
-
-                    items(
-                        count = items.size,
-                        key = { index -> key(index, items[index]) },
-                        contentType = { index -> contentType(index, items[index]) }
-                    ) { index ->
-                        itemContent(items[index])
-                    }
-
-                    if (isLoadingMore) {
-                        item(
-                            key = "loading_more",
-                            contentType = "loading_more"
-                        ) {
-                            loadMoreContent()
+                        if (isLoadingMore) {
+                            item(
+                                key = "loading_more",
+                                contentType = "loading_more"
+                            ) {
+                                loadMoreContent()
+                            }
                         }
                     }
                 }

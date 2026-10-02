@@ -168,6 +168,11 @@ class GlassDrawChainStructureTest {
 
     /** 取以 [signaturePrefix] 开头的函数体（含签名），按花括号配平定界。 */
     private fun blockBody(lines: List<String>, signaturePrefix: String): List<String> {
+        // W23：内部按 trimStart() 比较，带缩进的前缀会静默失配、红得莫名其妙 —— 入口处直接拒绝。
+        require(!signaturePrefix.startsWith(" ") && !signaturePrefix.startsWith("\t")) {
+            "signaturePrefix 带了前导缩进（\"$signaturePrefix\"）：本 helper 对行做 trimStart() 比较，" +
+                "缩进会导致永不匹配。请传去掉缩进的签名。"
+        }
         val start = lines.indexOfFirst { it.trimStart().startsWith(signaturePrefix) }
         assertTrue("找不到 `$signaturePrefix`，无法验证其内部结构。", start >= 0)
         return blockBodyAt(lines, start)

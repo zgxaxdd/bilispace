@@ -44,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
+import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
@@ -66,6 +67,11 @@ fun ImConversationScreen(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    // AP-20 ②：顶层 collect 维持现状的评估结论 —— 屏幕体虽随 UiState 变化重组，
+    // 但逐项重活（时间格式化/展示模型）已在 [messageItems] 的 remember 里按消息列表
+    // 记忆化，列表 items 以相等参数跳过；isLoadingMore/hasMoreHistory 等高频翻转只
+    // 被 effect key 读取、不进组合作用域。全量下推是架构级重构（风险 > 收益），
+    // 待真实重组开销数据（AP-T8 走查）再评估。
     val messageItems = remember(state.messages) { state.messages.toConversationMessageItems() }
     val shouldLoadMore by remember(
         state.hasMoreHistory,
@@ -83,8 +89,18 @@ fun ImConversationScreen(
         }
     }
 
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) vm.loadMore()
+    // AP-10：增长守卫 —— 谓词含 !isLoadingMore（且是 remember key），空页时
+    // isLoadingMore 的翻转会让 effect 重启；只有消息数确实变长才允许下一次预取。
+    val loadMoreGuard = remember { LoadMoreGrowthGuard() }
+    LaunchedEffect(messageItems.size) {
+        loadMoreGuard.onItemLineChanged(messageItems.size)
+    }
+
+    LaunchedEffect(shouldLoadMore, state.isLoadingMore) {
+        loadMoreGuard.onVisibility(shouldLoadMore, busy = state.isLoadingMore)
+        if (shouldLoadMore && loadMoreGuard.tryAcquire()) {
+            vm.loadMore()
+        }
     }
 
     LaunchedEffect(state.lastSentMessageKey) {
@@ -540,7 +556,12 @@ private fun ImMessage.imageRatio(): Float {
     return (imageWidth.toFloat() / imageHeight).coerceIn(0.45f, 1.8f)
 }
 
-private fun formatMessageTime(timestampSec: Long): String {
+/**
+ * AP-20 ④：时间格式化是用户可见输出 —— internal 化以便 JVM 单测锁住输出
+ * （含非正时间戳的空串边界）。调用点在 [toConversationMessageItems] 的
+ * `remember(state.messages)` 预计算里，不在 item 组合期。
+ */
+internal fun formatMessageTime(timestampSec: Long): String {
     if (timestampSec <= 0L) return ""
     return MESSAGE_TIME_FORMAT.format(
         Instant.ofEpochSecond(timestampSec).atZone(ZoneId.systemDefault())

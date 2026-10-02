@@ -25,7 +25,15 @@ val LocalGlassGuard = staticCompositionLocalOf { GlassGuardPolicy(MotionTier.Nor
  * - jank ≥ 7.5% 连续 2 个窗口 → 降级（Reduced + forceLowBudget）
  * - jank ≤ 4.0% → 恢复
  * - 降级后 60s 冷却内不评估恢复（防抖动）
- * 经 [LocalGlassGuard] 分发，只失效玻璃叶子，不引发页面重组。
+ *
+ * **分发语义（AP-28 ① 更正）**：[LocalGlassGuard] 是 `staticCompositionLocalOf`，
+ * 而 [policy] 是 `mutableStateOf` 且在各处 `.current` 读取 —— 降级/恢复那一刻
+ * （恰是 jank 峰值窗）会**使读取方所在的组合子树各重组一次**，不是原 KDoc 说的
+ * "只失效玻璃叶子、不引发页面重组"。选择维持 staticCompositionLocalOf 是刻意的：
+ * 换成 `compositionLocalOf` 会让**每次策略不变的重组**都多做一次 local 比较，
+ * 与目标相反；降级是低频事件（滞后 + 60s 冷却），一次子树重组的代价可接受。
+ * 读取方应尽量把 `LocalGlassGuard.current` 读在**窄叶子**里（见 PlayerControlGlass
+ * 与 GlassEffect 的用法），把这次重组的范围压到最小。
  */
 @Stable
 class GlassGuardTracker internal constructor() {

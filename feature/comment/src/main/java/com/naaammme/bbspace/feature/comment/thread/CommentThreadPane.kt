@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.CommentSort
 import com.naaammme.bbspace.feature.comment.component.CommentReplyAction
@@ -42,7 +43,8 @@ internal fun CommentThreadPane(
     state: CommentThreadState,
     listState: LazyListState,
     currentMid: Long,
-    busyReplyIds: Set<Long>,
+    // AP-19：稳定闭包（卡片自己查自己），不再传 Set。
+    isReplyBusy: (Long) -> Boolean,
     onReplyAction: (CommentReplyAction) -> Unit,
     onDismiss: () -> Unit,
     onToggleSort: () -> Unit,
@@ -59,7 +61,7 @@ internal fun CommentThreadPane(
             state = state,
             listState = listState,
             currentMid = currentMid,
-            busyReplyIds = busyReplyIds,
+            isReplyBusy = isReplyBusy,
             onReplyAction = onReplyAction,
             onDismiss = onDismiss,
             onToggleSort = onToggleSort,
@@ -77,7 +79,8 @@ private fun CommentThreadContent(
     state: CommentThreadState,
     listState: LazyListState,
     currentMid: Long,
-    busyReplyIds: Set<Long>,
+    // AP-19：稳定闭包（卡片自己查自己），不再传 Set。
+    isReplyBusy: (Long) -> Boolean,
     onReplyAction: (CommentReplyAction) -> Unit,
     onDismiss: () -> Unit,
     onToggleSort: () -> Unit,
@@ -101,8 +104,15 @@ private fun CommentThreadContent(
                 last >= total - 3
         }
     }
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) {
+    // AP-10：增长守卫 —— 谓词含 !cur.loadingMore，effect 会随加载翻转重启；
+    // 空页/全重复页（列表不增长）必须由守卫挡住。
+    val loadMoreGuard = remember { LoadMoreGrowthGuard() }
+    LaunchedEffect(stateHolder.items.size) {
+        loadMoreGuard.onItemLineChanged(stateHolder.items.size)
+    }
+    LaunchedEffect(shouldLoadMore, stateHolder.loading, stateHolder.loadingMore) {
+        loadMoreGuard.onVisibility(shouldLoadMore, busy = stateHolder.loading || stateHolder.loadingMore)
+        if (shouldLoadMore && loadMoreGuard.tryAcquire()) {
             onLoadMore()
         }
     }
@@ -171,7 +181,7 @@ private fun CommentThreadContent(
                 ThreadReplyCard(
                     reply = state.root,
                     currentMid = currentMid,
-                    busyReplyIds = busyReplyIds,
+                    isReplyBusy = isReplyBusy,
                     onAction = onReplyAction
                 )
             }
@@ -215,7 +225,7 @@ private fun CommentThreadContent(
                         ThreadReplyCard(
                             reply = reply,
                             currentMid = currentMid,
-                            busyReplyIds = busyReplyIds,
+                            isReplyBusy = isReplyBusy,
                             onAction = onReplyAction
                         )
                     }

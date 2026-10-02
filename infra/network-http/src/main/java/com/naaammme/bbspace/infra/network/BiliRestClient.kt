@@ -42,22 +42,22 @@ class BiliRestClient @Inject constructor(
 
     /**
      * 发送签名后的 POST 请求并读取指定响应头
+     *
+     * AP-21：签名与请求体构建移入 IO 块（理由同 [getSigned]）。
      */
     suspend fun postSignedReadHeader(
         url: String,
         params: Map<String, String>,
         headerName: String,
         profile: BiliRestProfile = BiliRestProfile.APP
-    ): Pair<JSONObject, String> {
+    ): Pair<JSONObject, String> = withContext(Dispatchers.IO) {
         val signedBody = AppSigner.sign(params, profile.appKey, profile.appSec)
         val requestBody = signedBody.toRequestBody(null)
-        return withContext(Dispatchers.IO) {
-            okHttpClient.newCall(
-                Request.Builder().url(url).post(requestBody).withHeaders(profile).build()
-            ).execute().use { resp ->
-                val json = JSONObject(resp.body?.string() ?: throw BiliApiException(-1, "Empty response"))
-                requireSuccess(json) to resp.header(headerName).orEmpty()
-            }
+        okHttpClient.newCall(
+            Request.Builder().url(url).post(requestBody).withHeaders(profile).build()
+        ).execute().use { resp ->
+            val json = JSONObject(resp.body?.string() ?: throw BiliApiException(-1, "Empty response"))
+            requireSuccess(json) to resp.header(headerName).orEmpty()
         }
     }
 
@@ -65,30 +65,36 @@ class BiliRestClient @Inject constructor(
      * 发送签名后的 GET 请求并要求 code == 0
      *
      * GET 参数会被签名后直接拼进 URL query。
+     *
+     * AP-21：签名（MD5）与 header 构建（约 8 次 SP 读）**在 IO 块内**执行 ——
+     * 调用方（首页/排行 VM）在 Main.immediate 上直调，原先这两段全跑在主线程。
+     * 签名输入与结果完全不变，只改执行线程（AP-T9 真机核对鉴权一致性）。
      */
     suspend fun getSigned(
         url: String,
         params: Map<String, String>,
         profile: BiliRestProfile = BiliRestProfile.APP
-    ): JSONObject {
+    ): JSONObject = withContext(Dispatchers.IO) {
         val signedQuery = AppSigner.sign(params, profile.appKey, profile.appSec)
         val fullUrl = "$url?$signedQuery"
-        return requireSuccess(executeJson(Request.Builder().url(fullUrl).get().withHeaders(profile).build()))
+        requireSuccess(executeJson(Request.Builder().url(fullUrl).get().withHeaders(profile).build()))
     }
 
     /**
      * 发送签名后的 POST 请求但不检查业务 code
      *
      * 用于二维码轮询这类需要调用方自行处理特殊返回码的接口
+     *
+     * AP-21：签名与请求体构建移入 IO 块（理由同 [getSigned]）。
      */
     suspend fun postSignedRaw(
         url: String,
         params: Map<String, String>,
         profile: BiliRestProfile = BiliRestProfile.APP
-    ): JSONObject {
+    ): JSONObject = withContext(Dispatchers.IO) {
         val signedBody = AppSigner.sign(params, profile.appKey, profile.appSec)
         val requestBody = signedBody.toRequestBody(null)
-        return executeJson(Request.Builder().url(url).post(requestBody).withHeaders(profile).build())
+        executeJson(Request.Builder().url(url).post(requestBody).withHeaders(profile).build())
     }
 
     /**

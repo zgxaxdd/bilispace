@@ -22,11 +22,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.IntOffset
@@ -108,27 +108,36 @@ fun IOSChevron(
     color: Color = MaterialTheme.colorScheme.outline,
     pointingRight: Boolean = true
 ) {
-    Canvas(modifier.size(width = 9.dp, height = 16.dp)) {
-        val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-        val w = size.width
-        val h = size.height
-        val midX = if (pointingRight) w * 0.42f else w * 0.58f
-        val tipX = if (pointingRight) w * 0.88f else w * 0.12f
-        // 两段线代替 Path：chevron 就是两条直线，drawPath 需要先 new 一个 Path
-        // （绘制 lambda 每帧执行一次 → 每帧一次分配）。drawLine 无分配。
-        drawLine(
-            color = color,
-            start = Offset(midX, h * 0.12f),
-            end = Offset(tipX, h * 0.5f),
-            strokeWidth = stroke.width,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(tipX, h * 0.5f),
-            end = Offset(midX, h * 0.88f),
-            strokeWidth = stroke.width,
-            cap = StrokeCap.Round
-        )
-    }
+    Canvas(
+        modifier.size(width = 9.dp, height = 16.dp).drawWithCache {
+            // AP-29 ③：原来 `Stroke(...)` 在绘制 lambda 里 —— 每帧一次分配
+            //（同文件注释自称"每帧一次分配"却仍在新建）。改 drawWithCache 后只在
+            // 密度（dp→px）变化时重建；drawLine 本身仍无分配。
+            val strokeWidth = 2.dp.toPx()
+            val w = size.width
+            val h = size.height
+            val midX = if (pointingRight) w * 0.42f else w * 0.58f
+            val tipX = if (pointingRight) w * 0.88f else w * 0.12f
+            onDrawBehind {
+                // 两段线代替 Path：chevron 就是两条直线，drawPath 需要先 new 一个 Path
+                // （绘制 lambda 每帧执行一次 → 每帧一次分配）。drawLine 无分配。
+                drawLine(
+                    color = color,
+                    start = Offset(midX, h * 0.12f),
+                    end = Offset(tipX, h * 0.5f),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = color,
+                    start = Offset(tipX, h * 0.5f),
+                    end = Offset(midX, h * 0.88f),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round
+                )
+            }
+        },
+        // 绘制全部发生在 drawWithCache 的 onDrawBehind 里，Canvas 自身的 onDraw 留空
+        onDraw = {}
+    )
 }

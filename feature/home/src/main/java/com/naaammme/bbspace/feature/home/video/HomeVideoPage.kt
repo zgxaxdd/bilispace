@@ -169,8 +169,16 @@ fun HomeVideoPage(
     } else {
         COVER_PRELOAD_WIDTH_PX to COVER_PRELOAD_HEIGHT_PX
     }
+    // FL-03：URL 按 actionKey 增量缓存 —— `remember(items, …)` 的 key 是 List 的
+    // equals，每次 loadMore 追加都要对**整表**重跑一次 map；biliImageUrlForVariant
+    // 是字符串拼接，会话越长越贵。改走缓存后追加一页只拼新增项。
+    // actionKey 含位置索引（同一视频在不同位置键不同），不存在误共享；缓存随
+    // preloadVariant 生存，量级 = 会话内去重后的卡片数，都是短字符串。
+    val preloadUrlCache = remember(preloadVariant) { HashMap<String, String?>() }
     val preloadCoverUrls = remember(items, preloadVariant) {
-        items.map { biliImageUrlForVariant(it.cover, preloadVariant) }
+        items.map { item ->
+            preloadUrlCache.getOrPut(item.actionKey) { biliImageUrlForVariant(item.cover, preloadVariant) }
+        }
     }
     val homeFling = rememberHomeFlingBehavior()
     var wasRefreshing by remember { mutableStateOf(false) }
@@ -216,6 +224,17 @@ fun HomeVideoPage(
     //    静止时仍用 180ms 合并抖动。
     // 3. 相应地取消"滚动中直接 return"的门控 —— 它和第 2 点合起来让预加载只在
     //    列表完全静止时才有用。解码始终在 IO 线程，不占主线程。
+    //
+    // FL-03：**已入队水位**。修正点 2 的 0ms debounce 让 (lastVisible, scrolling) 的
+    // 每次 distinct 变化都入队 —— 同一段 fling 里 lastVisible 不变、isScrollInProgress
+    // 抖动的每一拍都会把同一窗口的 8 个 ImageRequest 重新构造并入队一遍（Coil 内部
+    // 去重救的是解码，救不了调用方的重复构造）。入队过的上界记在 enqueuedUpTo，
+    // collect 只处理水位之外的新增段。
+    // key 带首项 actionKey：追加页面（首项不变）时水位延续；整表刷新（首项更换）
+    // 时水位归零，新内容的第一窗照常预取。
+    var enqueuedUpTo by remember(preloadVariant, items.firstOrNull()?.actionKey) {
+        mutableStateOf(-1)
+    }
     LaunchedEffect(gridState, preloadCoverUrls, preloadSizePx) {
         if (preloadCoverUrls.isEmpty()) return@LaunchedEffect
         snapshotFlow {
@@ -233,8 +252,13 @@ fun HomeVideoPage(
                 val from = lastVisible + 1
                 val to = (lastVisible + COVER_PRELOAD_AHEAD).coerceAtMost(preloadCoverUrls.lastIndex)
                 if (from > to) return@collect
-                val urls = (from..to).mapNotNull { preloadCoverUrls.getOrNull(it) }
+                // FL-03：水位之内的区间已入队过，只补新增段（不回退 debounce 语义：
+                // 滚动中新进入窗口的区间照常立即入队，见修正点 2/3）
+                val newFrom = from.coerceAtLeast(enqueuedUpTo + 1)
+                if (newFrom > to) return@collect
+                val urls = (newFrom..to).mapNotNull { preloadCoverUrls.getOrNull(it) }
                 if (urls.isEmpty()) return@collect
+                enqueuedUpTo = to
                 // 解码/网络都在 Coil 自己的调度器上，主线程只负责入队
                 withContext(Dispatchers.IO) {
                     val loader = SingletonImageLoader.get(context)

@@ -60,20 +60,30 @@ class FrameBudgetLintTest {
      */
     private val maxOffscreenCompositing = 0
 
-    /** `rememberInfiniteTransition`：常驻无限动画，每个都会持续驱动重组/重绘。 */
-    private val maxInfiniteTransition = 2
+    /**
+     * `rememberInfiniteTransition`：常驻无限动画，每个都会持续驱动重组/重绘。
+     *
+     * **上限 2 → 1 的变更记录（2026-10-02，AP-01）**：全仓 main 源码实测**仅 1 处**
+     * （`Skeleton.kt:95`，骨架呼吸的唯一时钟）。原上限 2 是没有按实测口径读数定下的
+     * （W24）。运行期"实例数 vs 调用点数"的缺口（1 个调用点被 N 个 item 各调一次）
+     * 由 `SkeletonShimmerStructureTest` 的容器级 provider 守卫管辖，本棘轮只管调用点。
+     */
+    private val maxInfiniteTransition = 1
 
     /**
      * `runBlocking`：阻塞当前线程。主线程上使用会直接掉帧，启动路径上会拖慢冷启。
      *
-     * **上限 2 → 3 的变更记录（2026-09-21）**：
-     * 新增的是 `VideoDetailActivity.preloadThemeConfig()` —— 详情页是**独立 Activity**，
-     * 有自己的一次 `setContent`；若不在此同步预读真实主题，无缝打开动画期间会先渲染
-     * `ThemeConfig()` 默认的 MATERIAL 浅色、再翻成用户真实主题（观感就是"打开瞬间白闪"）。
-     * 与 `MainActivity` 的两处同源同目的，且都带 300ms 超时兜底、异常时回退默认值，
-     * 不会把启动拖住。详见 `MainActivity.preloadThemeConfig` 的注释。
+     * **上限 2 的实测口径（2026-10-02，AP-01(d) 修正）**：全仓 main 源码恰好 2 处 ——
+     * `MainActivity.kt:293` 与 `VideoDetailActivity.kt:217`，同为 `preloadThemeConfig`
+     * 的同步主题预读（详情页是独立 Activity，有自己的 `setContent`；若不在此同步预读
+     * 真实主题，无缝打开动画期间会先渲染默认的 MATERIAL 浅色、再翻成用户真实主题，
+     * 观感就是"打开瞬间白闪"）。两处都带超时兜底、异常时回退默认值。
+     *
+     * **勘误**：本注释此前写"与 MainActivity 的两处同源同目的"，与代码不符
+     * （MainActivity 实为 1 处）—— 交接数字未复核就以讹传讹（W4），本次按本仓扫描器
+     * 实测口径（W24）改正，上限 3 → 2 收紧到真值。
      */
-    private val maxRunBlocking = 3
+    private val maxRunBlocking = 2
 
     /**
      * `animate*AsState`：值在**组合期**读取 → 动画每帧重组宿主 composable。
@@ -111,11 +121,28 @@ class FrameBudgetLintTest {
      *    —— 推荐页封面取色淡入的**同配方抽包复用**（排行卡要与推荐卡同观感，
      *    取色宿主从 FeedCard 抽到 designsystem 供两页共用）。第 5 条的全部理由
      *    原样适用：只在取色回来那一刻触发一次 350ms 过渡，不在滚动路径上。
+     *
+     * **AP-33 复核（2026-10-02）：9 保持不变，书面理由** —— FL-07（把卡片取色淡入
+     * 移出组合期）本轮**未执行**（史实：那是重构而非调优，历史坑在
+     * `HomeVideoPage` 的取色只挂 Coil onSuccess 上；在无设备条件下改它风险大于收益）。
+     * 实测仍为 9 处，故上限维持；FL-07 若单独立项再下调。
      */
     private val maxAnimateAsState = 9
 
-    /** `BlurEffect(`：不比较半径就重建 = 每帧重编着色器。 */
-    private val maxBlurEffect = 0
+    /**
+     * **真实模糊入口**（`hazeBlur(` + `drawBackdrop(`）：不比较半径就重建 = 每帧重编着色器。
+     *
+     * **AP-01(c) 改锚记录（2026-10-02）**：原棘轮锚在 `BlurEffect(` 上，但全仓 main 源码
+     * 对 `BlurEffect(` 的命中为 **0** —— 真实模糊已全部迁入 miuix-blur / haze 依赖
+     * （S5 反编译 miuix-blur 0.9.4-rc01 证实），原守卫**恒真、零咬合力**，是条假守卫。
+     * 现改锚到仅存的两个真实模糊入口：
+     * - `hazeBlur(`（GlassEffect.kt 的 haze 分支，全仓 1 处）；
+     * - `drawBackdrop(`（miuix 背板采样，全仓 3 处：LiquidBackdrop 工厂 /
+     *   HomeVideoPage.glassBadgeSurface / VideoPlayerPane.playerControlGlass）。
+     * 每多一处就是多一条玻璃模糊链；新增前先回答能不能复用既有背板
+     * （挂载点登记见 GlassMountRegistryTest）。
+     */
+    private val maxRealBlurEntries = 4
 
     @Test
     fun scannerActuallyReadsSources() {
@@ -184,13 +211,14 @@ class FrameBudgetLintTest {
     }
 
     @Test
-    fun blurEffect_isFrozen() {
+    fun realBlurEntries_areFrozen() {
         assertRatchet(
-            actual = countInSources("""BlurEffect\("""),
-            limit = maxBlurEffect,
-            what = "BlurEffect(",
-            why = "在 graphicsLayer 里直接构造 BlurEffect 而不比较半径，等于每帧新建 RenderEffect，" +
-                "底层要重新编译着色器。正确做法是先比较半径（lastBlurRadiusPx 之类）再赋值。"
+            actual = countInSources("""\.(hazeBlur|drawBackdrop)\("""),
+            limit = maxRealBlurEntries,
+            what = "hazeBlur(/drawBackdrop(（真实模糊入口）",
+            why = "每多一处就是多一条玻璃模糊链，且 miuix 的 DrawBackdropElement.equals 对 " +
+                "lambda 引用比较 —— 不 remember 住整条链就等于每次重组重建模糊缓存。" +
+                "新增前先回答：能不能复用既有背板？（挂载点登记见 GlassMountRegistryTest）"
         )
     }
 

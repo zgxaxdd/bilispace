@@ -605,6 +605,11 @@ class LiveRoomMessageRepository @Inject constructor(
         messages: List<LiveRoomMessage>,
         msg: LiveRoomMessage
     ): List<LiveRoomMessage> {
+        // AP-11：重连（见本类重连回放路径）会把同 msg_id 的消息再投一遍，而
+        // LiveDetailPane 的 LazyColumn 以 msgId 作 key —— 重复 key 直接崩溃。
+        // 同 id 的回放帧在入口处丢弃（消息 ≤ MAX_MESSAGE_COUNT 条，线性查重成本可忽略）。
+        val incomingId = msg.msgId
+        if (incomingId != null && messages.any { it.msgId == incomingId }) return messages
         if (messages.isEmpty()) return listOf(msg)
         val next = if (messages.size >= MAX_MESSAGE_COUNT) {
             ArrayList<LiveRoomMessage>(MAX_MESSAGE_COUNT).apply {

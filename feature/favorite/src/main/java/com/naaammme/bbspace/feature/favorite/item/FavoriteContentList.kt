@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -33,12 +34,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
+import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonBreath
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
+import com.naaammme.bbspace.core.designsystem.component.rememberSkeletonBreathOrNull
 import com.naaammme.bbspace.core.model.FavoriteContentItem
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 
 @Composable
 fun FavoriteContentList(
@@ -60,23 +65,37 @@ fun FavoriteContentList(
     val shouldLoadMore by rememberUpdatedState(canLoadMore)
     val hasLoadMoreError by rememberUpdatedState(errorOnLoadMore)
 
+    // AP-10：增长守卫 —— snapshotFlow 只对 (total, last) 变化发射，风暴面小，
+    // 但"在尾部小幅滚动逐次触发"仍是同一缺陷家族：只有列表确实变长才放行下一次。
+    val loadMoreGuard = remember { LoadMoreGrowthGuard() }
+    LaunchedEffect(items.size) {
+        loadMoreGuard.onItemLineChanged(items.size)
+    }
+
     LaunchedEffect(listState) {
         snapshotFlow {
             val total = listState.layoutInfo.totalItemsCount
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             total to last
         }
-            .distinctUntilChanged()
-            .filter { (total, last) ->
+            .map { (total, last) ->
                 shouldLoadMore &&
                     !hasLoadMoreError &&
                     total > 0 &&
                     last >= total - LOAD_MORE_TRIGGER_OFFSET
             }
-            .collect {
-                onLoadMore()
+            .distinctUntilChanged()
+            .collect { should ->
+                loadMoreGuard.onVisibility(should, busy = false)
+                if (should && loadMoreGuard.tryAcquire()) {
+                    onLoadMore()
+                }
             }
     }
+
+    // AP-15：呼吸时钟只在"加载更多骨架存在"时创建（骨架区消失即随组合销毁，
+    // 不给常驻列表留无限动画）；动效关闭时为 null，骨架完全静止。
+    val loadMoreBreath = if (isLoadingMore) rememberSkeletonBreathOrNull() else null
 
     LazyColumn(
         state = listState,
@@ -108,7 +127,10 @@ fun FavoriteContentList(
                 key = { index -> "favorite_content_loading_$index" },
                 contentType = { "loading" }
             ) {
-                VideoListCardSkeleton()
+                // AP-15：注入共享呼吸 —— N 个骨架一个时钟
+                ProvideSkeletonBreath(breath = loadMoreBreath) {
+                    VideoListCardSkeleton()
+                }
             }
         }
 

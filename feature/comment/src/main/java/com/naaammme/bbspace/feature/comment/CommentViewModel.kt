@@ -1,6 +1,9 @@
 package com.naaammme.bbspace.feature.comment
 
 import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
@@ -45,6 +48,19 @@ class CommentViewModel @Inject constructor(
     val editorState = _editorState.asStateFlow()
     private val _msg = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val msg = _msg.asSharedFlow()
+
+    /**
+     * AP-19：进行中的操作（点赞/翻译/删除等）rpid 集合。
+     *
+     * 从 [CommentUiState] 拆出来放进 snapshot state 的原因：Set 是**不稳定类型**，
+     * 作为 UiState 字段时每次动作都换一个新集合 → 全可见卡片相等性失败 →
+     * 每个动作触发两轮全可见卡片重组。现在卡片经 [isReplyBusy]（**终身一个实例**
+     * 的稳定闭包）+ 卡片内 derivedStateOf 自查，只有自身 busy 翻转的那张卡重组。
+     */
+    private val busyReplyIds = mutableStateOf<Set<Long>>(emptySet())
+
+    /** 卡片侧"自己查自己"的唯一入口；闭包实例稳定，可安全作为组合参数。 */
+    val isReplyBusy: (Long) -> Boolean = { rpid -> rpid in busyReplyIds.value }
 
     private var reqId = 0L
 
@@ -293,18 +309,14 @@ class CommentViewModel @Inject constructor(
     fun translateReply(rpid: Long) {
         val state = _uiState.value
         val subject = state.subject ?: return
-        if (rpid in state.busyReplyIds) return
-        _uiState.update {
-            it.copy(busyReplyIds = it.busyReplyIds + rpid)
-        }
+        if (isReplyBusy(rpid)) return
+        busyReplyIds.value = busyReplyIds.value + rpid
         viewModelScope.launch {
             val result = runCatchingCancellable {
                 repo.fetchTranslatedReply(subject, rpid)
             }
             if (_uiState.value.subject != subject) return@launch
-            _uiState.update {
-                it.copy(busyReplyIds = it.busyReplyIds - rpid)
-            }
+            busyReplyIds.value = busyReplyIds.value - rpid
             result.fold(
                 onSuccess = { translated ->
                     when {
@@ -343,21 +355,15 @@ class CommentViewModel @Inject constructor(
     fun checkReply(rpid: Long) {
         val state = _uiState.value
         val subject = state.subject ?: return
-        if (rpid in state.busyReplyIds) return
-        _uiState.update {
-            it.copy(
-                busyReplyIds = it.busyReplyIds + rpid,
-                replyCheckDialogText = null
-            )
-        }
+        if (isReplyBusy(rpid)) return
+        busyReplyIds.value = busyReplyIds.value + rpid
+        _uiState.update { it.copy(replyCheckDialogText = null) }
         viewModelScope.launch {
             val result = runCatchingCancellable {
                 repo.fetchReplyInfo(rpid)
             }
             if (_uiState.value.subject != subject) return@launch
-            _uiState.update {
-                it.copy(busyReplyIds = it.busyReplyIds - rpid)
-            }
+            busyReplyIds.value = busyReplyIds.value - rpid
             result.fold(
                 onSuccess = { reply ->
                     _uiState.update {
@@ -380,18 +386,14 @@ class CommentViewModel @Inject constructor(
     fun deleteReply(reply: CommentReply) {
         val state = _uiState.value
         val subject = state.subject ?: return
-        if (reply.rpid in state.busyReplyIds) return
-        _uiState.update {
-            it.copy(busyReplyIds = it.busyReplyIds + reply.rpid)
-        }
+        if (isReplyBusy(reply.rpid)) return
+        busyReplyIds.value = busyReplyIds.value + reply.rpid
         viewModelScope.launch {
             val result = runCatchingCancellable {
                 repo.deleteReply(subject, reply.rpid)
             }
             if (_uiState.value.subject != subject) return@launch
-            _uiState.update {
-                it.copy(busyReplyIds = it.busyReplyIds - reply.rpid)
-            }
+            busyReplyIds.value = busyReplyIds.value - reply.rpid
             result.fold(
                 onSuccess = {
                     _uiState.update { cur -> removeDeletedReply(cur, reply) }
@@ -459,16 +461,12 @@ class CommentViewModel @Inject constructor(
             _msg.tryEmit("请先登录")
             return
         }
-        if (reply.rpid in state.busyReplyIds) return
-        _uiState.update {
-            it.copy(busyReplyIds = it.busyReplyIds + reply.rpid)
-        }
+        if (isReplyBusy(reply.rpid)) return
+        busyReplyIds.value = busyReplyIds.value + reply.rpid
         viewModelScope.launch {
             val result = runCatchingCancellable { repoCall(subject) }
             if (_uiState.value.subject != subject) return@launch
-            _uiState.update {
-                it.copy(busyReplyIds = it.busyReplyIds - reply.rpid)
-            }
+            busyReplyIds.value = busyReplyIds.value - reply.rpid
             result.fold(
                 onSuccess = {
                     _uiState.update { cur -> updateReplyRate(cur, reply.rpid, transform) }

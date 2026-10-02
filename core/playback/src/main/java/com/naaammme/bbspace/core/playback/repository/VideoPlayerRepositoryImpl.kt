@@ -96,6 +96,10 @@ class VideoPlayerRepositoryImpl @Inject constructor(
             request.ids.cid > 0L
     }
 
+    override fun clearPlayUrlCache() {
+        playUrlCache.clear()
+    }
+
     private suspend fun buildRequest(request: PlaybackRequest): PlayViewUniteReq {
         val playable = request.playable
         val ids = playable.ids

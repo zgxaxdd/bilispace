@@ -46,6 +46,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -67,6 +68,8 @@ class VideoDownloadRepository @Inject constructor(
 
     val tasks: Flow<List<VideoDownloadTask>> = dao.observeAll()
         .map { list -> list.map(VideoDownloadEntity::toModel) }
+        // AP-24：同值重复写入会驱动下游重组 —— 结构相等去重拦住"内容没变的发射"
+        .distinctUntilChanged()
 
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val drainMutex = Mutex()

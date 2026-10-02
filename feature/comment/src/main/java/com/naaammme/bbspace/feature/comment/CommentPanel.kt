@@ -51,6 +51,7 @@ import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.designsystem.component.CommentCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.CommentHeaderSkeleton
+import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.PreviewImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.PublishedRecord
@@ -134,8 +135,16 @@ fun CommentPanel(
         }
     }
 
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) {
+    // AP-10：增长守卫 —— 谓词含 !uiState.loadingMore，effect 会随加载翻转重启；
+    // 空页/全重复页（列表不增长）必须由守卫挡住。
+    val loadMoreGuard = remember { LoadMoreGrowthGuard() }
+    LaunchedEffect(uiState.items.size) {
+        loadMoreGuard.onItemLineChanged(uiState.items.size)
+    }
+
+    LaunchedEffect(shouldLoadMore, uiState.loading, uiState.loadingMore) {
+        loadMoreGuard.onVisibility(shouldLoadMore, busy = uiState.loading || uiState.loadingMore)
+        if (shouldLoadMore && loadMoreGuard.tryAcquire()) {
             viewModel.loadMore()
         }
     }
@@ -235,7 +244,7 @@ fun CommentPanel(
                     state = replyThread,
                     listState = threadListState,
                     currentMid = uiState.currentMid,
-                    busyReplyIds = uiState.busyReplyIds,
+                    isReplyBusy = viewModel.isReplyBusy,
                     onReplyAction = onReplyAction,
                     onDismiss = onDismissDetail,
                     onToggleSort = viewModel::toggleReplyThreadSort,
@@ -331,7 +340,7 @@ fun CommentPanel(
                                 CommentCard(
                                     reply = reply,
                                     currentMid = uiState.currentMid,
-                                    busyReplyIds = uiState.busyReplyIds,
+                                    isReplyBusy = viewModel.isReplyBusy,
                                     onAction = onReplyAction
                                 )
                             }
@@ -384,7 +393,7 @@ fun CommentPanel(
                         state = threadPane,
                         listState = threadListState,
                         currentMid = uiState.currentMid,
-                        busyReplyIds = uiState.busyReplyIds,
+                        isReplyBusy = viewModel.isReplyBusy,
                         onReplyAction = onReplyAction,
                         onDismiss = viewModel::closeReplyThread,
                         onToggleSort = viewModel::toggleReplyThreadSort,

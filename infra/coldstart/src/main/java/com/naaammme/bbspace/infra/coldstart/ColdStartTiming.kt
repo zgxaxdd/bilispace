@@ -27,6 +27,9 @@ class ColdStartTiming(
     private var previous = start
     private val phases = LinkedHashMap<String, Long>()
 
+    /** 最近一次 mark 的阶段名；null = 连第一段都没标完。 */
+    private var lastMarkedPhase: String? = null
+
     /** 记一段：从上一次 mark（或构造）到现在的耗时。 */
     fun mark(
         phase: String
@@ -34,6 +37,7 @@ class ColdStartTiming(
         val now = ticker()
         phases[phase] = ((now - previous) / 1_000_000L).coerceAtLeast(0L)
         previous = now
+        lastMarkedPhase = phase
         return this
     }
 
@@ -47,6 +51,24 @@ class ColdStartTiming(
         val body = phases.entries.joinToString(" ") { "${it.key}=${it.value}ms" }
         val slow = if (totalMs >= thresholdWarnMs) " slow=1" else ""
         return "$PREFIX outcome=$outcome $body $TOTAL=${totalMs}ms$slow"
+    }
+
+    /**
+     * AP-09：异常路径渲染 —— **正在飞的那一段**记到它真实的名字下。
+     *
+     * 原实现把异常路径硬渲染成 `render(outcome, CACHE)`：gRPC 中途抛异常时，整段
+     * gRPC 耗时被归进 `cache=` 且行里**没有 `grpc=` 键** —— 最需要看数据的那次启动
+     * 字段恰恰是错的（PF-03 的"失败也出数据"做到了，归因没对）。现在按已 mark 的
+     * 阶段推断在飞段：null→BUILD、BUILD→GRPC、GRPC→PARSE、其余→CACHE。
+     */
+    fun renderFailure(outcome: String): String {
+        val inFlight = when (lastMarkedPhase) {
+            null -> BUILD
+            BUILD -> GRPC
+            GRPC -> PARSE
+            else -> CACHE
+        }
+        return render(outcome, inFlight)
     }
 
     companion object {

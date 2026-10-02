@@ -121,7 +121,6 @@ class HistoryViewModel @Inject constructor(
     ) {
         try {
             val page = repo.fetchPage(tab, if (reset) HistoryCursor() else cursor)
-            cursor = page.cursor
             // 按 key 去重：翻页窗口重叠时服务端可能返回重复条目，重复 key 会让 LazyColumn 崩溃
             val mergedItems = if (reset) {
                 page.items.distinctBy(HistoryItem::key)
@@ -135,6 +134,9 @@ class HistoryViewModel @Inject constructor(
             )
             _uiState.update {
                 if (it.tab != tab) return@update it
+                // AP-13：共享游标字段的赋值必须在 tab 校验**之后** —— 慢响应晚到
+                // （用户已切 tab）时不得污染新 tab 的翻页游标（表现：跳页/重复/漏项）。
+                cursor = page.cursor
                 it.copy(
                     items = mergedItems,
                     isLoading = false,

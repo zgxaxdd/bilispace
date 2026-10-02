@@ -142,6 +142,21 @@ fun DynamicDetailScreen(
                 }
             }
 
+            // AP-16：首屏加载态 —— VM 一直有 isLoading 但屏幕零引用，详情未到且
+            // 无错误时整页空白。统一走 StateMessageCard（UI-04 出口），
+            // 三态优先级保持 错误 > 加载 > 内容。
+            state.isLoading && detail == null -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    StateMessageCard(text = "加载中…")
+                }
+            }
+
             detail != null -> {
                 val commentSubject = if (detail.replyBizId > 0L && detail.replyBizType > 0L) {
                     CommentSubject(

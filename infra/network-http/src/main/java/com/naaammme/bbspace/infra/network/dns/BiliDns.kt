@@ -38,6 +38,12 @@ class BiliDns(
         private const val MIN_HTTPDNS_TTL_MS = 120_000L // 业务域名本地最小 TTL，降低热域名刷新频率
         private const val NO_NETWORK_HANDLE = -1L
 
+        /**
+         * AP-24：缓存容量上限。视频 CDN 主机名随会话轮换（不同 PCDN/边缘节点），
+         * 无上限 map 会一直长；128 条足够覆盖"业务域名 + 当前会话活跃 CDN 主机"。
+         */
+        private const val DNS_CACHE_MAX_ENTRIES = 128
+
         // 启动时主动预热的高频业务域名
         private val PREFETCH_DOMAINS = setOf(
             "app.bilibili.com",
@@ -287,6 +293,16 @@ class BiliDns(
             DomainType.HTTPDNS -> maxOf(remoteTtlMs, MIN_HTTPDNS_TTL_MS)
             DomainType.VIDEO_CDN,
             DomainType.OTHER -> remoteTtlMs
+        }
+        // AP-24：容量上限 —— 视频 CDN 主机名随会话不断轮换，无上限 map 会一直长。
+        // 溢出时先清过期条目，仍超限则丢任意一条（DNS 缓存丢一条的代价只是一次重新解析）。
+        if (cache.size >= DNS_CACHE_MAX_ENTRIES) {
+            val now = System.currentTimeMillis()
+            cache.entries.removeIf { it.value.expireAt <= now }
+            while (cache.size >= DNS_CACHE_MAX_ENTRIES) {
+                val victim = cache.keys.firstOrNull() ?: break
+                cache.remove(victim)
+            }
         }
         cache[hostname] = CacheEntry(
             addresses = addresses,

@@ -15,6 +15,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.brotli.BrotliInterceptor
 import java.util.concurrent.TimeUnit
@@ -71,7 +72,18 @@ object NetworkModule {
         biliDns: BiliDns,
         connectionPool: ConnectionPool
     ): OkHttpClient {
+        // AP-07 ①：冷启并发预算**显式化**。Dispatcher 的 64/5 就是 OkHttp 默认值
+        // （行为零变化），刻意写出来作为全站网络并发上限的对照基线：冷启窗口里
+        // 的首屏必需请求与可延后请求共享这 5 个每主机槽位，任何"抬高并发"的改动
+        // （如 FL-11 的 DNS 并行探测）都必须对照这里并写明理由。
+        // 更细的"首屏必需 vs 可延后"优先级由调用侧表达：更新检查已移出冷启窗口
+        // （MainActivity.scheduleUpdateCheckAfterFirstFrame，AP-07 ②）。
+        val dispatcher = Dispatcher().apply {
+            maxRequests = COLD_START_MAX_REQUESTS
+            maxRequestsPerHost = COLD_START_MAX_REQUESTS_PER_HOST
+        }
         return OkHttpClient.Builder()
+            .dispatcher(dispatcher)
             .dns(biliDns)
             .connectionPool(connectionPool)
             .addInterceptor(BrotliInterceptor)
@@ -132,4 +144,11 @@ object NetworkModule {
     private const val CONNECT_TIMEOUT_MS = 10_000L
     private const val READ_TIMEOUT_MS = 10_000L
     private const val WRITE_TIMEOUT_MS = 10_000L
+
+    /**
+     * AP-07 ①：与 OkHttp 当前默认值一致（64/5），写出来是让"冷启并发预算"进 diff。
+     * 调整前先读 provideOkHttpClient 的注释，并与 FL-11（DNS 并行化）一起排期。
+     */
+    private const val COLD_START_MAX_REQUESTS = 64
+    private const val COLD_START_MAX_REQUESTS_PER_HOST = 5
 }

@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.infra.network.dns
 
 import com.naaammme.bbspace.core.common.log.Logger
+import java.util.concurrent.Callable
 
 /**
  * 阿里 HTTPDNS
@@ -27,15 +28,24 @@ object AlibabaHttpDns {
     )
 
     /**
-     * 通过阿里 HTTPDNS 解析域名
+     * 通过阿里 HTTPDNS 解析域名（FL-11：5 个服务器**并行**探测，首个成功即用）。
+     *
+     * 原实现串行 for 循环 —— 最坏 5×1s 叠加在首帧关键路径上（PF-01）。现在并行提交、
+     * 总预算 [TOTAL_BUDGET_MS] 封顶：全部失败也不线性叠加。并发由共享有界池
+     * （3 并发）约束。
+     *
      * @return DnsResult 包含 IP 列表和 TTL，失败返回 null
      */
     fun resolve(hostname: String): DnsResult? {
-        for (server in SERVERS) {
-            resolveByServer(server, hostname)?.let { return it }
+        val result = parallelFirstSuccess(
+            tasks = SERVERS.map { server -> Callable { resolveByServer(server, hostname) } },
+            executor = httpDnsProbeExecutor,
+            totalBudgetMs = TOTAL_BUDGET_MS
+        )
+        if (result == null) {
+            Logger.w(TAG) { "Alibaba HTTPDNS resolve failed for $hostname" }
         }
-        Logger.w(TAG) { "Alibaba HTTPDNS resolve failed for $hostname" }
-        return null
+        return result
     }
 
     private fun resolveByServer(server: String, hostname: String): DnsResult? {
@@ -47,4 +57,7 @@ object AlibabaHttpDns {
             null
         }
     }
+
+    /** FL-11：全部源失败时的总耗时上限（并发下 ≈ 单源最坏值 + 调度开销）。 */
+    private const val TOTAL_BUDGET_MS = 2_000L
 }

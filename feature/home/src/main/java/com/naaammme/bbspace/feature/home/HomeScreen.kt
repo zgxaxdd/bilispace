@@ -386,6 +386,8 @@ fun HomeScreen(
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
             topBarOffsetPxProvider = topBarOffsetProvider,
+            // FL-06：顶栏完全滚出后的重采样门控用（与源侧 tickGate 同款判据）
+            topBarHeightPxProvider = { topBarHeightState.value },
             isScrolling = topBarScrolling,
             onEnterStoryMode = enterStoryMode,
             onNavigateToSearch = onNavigateToSearch,
@@ -414,6 +416,8 @@ private fun HomeTopBar(
     selectedIndex: Int,
     // 偏移量延迟读取：offset 块内取值，滚动时只重布局顶栏、不重组上游 scope
     topBarOffsetPxProvider: () -> Float,
+    // FL-06：顶栏实测高度（px），与偏移量构成"是否仍可见"的判据
+    topBarHeightPxProvider: () -> Int,
     // 是否正在滚动。由调用方用 derivedStateOf 收成布尔后传入 —— 不要在组合期直接读
     // 像素级 offset state（详见调用点注释）。
     isScrolling: Boolean,
@@ -446,7 +450,12 @@ private fun HomeTopBar(
             .then(
                 when {
                     isIOS && topGlassOn -> Modifier
-                        .glassFrameRefresh(LocalGlassRefresher.current)
+                        // FL-06：顶栏完全滚出屏幕后停止重采样（此前消费端无谓词，是
+                        // 与源侧 tickGate 不对称的缺口）。与源侧同款谓词：偏移 < 高度。
+                        .glassFrameRefresh(
+                            LocalGlassRefresher.current,
+                            visible = { topBarOffsetPxProvider() < topBarHeightPxProvider() }
+                        )
                         .glassEffect(
                             state = topGlassState,
                             surfaceType = GlassSurfaceType.HEADER,

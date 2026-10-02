@@ -122,6 +122,12 @@ class GlassRecordChainStructureTest {
      * 计数用 `[Gg]lassRefresher\.frame` 而不是 `.frame`：消费端 helper
      * （GlassRefresher.kt 里的 `refresher.frame`）读的是同一个 tick，但它是
      * **重采样**观察、不是源侧重录，混进来会让这个数字失去意义。
+     *
+     * **AP-33 复核（2026-10-02）：上限 2 保持不变，书面理由** —— FL-05（源侧 2→1：
+     * 把各 Tab 悬浮顶栏提为与 Dock 同级、删首页私有源）本轮**未执行**：它是架构级改动，
+     * 且自采样鬼影必须真机走查（HomeScreen 记录过两次踩坑）。实测仍 2 处，故维持。
+     * 另：AP-25 给播放控件链补上守卫/预算后，**消费端**的无效重采样已由可见性谓词与
+     * 预算收紧覆盖，源侧那份的收益待 FL-05 立项后一并验证。
      */
     @Test
     fun glassTickSites_currentlyTwo() {

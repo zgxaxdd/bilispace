@@ -24,6 +24,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.HazeColorEffect
 import dev.chrisbanes.haze.blur.hazeBlur
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
@@ -102,16 +103,25 @@ fun Modifier.glassEffect(
     if (state == null) return this
 
     val dark = isDarkTheme()
+    // AP-28 ②：用户把动效设为「关闭」（reduceMotion）时，玻璃按 Reduced 档预算走 ——
+    // 与骨架呼吸（FL-01）/FL 书 E-02 同一口径："关闭动效" = 不启动常驻动画、不跑
+    // 实时重录。折叠进同一个 budget 计算，避免第二套降级语义。
+    val anim = LocalAnimations.current
+    val effectiveTier = if (anim.reduceMotion) {
+        minMotionTier(guard.effectiveMotionTier, MotionTier.Reduced)
+    } else {
+        guard.effectiveMotionTier
+    }
     val budget = remember(
         surfaceType,
-        guard.effectiveMotionTier,
+        effectiveTier,
         guard.forceLowBlurBudget,
         isScrolling,
         isTransitionRunning
     ) {
         resolveGlassBudget(
             surfaceType = surfaceType,
-            motionTier = guard.effectiveMotionTier,
+            motionTier = effectiveTier,
             isScrolling = isScrolling,
             isTransitionRunning = isTransitionRunning,
             forceLowBudget = guard.forceLowBlurBudget
@@ -140,9 +150,9 @@ fun Modifier.glassEffect(
     val style = remember(config, surfaceType, dark, container, budget) {
         styleFor(config, surfaceType, dark, container, budget)
     }
-    val inputScaleFactor = remember(budget, surfaceType) {
-        resolveGlassInputScale(budget, surfaceType)
-    }
+    // FL-04：原 `inputScaleFactor = resolveGlassInputScale(budget, surfaceType)` 已删除
+    //（死代码：haze 2.0 移除 HazeInputScale 后从未被读取，全仓仅声明处与定义处两个命中）。
+    // 连带影响见 GlassBudget.kt 中 resolveGlassInputScale 的删除记录。
     // haze 2.0：采样策略由 HazePerformanceMode 表达（旧的 HazeInputScale 已移除）。
     // 滚动/转场期间降档以省算力；静止时用 Balanced（等价于原先的按比例降采样）。
     val performanceMode = remember(budget) {

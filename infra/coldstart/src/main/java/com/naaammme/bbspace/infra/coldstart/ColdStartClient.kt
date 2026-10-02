@@ -91,11 +91,14 @@ class ColdStartClient @Inject constructor(
         } catch (e: CancellationException) {
             // 取消不是"获取冷启动数据失败"：DNS 回调晚到后再被取消时，
             // 原来这条会把取消打成错误日志并返回空数据，掩盖真实故障也污染统计
-            Logger.w(TAG) { timing.render(ColdStartTiming.OUTCOME_CANCELLED, ColdStartTiming.CACHE) }
+            // AP-09：renderFailure 把在飞段记到真实名字下（不再硬归到 cache=）
+            Logger.w(TAG) { timing.renderFailure(ColdStartTiming.OUTCOME_CANCELLED) }
             throw e
         } catch (e: Exception) {
+            // AP-09：gRPC 中途失败时行里必须有 grpc= 键（原实现把整段 gRPC 耗时
+            // 归进 cache=，最需要数据的启动归因是错的）
             Logger.e(TAG, e) {
-                "获取冷启动数据失败 ${timing.render(ColdStartTiming.OUTCOME_ERROR, ColdStartTiming.CACHE)}"
+                "获取冷启动数据失败 ${timing.renderFailure(ColdStartTiming.OUTCOME_ERROR)}"
             }
             return ColdStartData(null, null)
         }

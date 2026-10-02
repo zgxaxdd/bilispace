@@ -27,10 +27,13 @@ import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.VideoCdnMode
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -127,6 +130,13 @@ class AppSettings @Inject constructor(
             config
         }
         .distinctUntilChanged()
+        // AP-05：`map {}` 的执行上下文 = **收集方上下文**，而 MainActivity /
+        // VideoDetailActivity 的收集都在 `LaunchedEffect`（主线程）—— 每次创建这两个
+        // Activity 都会在主线程跑一遍 persistSettingsMirror，其首次 `getSharedPreferences`
+        // 会 awaitLoadedLocked()（读盘 + 解析 XML，P4 教训在"回填"路径上的复活）。
+        // `flowOn(IO)` 把上游（含回填与 ThemeConfig 构造）整体移到 IO：下游收集方
+        // 仍按自己的上下文收值，首读快路径（peekThemeConfigBlocking）语义不变。
+        .flowOn(Dispatchers.IO)
 
     // ── 设置镜像：让「首帧主题 = 真实配置」不再需要在主线程 runBlocking ──────────
     //
@@ -217,7 +227,10 @@ class AppSettings @Inject constructor(
     /** 设置写入的**唯一收口**：写 DataStore 之后把快照同步写进镜像。 */
     private suspend fun editSettingsMirrored(transform: suspend (MutablePreferences) -> Unit) {
         val next = context.appSettingsDataStore.edit(transform)
-        persistSettingsMirror(next)
+        // AP-05：写入方（viewModelScope = Main.immediate）不再亲自碰 SP。
+        // 预热线程通常已把文件载入内存，但"镜像回填不发生在调用方线程"这条纪律
+        // 对写路径同样成立 —— 升级后首启/清数据后第一次写入仍可能触发真实读盘。
+        withContext(Dispatchers.IO) { persistSettingsMirror(next) }
     }
 
     /**
@@ -243,10 +256,7 @@ class AppSettings @Inject constructor(
             }
         }
         val current = sp.all
-        val same = sp.getBoolean(MIRROR_READY_KEY, false) &&
-            current.size - 1 == next.size &&
-            next.all { (k, v) -> current[k] == v }
-        if (same) return
+        if (mirrorSnapshotUpToDate(current, next)) return
         val editor = sp.edit()
         editor.clear()
         for ((k, v) in next) {
@@ -411,6 +421,14 @@ class AppSettings @Inject constructor(
     /**
      * 播放页控件模糊：进度条 / 中央播放钮 / 控制条 / 顶栏浮层是否采样实时视频画面做
      * 磨砂玻璃。关闭或背板不可用时回落「黑遮罩 + 白前景」纯色（可读性优先）。
+     *
+     * FL-14 结论（**不改默认值，只留结论**）：默认 true 是有意为之 —— 播放控件是
+     * 默认配置（MATERIAL + FROSTED）下少数真正有玻璃观感的区域之一，关掉它整个
+     * 播放页读作"一块黑条"。逐帧成本由两条既有机制兜底：视频层录制节点只在被 tick
+     * 读失效时重绘（不 tick 无录制成本），且 AP-25 已把该链接入帧守卫与预算（jank
+     * 降级/用户关闭动效时自动停）。若真机 gfxinfo 显示它仍是瓶颈，应调守卫阈值或
+     * 在设置页给出更明确的关闭引导，而不是翻转默认值（"只能靠眼睛判"的改动不得
+     * 改默认行为）。待真机：AP-T6。
      */
     val playerControlsBlur: Flow<Boolean> =
         context.appSettingsDataStore.data.map { it[playerControlsBlurKey] ?: true }
@@ -815,3 +833,16 @@ class AppSettings @Inject constructor(
         }
     }
 }
+
+/**
+ * 镜像快照是否已与 DataStore 一致（AP-05 抽出的纯函数，JVM 单测直接覆盖）。
+ *
+ * `current` 是 `sp.all`（含 [MIRROR_READY_KEY] 门闩本身），`next` 是 DataStore
+ * 快照的镜像键值对（不含门闩）→ "内容一致"意味着 `current` 比 `next` 恰好多
+ * 一个门闩键。判等失败就是回填写盘的触发条件，判错方向要么白写盘、要么漏更新
+ * （漏更新 = 下次冷启动用旧主题首帧）。
+ */
+internal fun mirrorSnapshotUpToDate(current: Map<String, Any?>, next: Map<String, Any>): Boolean =
+    current[MIRROR_READY_KEY] == true &&
+        current.size - 1 == next.size &&
+        next.all { (k, v) -> current[k] == v }

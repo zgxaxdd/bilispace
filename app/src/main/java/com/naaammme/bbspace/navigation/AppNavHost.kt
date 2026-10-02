@@ -802,6 +802,12 @@ private fun MainTabsScaffold(
     ) {
         // A1：主 Tab 内容切换 Crossfade（200ms Standard）。各 Tab 状态仍由
         // rememberSaveableStateHolder 保留，过渡期间新旧页面短暂并存。
+        //
+        // FL-08 结论（**不改，只留结论**）：Crossfade 期间"双树并存"的成本已被核对
+        // 可接受 —— HorizontalPager 默认 beyondViewportPageCount = 0（各页按
+        // LaunchedEffect(isActive) 懒加载），切 Tab 时**不会**同时组合两个 Tab 的
+        // 完整内容；200ms 窗口内实际并存的是离场树的最后状态与入场树的首帧骨架。
+        // 换成 AnimatedContent 只改过渡实现、不减组合量，还要重验滚动状态衔接 → 不做。
         Crossfade(
             targetState = currentTab,
             modifier = Modifier

@@ -45,6 +45,9 @@ class RankViewModel @Inject constructor(
     /** 当前在途加载：新加载开始前取消，防止慢响应晚到覆盖新类型的数据 */
     private var loadJob: Job? = null
 
+    /** AP-12：load 代际号 —— 每次进入 load() 递增；迟到的延迟重试据此自毁。 */
+    private var loadGeneration = 0
+
     init {
         load(type = DEFAULT_TYPE, refreshing = false)
     }
@@ -103,23 +106,18 @@ class RankViewModel @Inject constructor(
             }.fold(
                 onSuccess = { more ->
                     _uiState.update { cur ->
-                        val merged = (cur.entries + more).distinctBy(RankEntry::key)
-                        val next = cur.copy(
-                            entries = merged,
-                            isLoadingMore = false,
-                            canLoadMore = more.isNotEmpty()
-                        )
+                        // AP-12：代际校验 —— loadMore 在途时用户切了分区，响应到达后
+                        // 不得改写新分区的 state，更不能把污染结果写进新分区的缓存。
+                        val next = mergedStateIfCurrent(cur, type, more) ?: return@update cur
                         cacheCurrentLocked(next)
                         next
                     }
                 },
                 onFailure = { error ->
+                    // pageByType 按 type 分键，回滚旧分区的页码与当前分区无关，总是安全
                     pageByType[type] = nextPage - 1
-                    _uiState.update {
-                        it.copy(
-                            isLoadingMore = false,
-                            errorMessage = UserFacingError.messageOf(error)
-                        )
+                    _uiState.update { cur ->
+                        failureStateIfCurrent(cur, type, UserFacingError.messageOf(error)) ?: cur
                     }
                 }
             )
@@ -136,6 +134,9 @@ class RankViewModel @Inject constructor(
         // 取消在途加载：快速切换分区时旧响应若晚到，会把新分区的数据整个覆盖掉
         //（runCatchingCancellable 会把取消原样传播，onFailure 不会收到它）。
         loadJob?.cancel()
+        // AP-12：代际号（优于时间戳，见 FINDINGS S2 的口径）—— 每次 load 递增，
+        // 迟到的 1.5s 自动重试必须比对代际，防止"按旧分区重载把 UI 切回去"。
+        val generation = ++loadGeneration
         val seriesNumber = _uiState.value.seriesNumber
             ?: _uiState.value.seriesList.firstOrNull()?.number
         _uiState.update {
@@ -216,6 +217,9 @@ class RankViewModel @Inject constructor(
                     if (!refreshing && retryAllowed && _uiState.value.entries.isEmpty()) {
                         viewModelScope.launch {
                             delay(1_500)
+                            // AP-12：1.5s 内用户切了分区（load 再次被调用，代际已变）
+                            // 就不能再按旧 type 重载 —— 旧实现会把 UI 切回旧分区并覆盖新数据。
+                            if (generation != loadGeneration) return@launch
                             load(type = type, refreshing = false, retryAllowed = false)
                         }
                     }
@@ -261,8 +265,33 @@ class RankViewModel @Inject constructor(
         val canLoadMore: Boolean
     )
 
-    private companion object {
-        const val TAG = "RankViewModel"
-        val DEFAULT_TYPE = RankType.POPULAR
+    companion object {
+        private const val TAG = "RankViewModel"
+        private val DEFAULT_TYPE = RankType.POPULAR
+
+        /**
+         * AP-12：loadMore 成功写回的代际判定（纯函数，`RankMergeGenerationTest` 覆盖；
+         * 可见性刻意 public —— 判定逻辑从 update lambda 里抽出来的唯一目的就是能被测）。
+         * 返回 null = 响应已过期（在途期间用户切换了分区），必须整包丢弃 ——
+         * 不能改写新分区的 entries，也不能把污染结果写进新分区的缓存。
+         */
+        fun mergedStateIfCurrent(
+            cur: RankUiState,
+            requestedType: RankType,
+            more: List<RankEntry>
+        ): RankUiState? {
+            if (cur.type != requestedType) return null
+            return cur.copy(
+                entries = (cur.entries + more).distinctBy(RankEntry::key),
+                isLoadingMore = false,
+                canLoadMore = more.isNotEmpty()
+            )
+        }
+
+        /** AP-12：loadMore 失败写回的代际判定（同上；旧分区的错误不许弹到新分区）。 */
+        fun failureStateIfCurrent(cur: RankUiState, requestedType: RankType, message: String): RankUiState? {
+            if (cur.type != requestedType) return null
+            return cur.copy(isLoadingMore = false, errorMessage = message)
+        }
     }
 }

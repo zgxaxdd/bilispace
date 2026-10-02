@@ -4,14 +4,17 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.queue.SwipeSeenMemory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
 
 private val Context.swipeSeenDataStore by preferencesDataStore(name = "swipe_seen")
@@ -37,9 +40,13 @@ class SwipeSeenStore @Inject constructor(
     suspend fun filterFresh(
         entries: List<SwipeEntry>,
         nowMs: Long = System.currentTimeMillis(),
-    ): List<SwipeEntry> = mutex.withLock {
-        val memory = loadLocked()
-        entries.filterNot { memory.contains(it.legacyKey(), nowMs) }
+    ): List<SwipeEntry> = withContext(Dispatchers.IO) {
+        // FL-17：调用方在 viewModelScope（Main.immediate）——O(500) 过滤 + JSON 解析
+        // 不许跑在主线程。DataStore 的磁盘 IO 本来在 IO，但序列化/过滤是调用方上下文的活。
+        mutex.withLock {
+            val memory = loadLocked()
+            entries.filterNot { memory.contains(it.legacyKey(), nowMs) }
+        }
     }
 
     /** 记住一批已推条目（先到先记；超出上限按最旧淘汰）。 */
@@ -48,12 +55,17 @@ class SwipeSeenStore @Inject constructor(
         nowMs: Long = System.currentTimeMillis(),
     ) {
         if (entries.isEmpty()) return
-        mutex.withLock {
-            val updated = loadLocked().remember(entries.map { it.legacyKey() }, nowMs)
-            cache = updated
-            runCatching {
-                context.swipeSeenDataStore.edit { prefs ->
-                    prefs[SEEN_JSON_KEY] = updated.toJson()
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val updated = loadLocked().remember(entries.map { it.legacyKey() }, nowMs)
+                cache = updated
+                // FL-17：写失败不崩、不影响会话；但**取消必须原样传播** ——
+                // runCatchingCancellable（CancellationSweepGuardTest 的纪律），
+                // 裸 runCatching 会把 CancellationException 吞成"写失败"。
+                runCatchingCancellable {
+                    context.swipeSeenDataStore.edit { prefs ->
+                        prefs[SEEN_JSON_KEY] = updated.toJson()
+                    }
                 }
             }
         }
@@ -61,7 +73,7 @@ class SwipeSeenStore @Inject constructor(
 
     private suspend fun loadLocked(): SwipeSeenMemory {
         cache?.let { return it }
-        val json = runCatching {
+        val json = runCatchingCancellable {
             context.swipeSeenDataStore.data.map { prefs -> prefs[SEEN_JSON_KEY] }.first()
         }.getOrNull()
         val memory = json?.let(SwipeSeenMemory::fromJson) ?: SwipeSeenMemory.empty()

@@ -123,15 +123,52 @@ fun rememberSkeletonBreath(): State<Float> {
  */
 @Composable
 fun ProvideSkeletonShimmer(
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     if (LocalSkeletonBreath.current != null) {
         content()
         return
     }
+    // FL-01 ③：动效设为「关闭」（reduceMotion）时不 provide —— LocalSkeletonBreath
+    // 保持 null，SkeletonBlock 走完全静止分支。关闭动效 = 不启动常驻动画
+    // （与玻璃预算 E-02 / AP-28 同一口径），性能与无障碍双收。
+    if (!enabled || LocalAnimations.current.reduceMotion) {
+        content()
+        return
+    }
     val breath = rememberSkeletonBreath()
     CompositionLocalProvider(LocalSkeletonBreath provides breath, content = content)
 }
+
+/**
+ * AP-15：注入**外部创建**的共享呼吸时钟（与 [ProvideSkeletonShimmer] 的区别是
+ * 呼吸由调用方在"骨架区可见"的条件下 hoist 出来，而不是这里创建）。
+ *
+ * 用途：普通 LazyColumn 的"翻页骨架"（`items(count = 2) { VideoListCardSkeleton() }`）
+ * ——骨架区只在加载更多时存在，把呼吸的创建条件放在屏幕层的 [rememberSkeletonBreathOrNull]
+ * 上，item 体内注入同一实例：N 个骨架共享一个时钟，骨架区消失即随组合销毁，
+ * 不给常驻列表留无限动画。
+ *
+ * [breath] 为 null（未在骨架态 / reduceMotion）时透传：单卡骨架自带的幂等 provider
+ * 会检查 reduceMotion 并保持静止（[SkeletonBlock] 完全静止分支）。
+ */
+@Composable
+fun ProvideSkeletonBreath(
+    breath: State<Float>?,
+    content: @Composable () -> Unit
+) {
+    CompositionLocalProvider(LocalSkeletonBreath provides breath, content = content)
+}
+
+/**
+ * AP-15：创建共享呼吸的**条件入口** —— reduceMotion（动效=关）返回 null，
+ * 骨架完全静止（FL-01 ③ 的同款口径）。只在骨架区可见时调用；
+ * 给常驻可见的内容无条件调用等于留一条永不停止的无限动画。
+ */
+@Composable
+fun rememberSkeletonBreathOrNull(): State<Float>? =
+    if (LocalAnimations.current.reduceMotion) null else rememberSkeletonBreath()
 
 /**
  * 骨架色块。有容器下发呼吸进度时**整块明暗脉动**，否则静止。

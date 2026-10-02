@@ -107,6 +107,8 @@ class ColdStartTimingTest {
      *
      * 成功与"拿到空数据"共用一次 render（差别只在 outcome 变量），所以数的是 render
      * **调用点**不少于三处，再单独确认四个出口常量都被用上。
+     * AP-09：异常/取消两条出口改走 `renderFailure`（在飞段的真实归因），
+     * 计数正则同时覆盖两种形态。
      */
     @Test
     fun clientRendersEveryExitPath() {
@@ -115,8 +117,14 @@ class ColdStartTimingTest {
         assertTrue("找不到 $rel", file.isFile)
         val code = file.readText()
         assertTrue("必须实例化计时器", code.contains("val timing = ColdStartTiming()"))
-        val renders = Regex("""timing\.render\(""").findAll(code).count()
+        val renders = Regex("""timing\.render(?:Failure)?\(""").findAll(code).count()
         assertTrue("render 只有 $renders 处，至少要有成功/取消/异常三条出口", renders >= 3)
+        // AP-09：异常/取消路径必须用 renderFailure —— 硬归 cache 的旧形态不许回潮
+        assertTrue(
+            "取消/异常出口必须走 renderFailure（归因到在飞段），不许再 render(…, CACHE)",
+            code.contains("timing.renderFailure(ColdStartTiming.OUTCOME_CANCELLED)") &&
+                code.contains("timing.renderFailure(ColdStartTiming.OUTCOME_ERROR)")
+        )
         // 查的是**符号名**而不是常量的值：源码里写的是 ColdStartTiming.OUTCOME_OK，
         // 用值（"ok"）去 contains 会在大小写不同的地方漏判或误判
         listOf("OUTCOME_OK", "OUTCOME_EMPTY", "OUTCOME_ERROR", "OUTCOME_CANCELLED").forEach { symbol ->
@@ -125,6 +133,44 @@ class ColdStartTimingTest {
         listOf("BUILD", "GRPC", "PARSE").forEach { symbol ->
             assertTrue("阶段 $symbol 没被 mark", code.contains("mark(ColdStartTiming.$symbol)"))
         }
+    }
+
+    /**
+     * AP-09：异常路径的归因必须完整 —— gRPC 中途炸掉时，行里要有 `grpc=` 键且
+     * `cache=` 不许出现（原实现把整段 gRPC 耗时归进 cache=，最需要数据的启动归因是错的）。
+     */
+    @Test
+    fun failureDuringGrpcIsAttributedToGrpcNotCache() {
+        val timing = ColdStartTiming(clock(0, 5, 60))
+        timing.mark(ColdStartTiming.BUILD) // BUILD 完成（5ms），随后 gRPC 飞了 55ms 后抛异常
+        val line = timing.renderFailure(ColdStartTiming.OUTCOME_ERROR)
+        val parsed = ColdStartTiming.parse(line)
+        assertEquals("在飞的 gRPC 段必须记在 grpc= 名下：$line", 55L, parsed[ColdStartTiming.GRPC])
+        assertFalse(
+            "cache= 键不许出现在 gRPC 失败的行里（那是硬归因的旧病）：$line",
+            parsed.containsKey(ColdStartTiming.CACHE)
+        )
+        assertEquals(60L, parsed[ColdStartTiming.TOTAL])
+        assertTrue(line.contains("outcome=error"))
+    }
+
+    /** 连 BUILD 都没标完就炸 → 归到 build=；PARSE 段炸 → 归到 parse=（grpc= 已在行里）。 */
+    @Test
+    fun failureAttributionFollowsTheInFlightPhase() {
+        val early = ColdStartTiming(clock(0, 1))
+        val earlyLine = early.renderFailure(ColdStartTiming.OUTCOME_ERROR)
+        val earlyParsed = ColdStartTiming.parse(earlyLine)
+        assertEquals("构造段失败归 build=：$earlyLine", 1L, earlyParsed[ColdStartTiming.BUILD])
+        assertFalse(earlyParsed.containsKey(ColdStartTiming.GRPC))
+
+        val parseCrash = ColdStartTiming(clock(0, 5, 12, 30))
+        parseCrash.mark(ColdStartTiming.BUILD)
+        parseCrash.mark(ColdStartTiming.GRPC)
+        val crashLine = parseCrash.renderFailure(ColdStartTiming.OUTCOME_ERROR)
+        val crashParsed = ColdStartTiming.parse(crashLine)
+        assertEquals(5L, crashParsed[ColdStartTiming.BUILD])
+        assertEquals(7L, crashParsed[ColdStartTiming.GRPC])
+        assertEquals("解析段失败归 parse=：$crashLine", 18L, crashParsed[ColdStartTiming.PARSE])
     }
 
     private fun repoRootFile(rel: String): File {

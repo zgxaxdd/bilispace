@@ -8,6 +8,10 @@ import com.naaammme.bbspace.core.model.Cookie
 import com.naaammme.bbspace.core.model.LoginCredential
 import com.naaammme.bbspace.core.model.User
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -30,6 +34,13 @@ class AuthStore @Inject constructor(
         private const val KEY_HD_KEY_PREFIX = "hd_key_"
         private const val KEY_HD_EXP_PREFIX = "hd_exp_"
     }
+
+    /**
+     * AP-32：账号级联清理的进程级作用域 —— 清理器逐个含文件 IO，不许再挂在
+     * removeAccount 的同步路径（调用方主线程）上。**刻意不 cancel**：本类是
+     * @Singleton、活到进程结束；清理是幂等 best-effort，被中途取消只留脏缓存。
+     */
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val prefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE)
 
@@ -193,12 +204,18 @@ class AuthStore @Inject constructor(
         // 其它模块按 mid 存的本地数据（ST-12：IM 的设备 id 缓存就是这么永久留下的）。
         // 单个清理器失败不许阻止账号被移除 —— 用户看不到"删除失败"比看到一个脏缓存更重要，
         // 所以逐个吞掉并记日志；契约见 PerAccountDataCleaner。
-        perAccountCleaners.forEach { cleaner ->
-            val name = cleaner.javaClass.simpleName
-            try {
-                cleaner.clean(mid)
-            } catch (e: Exception) {
-                Logger.w(TAG) { "per-account cleanup failed mid=$mid cleaner=$name msg=${e.message}" }
+        //
+        // AP-32：清理器逐个含文件 IO（IM 设备 id 缓存等），原实现挂在 removeAccount 的
+        // **同步路径（调用方主线程）** 上。清理是幂等 best-effort、失败也只记日志 ——
+        // 语义不变的前提下移入 IO 作用域：删账号立即返回，清理在后台完成。
+        cleanupScope.launch {
+            perAccountCleaners.forEach { cleaner ->
+                val name = cleaner.javaClass.simpleName
+                try {
+                    cleaner.clean(mid)
+                } catch (e: Exception) {
+                    Logger.w(TAG) { "per-account cleanup failed mid=$mid cleaner=$name msg=${e.message}" }
+                }
             }
         }
         if (this.mid == mid) {

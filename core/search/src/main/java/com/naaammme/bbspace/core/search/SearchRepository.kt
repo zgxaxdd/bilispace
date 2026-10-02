@@ -33,8 +33,11 @@ import dagger.hilt.components.SingletonComponent
 import java.util.TimeZone
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 @Singleton
 class SearchRepository @Inject constructor(
@@ -42,7 +45,11 @@ class SearchRepository @Inject constructor(
     private val searchHistoryDao: SearchHistoryDao
 ) {
 
-    suspend fun search(req: SearchReq): SearchPage {
+    // AP-14：解析移出主线程 —— 调用方（SearchViewModel）在 viewModelScope = Main.immediate
+    // 上直调，整页响应的逐项映射（mapVideo 的 URI 解析 / httpsImageUrl 字符串拼接，
+    // 约 20 项/页）原先全在 Main 上跑。同仓 HistoryRepository / DynamicRepository /
+    // ArticleRecommendRepository 都包了 Dispatchers.Default，唯独搜索漏了。
+    suspend fun search(req: SearchReq): SearchPage = withContext(Dispatchers.Default) {
         val reqBody = SearchAllRequest.newBuilder()
             .setKeyword(req.keyword)
             .setOrder(req.order.toProto())
@@ -79,7 +86,7 @@ class SearchRepository @Inject constructor(
             mapVideo(item, resp.trackid)?.let(videos::add)
         }
 
-        return SearchPage(
+        SearchPage(
             keyword = resp.keyword.ifBlank { req.keyword },
             authors = authors,
             videos = videos,
@@ -91,9 +98,12 @@ class SearchRepository @Inject constructor(
     suspend fun recordHistory(keyword: String) {
         val query = keyword.trim()
         if (query.isBlank()) return
-        searchHistoryDao.record(
+        // AP-23：插入与淘汰同事务 —— 搜索历史很容易累积到几百条，删一条/读一条的
+        // 代价随长度线性增长；上限与 playback history 的 trimByUid 同款不对称收口。
+        searchHistoryDao.recordAndTrim(
             keyword = query,
-            updatedAt = System.currentTimeMillis()
+            updatedAt = System.currentTimeMillis(),
+            limit = SEARCH_HISTORY_MAX_ENTRIES
         )
     }
 
@@ -106,11 +116,13 @@ class SearchRepository @Inject constructor(
     fun observeHistory(
         order: SearchHistoryOrder
     ): Flow<List<String>> {
+        // AP-23：读取补 LIMIT —— 不再全表读
         val source = when (order) {
-            SearchHistoryOrder.TIME -> searchHistoryDao.observeTopKeywordsByTime()
-            SearchHistoryOrder.HOT -> searchHistoryDao.observeTopKeywordsByHot()
+            SearchHistoryOrder.TIME -> searchHistoryDao.observeTopKeywordsByTime(SEARCH_HISTORY_MAX_ENTRIES)
+            SearchHistoryOrder.HOT -> searchHistoryDao.observeTopKeywordsByHot(SEARCH_HISTORY_MAX_ENTRIES)
         }
-        return source.map { list -> list.filter { it.isNotBlank() } }
+        // AP-24：同值重复发射驱动下游重组 —— 结构相等去重
+        return source.map { list -> list.filter { it.isNotBlank() } }.distinctUntilChanged()
     }
 
     private fun mapVideo(
@@ -234,6 +246,11 @@ class SearchRepository @Inject constructor(
         const val CATEGORY_KEY = "category"
         const val DURATION_KEY = "duration"
 
+        /**
+         * AP-23：搜索历史上限（表内条数与读取条数同值，口径不漂）。
+         * 对照：playback history 一直有 trimByUid 淘汰，搜索历史此前没有任何淘汰路径。
+         */
+        const val SEARCH_HISTORY_MAX_ENTRIES = 50
     }
 }
 

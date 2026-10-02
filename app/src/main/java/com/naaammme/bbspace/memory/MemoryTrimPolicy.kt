@@ -73,6 +73,32 @@ enum class SeamlessCoverAction {
 }
 
 /**
+ * 网络与播放链路**进程级自建缓存**（AP-04 补登记）的收尾动作。
+ *
+ * "自建缓存必须登记进 trim 分级"是一条铁律 —— 下面三个此前全部漏登记
+ * （`applyTrimPlan` 只认识 Coil / 封面色 / 无缝位图）。每个被登记者选这一档的理由：
+ *
+ * - **视频详情缓存**（`VideoDetailRepository`，@Singleton，≤12 条整份详情、
+ *   含 relates/season 等重对象，重建 = 完整网络往返）：UI_HIDDEN → Keep，
+ *   用户随时可能返回详情页，重建会可见地变慢；BACKGROUND 及以上 → Clear。
+ * - **播放地址缓存**（`PlayUrlCache`，≤16 条、TTL 90s）：UI_HIDDEN → Keep
+ *   （清了会让"返回上一支"重付一次 gRPC；TTL 本来就会自愈）；
+ *   BACKGROUND → Clear（后台清空几乎零代价：等到再开播时 TTL 多半已过）。
+ * - **DNS 缓存**（`BiliDns.cache`）：内存量级极小、价值在时延 —— UI_HIDDEN →
+ *   Keep（后台播放断线重连仍受益）；BACKGROUND → Clear（下一次解析透明重建）。
+ *
+ * **刻意不登记的 2 处（"Keep"也要写明理由）**：
+ * - `CoverExpand` 的 96 条 Rect（展开动画锚点）：清了
+ *   `coverExpandOrigin.record` 直接退化 —— 那是交互正确性数据，不是缓存。
+ * - `SwipeQoeHub`（CAPACITY = 500 的诊断环形数据）：丢了就无法解释线上问题，
+ *   且量级有固定上界，不构成内存压力。
+ */
+enum class NetCacheAction {
+    Keep,
+    Clear
+}
+
+/**
  * 一次 `onTrimMemory(level)` 应该做的事。
  *
  * @param reason 打日志用的档位名。**刻意由策略给出**而不是调用方现写：
@@ -83,6 +109,7 @@ data class MemoryTrimPlan(
     val imageCache: ImageCacheAction,
     val coverColors: CoverColorAction,
     val seamlessCovers: SeamlessCoverAction,
+    val netCaches: NetCacheAction = NetCacheAction.Keep,
     val reason: String
 )
 
@@ -146,6 +173,9 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
             // 无缝位图同样走温和档：留最近 1 条（回前台大概率还是那张卡），
             // 其余还给系统 —— 与 imageCache 的 Trim 同一取向。
             seamlessCovers = SeamlessCoverAction.TrimToRecent,
+            // AP-04 补登记的三个进程级缓存：界面刚不可见 ≠ 吃紧，一律 Keep
+            //（详情重建要走网络、播放地址 90s TTL 自愈、DNS 量小价值在时延）。
+            netCaches = NetCacheAction.Keep,
             reason = "UI_HIDDEN"
         )
 
@@ -156,6 +186,7 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
             imageCache = ImageCacheAction.Clear,
             coverColors = CoverColorAction.TrimToHistory,
             seamlessCovers = SeamlessCoverAction.Clear,
+            netCaches = NetCacheAction.Clear,
             reason = "BACKGROUND"
         )
 
@@ -167,6 +198,7 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
                 imageCache = ImageCacheAction.Nothing,
                 coverColors = CoverColorAction.Keep,
                 seamlessCovers = SeamlessCoverAction.Keep,
+                netCaches = NetCacheAction.Keep,
                 reason = "RUNNING_VISIBLE"
             )
         } else {
@@ -174,6 +206,7 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
                 imageCache = ImageCacheAction.Clear,
                 coverColors = CoverColorAction.TrimToHistory,
                 seamlessCovers = SeamlessCoverAction.Clear,
+                netCaches = NetCacheAction.Clear,
                 reason = "RUNNING_LOW"
             )
         }
@@ -182,6 +215,7 @@ fun planTrimMemory(level: Int, uiVisible: Boolean): MemoryTrimPlan = when (level
         imageCache = ImageCacheAction.Nothing,
         coverColors = CoverColorAction.Keep,
         seamlessCovers = SeamlessCoverAction.Keep,
+        netCaches = NetCacheAction.Keep,
         reason = "IGNORED"
     )
 }
@@ -192,5 +226,6 @@ fun planLowMemory(): MemoryTrimPlan =
         imageCache = ImageCacheAction.Clear,
         coverColors = CoverColorAction.TrimToHistory,
         seamlessCovers = SeamlessCoverAction.Clear,
+        netCaches = NetCacheAction.Clear,
         reason = "onLowMemory"
     )

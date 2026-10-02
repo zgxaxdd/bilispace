@@ -47,6 +47,7 @@ import com.naaammme.bbspace.core.model.WebLinkTarget
 import com.naaammme.bbspace.navigation.AppNavHost
 import com.naaammme.bbspace.playback.PlaybackHostState
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -65,6 +66,13 @@ class MainActivity : ComponentActivity() {
          * 给 300ms 只为兜住异常情况，超时即回退默认主题，绝不拖住启动。
          */
         const val THEME_PRELOAD_TIMEOUT_MS = 300L
+
+        /**
+         * AP-07：更新检查延后量。冷启网络关键窗（首屏流 / DNS 预热 / 连接预热）
+         * 集中在头几秒；10s 后应用已可交互、冷启请求已收尾，此时才发
+         * api.github.com 的检查（可延后一类的优先级）。
+         */
+        const val UPDATE_CHECK_DELAY_AFTER_FIRST_FRAME_MS = 10_000L
     }
 
     @Inject
@@ -198,7 +206,9 @@ class MainActivity : ComponentActivity() {
         // maybeShowPendingNotificationPermission 的时序注释）
         hostState.onPlaybackUiStarted = playbackUiStartedCallback
         if (savedInstanceState == null) {
-            autoCheckUpdate()
+            // AP-07：更新检查移出冷启 —— 不在 onCreate 直接发起（那里与首屏/DNS/预取
+            // 争抢无预算的带宽），改为首帧后固定延迟再检查。见方法注释。
+            scheduleUpdateCheckAfterFirstFrame()
         }
         pendingAppLink = toAppLink(intent)
         enableEdgeToEdge(
@@ -296,6 +306,22 @@ class MainActivity : ComponentActivity() {
             }
         }
     }.getOrNull() ?: ThemeConfig()
+
+    /**
+     * AP-07：更新检查的调度点 —— **必须**在冷启网络窗口之外。
+     *
+     * 冷启前几秒是首屏必需网络（首页流、DNS 预热、详情预热）的关键窗口；此前的
+     * `autoCheckUpdate()` 挂在 onCreate 上，`api.github.com` 请求无预算地插进同一
+     * 窗口争抢带宽（弱网下拉长首屏）。改为 [UPDATE_CHECK_DELAY_AFTER_FIRST_FRAME_MS]
+     * 后再发：届时应用早已可交互，检查结果晚到几秒无感知（发现更新变晚是可接受代价，
+     * AP-07 风险条目）。失败路径由 AppUpdateChecker 内部留痕（Logger.w），不静默。
+     */
+    private fun scheduleUpdateCheckAfterFirstFrame() {
+        lifecycleScope.launch {
+            delay(UPDATE_CHECK_DELAY_AFTER_FIRST_FRAME_MS)
+            autoCheckUpdate()
+        }
+    }
 
     private fun autoCheckUpdate() {        lifecycleScope.launch {
             if (!appSettings.autoCheckUpdate.first()) return@launch

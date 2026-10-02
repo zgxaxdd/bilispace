@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -376,7 +377,7 @@ internal fun LinkedBottomDock(
  * 且与内部子控件的 24dp 无法保证同心。Dock 是唯一的主导航 chrome，圆角是组件约定。
  */
 @Composable
-internal fun dockCapsuleShape(): Shape = RoundedCornerShape(BiliRadius.dock)
+internal fun dockCapsuleShape(): Shape = remember { RoundedCornerShape(BiliRadius.dock) }
 
 /**
  * Dock 单个胶囊表面：玻璃链路（消费端逐帧重采样 + haze/miuix 背板）与
@@ -409,8 +410,12 @@ internal fun DockGlassSurface(
     }
     val shellModifier = when {
         glassOn -> Modifier
-            // 消费端重采样：Dock 滚动隐藏期间玻璃光栅会冻结，滑回时带着旧模糊出现
-            .glassFrameRefresh(LocalGlassRefresher.current)
+            // 消费端重采样：Dock 滚动隐藏期间玻璃光栅会冻结，滑回时带着旧模糊出现。
+            // FL-06：消费端谓词显式化 —— Dock 是常驻导航 chrome，本设计里**没有**
+            // 滚动隐藏（无 translationY 机制；GlassRecordChainStructureTest 反向断言
+            // 了根源必须常采样，理由正是 Dock/胶囊仍可见），故谓词恒 true 是事实而非省略。
+            // 未来若给 Dock 加滚动隐藏，必须把"移动即停止绘制"的可见性判断接到这里。
+            .glassFrameRefresh(LocalGlassRefresher.current, visible = { true })
             .glassEffect(
                 state = glassState,
                 surfaceType = GlassSurfaceType.BOTTOM_BAR,

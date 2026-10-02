@@ -129,6 +129,14 @@ private fun LazyListScope.videoSection(
     }
 
     when {
+        // AP-16：首屏加载态 —— videos 空且正在刷新时，原实现落进 else 的
+        // items(emptyList())，首屏"空一片"。统一走 StateMessageCard（UI-04 出口），
+        // 三态优先级保持 错误（上方 message item）> 空 > 加载。
+        state.videos.isEmpty() && state.isRefreshing && state.message.isNullOrBlank() -> {
+            item(key = "archive_loading", contentType = "state") {
+                StateMessageCard(text = "加载中…")
+            }
+        }
         state.showEmpty && !state.isRefreshing -> {
             item(key = "archive_empty", contentType = "state") {
                 StateMessageCard(text = "这个空间还没有公开视频")

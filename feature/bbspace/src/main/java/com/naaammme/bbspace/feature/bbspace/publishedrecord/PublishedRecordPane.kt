@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_COMMENT
@@ -63,12 +64,20 @@ fun PublishedRecordPane(
         }
     }
 
+    // AP-10：增长守卫 —— effect 以 (shouldLoadMore, isLoading, isLoadingMore, hasMore) 为 key，
+    // 空页时 isLoadingMore 的翻转会让它重启；只有列表确实变长才放行下一次。
+    val loadMoreGuard = remember { LoadMoreGrowthGuard() }
+    LaunchedEffect(state.items.size) {
+        loadMoreGuard.onItemLineChanged(state.items.size)
+    }
+
     LaunchedEffect(vm) {
         vm.loadIfNeeded()
     }
 
     LaunchedEffect(shouldLoadMore, state.isLoading, state.isLoadingMore, state.hasMore) {
-        if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && state.hasMore && state.items.isNotEmpty()) {
+        loadMoreGuard.onVisibility(shouldLoadMore, busy = state.isLoading || state.isLoadingMore)
+        if (shouldLoadMore && state.hasMore && state.items.isNotEmpty() && loadMoreGuard.tryAcquire()) {
             vm.loadMore()
         }
     }

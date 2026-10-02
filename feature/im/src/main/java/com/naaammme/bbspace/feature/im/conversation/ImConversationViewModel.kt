@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.data.mergePagesUnique
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.im.ImRepository
 import com.naaammme.bbspace.core.model.ImConversationPage
@@ -197,7 +198,9 @@ class ImConversationViewModel @Inject constructor(
 
     private fun applyOlderMessages(page: ImConversationPage) {
         _uiState.update { state ->
-            val messages = state.messages + page.messages
+            // AP-11：翻页窗口重叠时服务端会回放同 key 消息，重复 key 会让 LazyColumn
+            // 崩溃（范式：ImViewModel.mergeSessions / HistoryViewModel 的 distinctBy）
+            val messages = mergePagesUnique(state.messages, page.messages, reset = false) { msg -> msg.key }
             state.copy(
                 hasMoreHistory = page.hasMoreHistory,
                 messages = messages,

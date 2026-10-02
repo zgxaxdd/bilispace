@@ -12,6 +12,7 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 @Singleton
@@ -31,7 +32,9 @@ class PlaybackHistoryRepository @Inject constructor(
     }
 
     fun observeVideos(): Flow<List<PlaybackHistory>> {
+        // AP-24：同值重复写入会驱动下游重组 —— 结构相等去重拦住"内容没变的发射"
         return dao.observeVideos().map { list -> list.map(PlaybackHistoryEntity::toModel) }
+            .distinctUntilChanged()
     }
 
     suspend fun deleteVideo(id: String) {

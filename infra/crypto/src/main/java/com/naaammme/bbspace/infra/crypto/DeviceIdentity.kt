@@ -17,11 +17,21 @@ import kotlin.random.Random
 /**
  * 设备身份生成器
  * 生成本地 buvid: DRM ID(XU) > MAC(XY) > Android ID(XX) > UUID(XW)
+ *
+ * **AP-06 线程纪律**：本类在 `Application.onCreate` 的 Hilt 注入链上被构造
+ * （`imageOkHttpClient` / `AppInitializer` 都传递引用它），**构造本身必须是零 IO 的** ——
+ * 原实现在构造（主线程、首帧之前）里同步做了 3 次 SP 读（首次 = 读盘 + 解析 XML）+
+ * `Settings.Secure` 的 binder IPC + 可能的 MediaDrm/NetworkInterface 探测，且无超时兜底。
+ * 现在所有重字段改 `by lazy`：IO 与探测全部推迟到**首次访问**（首个请求的执行线程，
+ * 一律是后台线程）；取值顺序与落盘内容与原实现完全一致，签名输入不变（AP-T9）。
  */
 class DeviceIdentity(context: Context) {
     private val appContext = context.applicationContext
-    private val prefs: SharedPreferences =
+
+    // AP-06：getSharedPreferences 本体（首访问读盘 + 解析 XML）推迟到后台线程首用时
+    private val prefs: SharedPreferences by lazy {
         appContext.getSharedPreferences("device_identity", Context.MODE_PRIVATE)
+    }
 
     val brand: String = Build.BRAND
     val model: String = Build.MODEL
@@ -31,29 +41,31 @@ class DeviceIdentity(context: Context) {
     val buildId: String = Build.DISPLAY
     val buildFingerprint: String = Build.FINGERPRINT
 
-    val androidId: String =
-        Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+    // AP-06：Settings.Secure 是 binder IPC，不许在构造线程（主线程、首帧前）发生
+    private val androidIdValue: String by lazy {
+        Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+    }
+    val androidId: String
+        get() = androidIdValue
 
-    val mac: String
+    val mac: String by lazy {
+        prefs.getString("mac", null) ?: getRealMac().also { save("mac", it) }
+    }
 
-    val localBuvid: String
+    val localBuvid: String by lazy {
+        prefs.getString("buvid_v2", null) ?: run {
+            selectAndEncode(androidId).also { save("buvid_v2", it) }
+        }
+    }
     val remoteBuvid: String
         get() = prefs.getString("buvid_remote", "") ?: ""
 
     val buvid: String
         get() = remoteBuvid.ifEmpty { localBuvid }
 
-    val fp: String
-
-    init {
-        mac = prefs.getString("mac", null) ?: getRealMac().also { save("mac", it) }
-
-        localBuvid = prefs.getString("buvid_v2", null) ?: run {
-            selectAndEncode(androidId).also { save("buvid_v2", it) }
-        }
-
+    val fp: String by lazy {
         val radio = Build.getRadioVersion() ?: ""
-        fp = prefs.getString("fp_v2", null)
+        prefs.getString("fp_v2", null)
             ?: generateFp(localBuvid, model, radio).also { save("fp_v2", it) }
     }
 

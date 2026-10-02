@@ -193,14 +193,41 @@ class PlaybackHostState @Inject constructor(
      * 视频页恢复判定（MainActivity 回到前台时评估）：播放会话仍持有视频目标、
      * 详情 Activity 实例确已不存在、宿主处于 Hidden（Activity 路径；覆盖层/迷你
      * 路径由自身组合恢复）且并非用户主动关闭 → 系统移出了详情页，应重新拉起。
+     *
+     * **设计约束（AP-03 降级路线，勿再挂"待真机验证恢复"账）**：本判定读的
+     * [currentTarget] 转发自 [StreamPlaybackSession]（@Singleton，进程内单例，
+     * **无任何持久化**）。进程被系统杀死重建后 `currentTarget` 必为 null，
+     * 本判定在**新进程上恒为 false** —— "进程重建后恢复视频页"在当前数据模型下
+     * 对任何设备都不可达（L4-30 已按此改写为设计约束）。进程死亡后唯一能跨进程
+     * 回来的是刷视频会话快照（VideoViewModel + SwipeSessionController），它走
+     * VideoViewModel 的 restore init 块，与 MainActivity 的恢复入口无交接。
+     * 若未来要真恢复，需引入持久化的 target id + 播放位置（AP-03 路线 B）。
      */
-    fun shouldRestoreVideoPage(): Boolean {
-        if (videoDetailAlive) return false
-        if (currentTarget.value !is StreamPlaybackTarget.Video) return false
-        if (_hostMode.value != PlaybackHostMode.Hidden) return false
-        if (isUserClosedVideo) return false
-        return true
-    }
+    fun shouldRestoreVideoPage(): Boolean = shouldRestoreVideoPage(
+        videoDetailAlive = videoDetailAlive,
+        currentTarget = currentTarget.value,
+        hostMode = _hostMode.value,
+        isUserClosedVideo = isUserClosedVideo
+    )
 
     private var pendingCloseJob: Job? = null
+
+    companion object {
+        /**
+         * 恢复判定的纯函数形态（AP-03）：四个条件全部可从状态快照回答，
+         * JVM 单测直接覆盖（PlaybackRestoreStateTest）。
+         */
+        fun shouldRestoreVideoPage(
+            videoDetailAlive: Boolean,
+            currentTarget: StreamPlaybackTarget?,
+            hostMode: PlaybackHostMode,
+            isUserClosedVideo: Boolean
+        ): Boolean {
+            if (videoDetailAlive) return false
+            if (currentTarget !is StreamPlaybackTarget.Video) return false
+            if (hostMode != PlaybackHostMode.Hidden) return false
+            if (isUserClosedVideo) return false
+            return true
+        }
+    }
 }

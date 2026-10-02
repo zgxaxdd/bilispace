@@ -14,7 +14,9 @@ data class CommentUiState(
     val currentMid: Long = 0L,
     val loading: Boolean = false,
     val loadingMore: Boolean = false,
-    val busyReplyIds: Set<Long> = emptySet(),
+    // AP-19：busyReplyIds 已从 UiState 拆出（Set 是不稳定类型，放这里会让每次动作
+    // 触发两轮全可见卡片重组）—— 现住在 CommentViewModel.busyReplyIds（snapshot state），
+    // 卡片经 CommentViewModel.isReplyBusy + derivedStateOf "自己查自己"。
     val error: String? = null,
     val loadMoreError: String? = null,
     val title: String = "评论",

@@ -149,7 +149,11 @@ internal fun biliDarkHairlineBorder(containerColor: Color): androidx.compose.fou
         containerColor != MaterialTheme.colorScheme.surfaceContainer
     ) return null
     // 纯黑底描边稍强（7%），染色炭底稍弱（5%）——炭底本身与卡片已有明度差
-    val alpha = if (bg == Color.Black) 0.07f else 0.05f
-    return androidx.compose.foundation.BorderStroke(0.5.dp, Color.White.copy(alpha = alpha))
+    // AP-29 ④：BorderStroke + Color.copy 原为每次组合新建；BorderStroke 是 @Immutable
+    // 且实现 equals，remember 住后下游 Modifier.border 的相等性检查不再失效。
+    return remember(bg, containerColor) {
+        val alpha = if (bg == Color.Black) 0.07f else 0.05f
+        androidx.compose.foundation.BorderStroke(0.5.dp, Color.White.copy(alpha = alpha))
+    }
 }
 

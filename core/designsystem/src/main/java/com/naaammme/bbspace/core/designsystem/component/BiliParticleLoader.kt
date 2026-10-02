@@ -7,12 +7,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import kotlin.math.PI
@@ -56,62 +56,64 @@ fun BiliParticleLoader(
             }
         }
     }
-    Canvas(modifier = modifier) {
-        drawCometArc(phase = phase.value, color = color)
-    }
-}
-
-/**
- * 单弧绘制：先按"轨道槽"画一圈极淡的底环（告诉眼睛这是一枚环，不是一段飘着的线），
- * 再叠主体彗尾弧。
- *
- * 弧的几何：角 0（3 点钟）起、顺时针 [ARC_SPAN]，所以渐变也按同方向铺，
- * 头部落在 `ARC_SPAN / 360` 处 —— 这是"渐变要与弧对齐"的关键，写错就会变成
- * "亮点在中间、两头一样暗"。
- */
-private fun DrawScope.drawCometArc(phase: Float, color: Color) {
-    val minDim = size.minDimension
-    if (minDim <= 0f) return
-    val center = Offset(size.width / 2f, size.height / 2f)
-    val radius = minDim * ARC_R
-    val stroke = minDim * ARC_STROKE
-
-    // 极淡底环：全周 8% 白，给"环"一个参照物（也避免深色底上只有一段线显得碎）
-    drawArc(
-        color = color.copy(alpha = TRACK_ALPHA),
-        startAngle = 0f,
-        sweepAngle = 360f,
-        useCenter = false,
-        topLeft = Offset(center.x - radius, center.y - radius),
-        size = Size(radius * 2f, radius * 2f),
-        style = Stroke(width = stroke, cap = StrokeCap.Round)
-    )
-
-    // 呼吸：整体透明度在两拍之间缓慢起伏（不是尺寸抖动 —— 尺寸变化会读成"闪"）
-    val breath = BREATH_MIN + BREATH_SPAN * (0.5f + 0.5f * sin(phase * TWO_PI * BREATH_CYCLES))
-    val headStop = ARC_SPAN / 360f
-
-    rotate(degrees = phase * 360f, pivot = center) {
-        drawArc(
-            brush = Brush.sweepGradient(
-                // 与弧同向：尾部几乎透明 → 中段渐亮 → 头部最亮 → 收尾归零。
-                // 用 `vararg Pair<Float, Color>` 这个重载（带 stops 的那个签名在 sweepGradient 上
-                // 不存在，写错会直接报"没有候选重载"）。
+    // AP-29 ②：几何与"不随呼吸变化"的绘制对象一次性缓存（尺寸/颜色变化才重建）——
+    // 原实现每帧新建 1 个 sweepGradient Brush + 5 个 Color.copy + 2 个 Stroke。
+    // 呼吸只调制**整体 alpha**（drawArc(alpha=)），因此基础渐变与 breath 解耦、可缓存。
+    Canvas(
+        modifier = modifier.drawWithCache {
+            val minDim = size.minDimension
+            if (minDim <= 0f) {
+                return@drawWithCache onDrawBehind { }
+            }
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = minDim * ARC_R
+            val arcStroke = Stroke(width = minDim * ARC_STROKE, cap = StrokeCap.Round)
+            val trackColor = color.copy(alpha = TRACK_ALPHA)
+            // 与弧同向：尾部几乎透明 → 中段渐亮 → 头部最亮 → 收尾归零。
+            // 用 `vararg Pair<Float, Color>` 这个重载（带 stops 的那个签名在 sweepGradient 上
+            // 不存在，写错会直接报"没有候选重载"）。
+            val headStop = ARC_SPAN / 360f
+            val arcBrush = Brush.sweepGradient(
                 0f to color.copy(alpha = 0f),
-                headStop * 0.45f to color.copy(alpha = 0.30f * breath),
-                headStop * 0.92f to color.copy(alpha = 0.95f * breath),
-                headStop to color.copy(alpha = 1f * breath),
+                headStop * 0.45f to color.copy(alpha = 0.30f),
+                headStop * 0.92f to color.copy(alpha = 0.95f),
+                headStop to color.copy(alpha = 1f),
                 1f to color.copy(alpha = 0f),
                 center = center
-            ),
-            startAngle = 0f,
-            sweepAngle = ARC_SPAN,
-            useCenter = false,
-            topLeft = Offset(center.x - radius, center.y - radius),
-            size = Size(radius * 2f, radius * 2f),
-            style = Stroke(width = stroke, cap = StrokeCap.Round)
-        )
-    }
+            )
+            val arcTopLeft = Offset(center.x - radius, center.y - radius)
+            val arcSize = Size(radius * 2f, radius * 2f)
+            onDrawBehind {
+                // 极淡底环：全周 8% 白，给"环"一个参照物（也避免深色底上只有一段线显得碎）
+                drawArc(
+                    color = trackColor,
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = arcTopLeft,
+                    size = arcSize,
+                    style = arcStroke
+                )
+                // 呼吸：整体透明度在两拍之间缓慢起伏（不是尺寸抖动 —— 尺寸变化会读成"闪"）
+                val breath = BREATH_MIN + BREATH_SPAN *
+                    (0.5f + 0.5f * sin(phase.value * TWO_PI * BREATH_CYCLES))
+                rotate(degrees = phase.value * 360f, pivot = center) {
+                    drawArc(
+                        brush = arcBrush,
+                        startAngle = 0f,
+                        sweepAngle = ARC_SPAN,
+                        useCenter = false,
+                        topLeft = arcTopLeft,
+                        size = arcSize,
+                        alpha = breath,
+                        style = arcStroke
+                    )
+                }
+            }
+        },
+        // 绘制全部发生在 drawWithCache 的 onDrawBehind 里，Canvas 自身的 onDraw 留空
+        onDraw = {}
+    )
 }
 
 /** 一个完整周期（毫秒）。2.6s：恒速转一圈，慢到不焦虑、快到看得出在动。 */

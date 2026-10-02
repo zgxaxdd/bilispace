@@ -18,4 +18,6 @@ dependencies {
     api(libs.datastore.preferences)
     implementation(libs.okhttp)
     implementation(libs.androidx.core.ktx)
+
+    testImplementation(libs.junit)
 }
