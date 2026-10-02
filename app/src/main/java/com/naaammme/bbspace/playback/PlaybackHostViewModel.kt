@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.LivePlaybackController
+import com.naaammme.bbspace.core.playback.PlaybackReporter
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.model.LiveRoute
@@ -27,7 +28,8 @@ class PlaybackHostViewModel @Inject constructor(
     playerSettings: AppSettings,
     private val hostState: PlaybackHostState,
     val capsuleState: CapsuleIndicatorState,
-    val videoDetailNavBus: VideoDetailNavBus
+    val videoDetailNavBus: VideoDetailNavBus,
+    private val playbackReporter: PlaybackReporter
 ) : ViewModel() {
 
     val player = playbackSession.player
@@ -97,6 +99,11 @@ class PlaybackHostViewModel @Inject constructor(
     }
 
     fun onEnterBackground() {
+        // PT-04：宿主前后台信号下发给心搏循环（后台不发心搏，与上游一致）。
+        // 注意：backgroundPlaybackEnabled 开启时本观察者不注册（PlaybackHost），
+        // 该模式下后台续播会继续上报——与上游"后台一律不发"的有意差异，见
+        // PlaybackHeartbeatPolicy 的 KDoc。
+        playbackReporter.setHostBackground(true)
         if (!sessionState.value.playWhenReady) {
             shouldResumeAfterBackgroundPause = false
             return
@@ -106,6 +113,7 @@ class PlaybackHostViewModel @Inject constructor(
     }
 
     fun onReturnForeground() {
+        playbackReporter.setHostBackground(false)
         if (!shouldResumeAfterBackgroundPause) return
         shouldResumeAfterBackgroundPause = false
         if (currentTarget.value != null && !sessionState.value.playWhenReady) {

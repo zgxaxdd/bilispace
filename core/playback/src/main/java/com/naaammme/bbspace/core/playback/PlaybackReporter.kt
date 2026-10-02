@@ -13,7 +13,14 @@ import com.naaammme.bbspace.infra.crypto.DeviceIdentity
 import com.naaammme.bbspace.infra.player.PlayerPlaybackState
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -29,6 +36,61 @@ class PlaybackReporter @Inject constructor(
     private var pageOwnerId = 0L
     private var pagePolarisId = ""
     private var ctx: PlaybackReportSession? = null
+
+    // ── PT-04：周期心搏（30s） ──────────────────────────────────────────────
+
+    /**
+     * 心搏循环的宿主作用域。@Singleton 与进程同寿命，**刻意不 cancel**：
+     * 循环的退出条件由判据承担（暂停 / 后台 / 会话结束），见
+     * [PlaybackHeartbeatPolicy.shouldSendPlaybackHeartbeat] 与 [heartbeatLoopJob] 的取消点。
+     */
+    private val heartbeatScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 宿主前后台信号（app 层 `PlaybackHostViewModel` 下发；默认前台）。 */
+    @Volatile
+    private var isHostInBackground = false
+
+    /** tick 时刻的最新播放位置（onPlaybackState 每次刷新，稳态播放约 0.5s 一新）。 */
+    @Volatile
+    private var lastKnownPositionMs = 0L
+
+    private var heartbeatLoopJob: Job? = null
+
+    /** PT-04：宿主前后台信号入口（app 层生命周期调用；默认值 = 前台）。 */
+    fun setHostBackground(inBackground: Boolean) {
+        isHostInBackground = inBackground
+    }
+
+    /**
+     * tick 决策收口在文件级 [playbackHeartbeatTickDecision]（纯函数，JVM 可测）；
+     * 循环本体只做"睡周期 → 读状态 → 问决策 → 发包"。
+     */
+    private fun startHeartbeatLoop(active: PlaybackReportSession) {
+        heartbeatLoopJob?.cancel()
+        heartbeatLoopJob = heartbeatScope.launch {
+            var lastReported: PlaybackHeartbeatPolicy.PlaybackHeartbeatSnapshot? = null
+            while (isActive) {
+                delay(PlaybackHeartbeatPolicy.PLAYBACK_HEARTBEAT_INTERVAL_MS)
+                val current = mu.withLock {
+                    ctx?.takeIf { it.sessionId == active.sessionId && !it.heartbeatEnded }
+                } ?: return@launch
+                val positionMs = lastKnownPositionMs
+                val snapshot = playbackHeartbeatTickDecision(
+                    isPlaying = current.lastIsPlaying,
+                    isInBackground = isHostInBackground,
+                    aid = current.report.aid,
+                    cid = current.report.cid,
+                    positionMs = positionMs,
+                    playedTimeMs = current.playedTimeMs,
+                    nowElapsedMs = android.os.SystemClock.elapsedRealtime(),
+                    heartbeatEnded = current.heartbeatEnded,
+                    lastReported = lastReported
+                ) ?: continue
+                remoteReporter.heartbeatProgress(current, positionMs)
+                lastReported = snapshot
+            }
+        }
+    }
 
     fun bindOwner(who: Long) {
         if (pageOwnerId == who) return
@@ -80,6 +142,7 @@ class PlaybackReporter @Inject constructor(
         playbackState: PlayerPlaybackState,
         progress: PlaybackProgress
     ) {
+        lastKnownPositionMs = progress.positionMs
         val current = mu.withLock {
             val active = ctx ?: return@withLock null
             if (active.source != state.playbackSource) return@withLock null
@@ -177,6 +240,9 @@ class PlaybackReporter @Inject constructor(
             )
             if (active.heartbeatStarted && !active.heartbeatEnded) {
                 remoteReporter.endHeartbeat(active)
+                // PT-04：旁路收口同样取消心搏循环（detached 会话不再有周期包）
+                heartbeatLoopJob?.cancel()
+                heartbeatLoopJob = null
             }
         }
     }
@@ -188,10 +254,16 @@ class PlaybackReporter @Inject constructor(
             if (current.sessionId != active.sessionId) return@withLock
             ctx = current.copy(heartbeatStartTs = ts)
         }
+        // PT-04：首包发出后启动 30s 周期循环（同会话幂等：换会话先取消旧循环）
+        startHeartbeatLoop(active)
     }
 
     private suspend fun endHeartbeat(active: PlaybackReportSession) {
         if (active.heartbeatEnded) return
+        // PT-04：会话结束 → 心搏循环必须取消（验收④；结构断言见
+        // PlaybackHeartbeatPolicyTest.endHeartbeatCancelsTheLoop）
+        heartbeatLoopJob?.cancel()
+        heartbeatLoopJob = null
         remoteReporter.endHeartbeat(active)
         mu.withLock {
             val current = ctx ?: return@withLock
@@ -246,3 +318,35 @@ internal data class DetachedPlaybackReport(
     val playbackState: PlaybackState,
     val positionMs: Long
 )
+
+/**
+ * PT-04：一拍心搏的**决策内核**（纯函数，文件级以便 JVM 单测直调真代码——
+ * `PlaybackReporter` 构造期有 Android 依赖，实例化不可测）。
+ * 返回非 null = 应该发的快照；null = 本拍跳过（暂停 / 后台 / 身份缺失 / 无进展 / 已结束）。
+ */
+internal fun playbackHeartbeatTickDecision(
+    isPlaying: Boolean,
+    isInBackground: Boolean,
+    aid: Long,
+    cid: Long,
+    positionMs: Long,
+    playedTimeMs: Long,
+    nowElapsedMs: Long,
+    heartbeatEnded: Boolean,
+    lastReported: PlaybackHeartbeatPolicy.PlaybackHeartbeatSnapshot?
+): PlaybackHeartbeatPolicy.PlaybackHeartbeatSnapshot? {
+    if (heartbeatEnded) return null
+    if (!PlaybackHeartbeatPolicy.shouldSendPlaybackHeartbeat(isPlaying, isInBackground, aid, cid)) {
+        return null
+    }
+    val snapshot = PlaybackHeartbeatPolicy.resolvePlaybackHeartbeatSnapshot(
+        currentPositionMs = positionMs,
+        accumulatedPlayMs = playedTimeMs,
+        activePlayStartElapsedMs = null,
+        nowElapsedMs = nowElapsedMs
+    )
+    if (!PlaybackHeartbeatPolicy.shouldFlushPlaybackHeartbeatSnapshot(aid, cid, snapshot, lastReported)) {
+        return null
+    }
+    return snapshot
+}

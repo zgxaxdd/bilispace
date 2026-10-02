@@ -44,6 +44,24 @@ class RemotePlaybackReporter @Inject constructor(
         request(HB_URL, params)
     }
 
+    /**
+     * PT-04：周期心搏的**中间包**——与结束包同构，但 `last_play_progress_time` 用
+     * 调用方给定的当前位置（周期 tick 时刻的进度，比会话内缓存的新）。
+     * 不改变 heartbeatEnded / finalized 状态（会话仍活着）。
+     */
+    internal suspend fun heartbeatProgress(
+        active: PlaybackReportSession,
+        positionMs: Long
+    ) {
+        if (!canReport(active)) return
+        val params = buildHeartbeatParams(
+            active = active,
+            startPacket = false,
+            positionMsOverride = positionMs
+        )
+        request(HB_URL, params)
+    }
+
     internal suspend fun reportPlaybackHistory(
         active: PlaybackReportSession,
         positionMs: Long,
@@ -79,7 +97,8 @@ class RemotePlaybackReporter @Inject constructor(
 
     private fun buildHeartbeatParams(
         active: PlaybackReportSession,
-        startPacket: Boolean
+        startPacket: Boolean,
+        positionMsOverride: Long? = null
     ): Map<String, String> {
         val src = active.request.playable.src
         val report = active.report
@@ -128,7 +147,10 @@ class RemotePlaybackReporter @Inject constructor(
             base["total_time"] = msToSec(active.totalTimeMs).toString()
             base["paused_time"] = msToSec(active.pausedTimeMs).toString()
             base["played_time"] = msToSec(active.playedTimeMs).toString()
-            base["last_play_progress_time"] = active.lastProgressSec.toString()
+            // PT-04：周期包带 tick 时刻的实时进度；结束包维持会话缓存值（行为不变）
+            base["last_play_progress_time"] = positionMsOverride
+                ?.let { msToSec(it) }?.toString()
+                ?: active.lastProgressSec.toString()
             base["max_play_progress_time"] = active.maxProgressSec.toString()
             base["actual_played_time"] = msToSec(active.actualPlayedTimeMs).toString()
             base["list_play_time"] = ZERO
