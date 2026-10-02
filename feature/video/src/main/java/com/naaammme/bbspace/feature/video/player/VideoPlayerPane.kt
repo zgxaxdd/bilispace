@@ -34,8 +34,15 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -445,11 +452,6 @@ internal fun VideoPlayerPane(
     /** 失败态的重试回调（`null` = 不给重试入口，只显示错误）。 */
     onRetrySwipe: (() -> Unit)? = null,
     /**
-     * 进度条拖动状态上报（SW-15）：pager 据此在拖动中**抑制自动翻页**
-     * （用户注意力在进度条上，此时翻页等于把操作打断并丢弃）。
-     */
-    onSwipeScrubbingChange: (Boolean) -> Unit = {},
-    /**
      * 进 UP 空间（SW-20/21：会话信息层的头像与 @名 共用这一出口）。
      * `null` = 宿主不接（此时头像/@名退化为不可点，不做假入口）。
      */
@@ -839,72 +841,14 @@ internal fun VideoPlayerPane(
             // 一个"的 —— 上下滑时互动栏会跟着整页滑走再滑回来（用户反馈的"整体
             // 向上调动"）。现在它提升为会话级单实例，常驻在 PortraitSwipePager 的
             // 页面层之上，切视频原地换数据、不随页面位移（见 pager 的互动栏接线）。
-            if (swipePagingActive && !swipeWaitingFirstFrame) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .fillMaxHeight(SWIPE_BOTTOM_ZONE_FRACTION)
-                        .graphicsLayer {
-                            translationY = if (showCtrl) -ctrlBarHeightPx.toFloat() else 0f
-                        }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(SwipeBottomScrimBrush)
-                    )
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                    ) {
-                        // 会话内常驻信息（信息层第二阶段第一步）：标题 + UP。
-                        //
-                        // 为什么需要：连播时控件 2 秒自动隐藏，用户连"在看谁的作品"都不知道
-                        // （BiliPai 的竖屏页默认就常驻信息区，PortraitFullscreenOverlay.kt:194-394）。
-                        // 右侧给会话级互动栏留白（pager 层），标题不与其重叠。
-                        // BiliPai 手法：读**本作用域已收集**的 state，不在调用点重复 collect。
-                        SwipeSessionInfoLine(
-                            title = state.detail?.title,
-                            owner = state.detail?.owner?.name,
-                            // SW-21：作者行头像/话题/进空间 + 换页收起标题（复位键 = 当前 aid）
-                            ownerFace = state.detail?.owner?.face,
-                            tags = state.detail?.tags.orEmpty(),
-                            seasonTitle = state.detail?.season?.title,
-                            onOpenSpace = onOpenSpace?.let { open ->
-                                state.detail?.owner?.mid?.takeIf { it > 0L }?.let { mid ->
-                                    {
-                                        open(
-                                            SpaceRoute(
-                                                mid = mid,
-                                                name = state.detail?.owner?.name,
-                                                fromViewAid = state.ids.aid.takeIf { it > 0L }
-                                            )
-                                        )
-                                    }
-                                }
-                            },
-                            resetKey = state.ids.aid.takeIf { it > 0L } ?: state.ids.bvid
-                        )
-                        // 会话内**常驻细进度条**（信息层第一阶段）。
-                        //
-                        // 为什么需要：上下滑会话里控件是 2 秒自动隐藏的，用户没有任何"这支还剩多久"的
-                        // 线索；BiliPai 的竖屏页底部就常驻一条细进度（PortraitFullscreenOverlay.kt:387-394），
-                        // 抖音/TikTok 同为行业惯例。
-                        // SW-15 起**可拖**（横向拖动 seek + 时间气泡；纵向仍让位给翻页）——
-                        // 旧注释"不可点、不消费触摸"是当时的定稿，任务书 B-3 要求反转，见组件 KDoc。
-                        SwipeProgressLine(
-                            viewModel = viewModel,
-                            onScrubbingChange = onSwipeScrubbingChange,
-                            modifier = Modifier.padding(
-                                top = BiliSpacing.lg,
-                                bottom = SwipeProgressBottomInset
-                            )
-                        )
-                    }
-                }
-            }
+            // 底部三件套（渐变遮罩 + 信息层 + 常驻细进度条）**已提升为会话级单例**：
+            // 用户真机反馈「翻下一个视频时下方简介会从下往上跳动」——根因就是它长在
+            // pane 里（pane 每页一个），翻页时跟着页面位移；而互动栏早就是会话级单例，
+            // 所以只有它晃。现在与互动栏同一处理：常驻在 PortraitSwipePager 的页面层
+            // 之上、切视频原地换数据（见 pager 的底部 chrome 接线），顺带省掉每页一份
+            // 的重复组合。
+            // 组件定义留在本文件（[SwipeSessionInfoLine] / [SwipeProgressLine]），
+            // 与控制件玻璃同语言。
 
             // 播放设置侧栏：必须排在**底部信息层之后**——它是全屏右挂面板，
             // z 序要盖住互动栏/信息行，否则点亮的爱心和计数会穿透面板浮在
@@ -1199,7 +1143,7 @@ private val WaitVeilErrorTint = Color(0xFFB9BEC7)
  * 例外只有触摸带高度——它是可访问性的硬要求，用 token 表达）。
  */
 @Composable
-private fun SwipeProgressLine(
+internal fun SwipeProgressLine(
     viewModel: VideoViewModel,
     /** 拖动状态上报（SW-15）：pager 据此抑制自动翻页。 */
     onScrubbingChange: (Boolean) -> Unit,
@@ -1387,10 +1331,13 @@ internal fun SwipeSessionActionRail(
         )
         // 现代短视频的互动栏：图标大、计数在图标**下方**、层间距均匀（抖音/B 站竖屏同款）
         SwipeRailAction(
-            icon = Icons.Filled.Favorite,
+            // 现代审美（2026-10-02）：用 **Rounded 系图标**（BiliPai/抖音同款圆润轮廓），
+            // 点赞态用主题色（B 站品牌粉由主题给，不再写死颜色）；计数缺失时显示动作名
+            // （BiliPai 的 countText fallback："0 条也读得懂这颗是什么"）。
+            icon = Icons.Rounded.ThumbUp,
             contentDescription = if (liked) "取消点赞" else "点赞",
-            label = stickyLike,
-            tint = if (liked) LikeHeartColor else Color.White,
+            label = stickyLike ?: "点赞",
+            tint = if (liked) MaterialTheme.colorScheme.primary else Color.White,
             onClick = onToggleLike,
             onLongClick = onLongPressLike,
             onLongClickLabel = "一键三连",
@@ -1399,9 +1346,9 @@ internal fun SwipeSessionActionRail(
         )
         if (onOpenComments != null) {
             SwipeRailAction(
-                icon = Icons.AutoMirrored.Filled.Comment,
+                icon = Icons.AutoMirrored.Rounded.Comment,
                 contentDescription = "评论",
-                label = stickyReply,
+                label = stickyReply ?: "评论",
                 tint = Color.White,
                 onClick = onOpenComments
             )
@@ -1410,9 +1357,9 @@ internal fun SwipeSessionActionRail(
         // 与评论按钮同一口径：宿主不接（`null`）就整颗不出现，不做点了没反应的假按钮。
         if (onOpenFavorite != null) {
             SwipeRailAction(
-                icon = if (faved) Icons.Filled.Star else Icons.Outlined.Star,
+                icon = if (faved) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                 contentDescription = if (faved) "取消收藏" else "收藏",
-                label = stickyFav,
+                label = stickyFav ?: "收藏",
                 tint = if (faved) FavStarColor else Color.White,
                 onClick = onOpenFavorite,
                 // SW-31：收藏态变化 → 图标弹一下（同点赞）
@@ -1420,7 +1367,7 @@ internal fun SwipeSessionActionRail(
             )
         }
         SwipeRailAction(
-            icon = Icons.Filled.Share,
+            icon = Icons.Rounded.Share,
             contentDescription = "分享",
             label = null,
             tint = Color.White,
@@ -1433,7 +1380,7 @@ internal fun SwipeSessionActionRail(
         // 更多（SW-24）：不感兴趣/弹幕开关/复制链接/系统分享。宿主不接则整颗不出现。
         if (onOpenMore != null) {
             SwipeRailAction(
-                icon = Icons.Default.MoreVert,
+                icon = Icons.Rounded.MoreVert,
                 contentDescription = "更多",
                 label = null,
                 tint = Color.White,
@@ -1505,8 +1452,11 @@ private fun SwipeRailAction(
             modifier = Modifier
                 .size(SwipeRailDiscSize)
                 .clip(CircleShape)
-                .background(SwipeRailGlassBrush)
-                .border(1.dp, PlayerPlayButtonBorder, CircleShape)
+                // 现代化观感（2026-10-02，用户 "ui 不好看，要现代审美"）：图标底改成
+                // **纯色暗盘**（16% 黑，对标 BiliPai 竖屏栏 `iconBackingAlpha = 0.16f`）——
+                // 原来的"玻璃渐变 + 白描边"读起来沉、像上一代的拟物玻璃。
+                // 顺带更省：没有渐变/描边/模糊，只有一次纯色绘制。
+                .background(SwipeRailBackingColor)
                 .combinedClickable(
                     onClickLabel = contentDescription,
                     onLongClickLabel = if (onLongClick != null) onLongClickLabel else null,
@@ -1527,7 +1477,8 @@ private fun SwipeRailAction(
                     }
             )
         }
-        label?.takeIf(String::isNotBlank)?.let { count ->
+        label?.let { count ->
+            Spacer(modifier = Modifier.height(BiliSpacing.xs))
             SwipeRailCount(label = count, reduceMotion = LocalAnimations.current.reduceMotion)
         }
     }
@@ -1554,8 +1505,15 @@ private fun SwipeRailCount(label: String, reduceMotion: Boolean) {
     }
     Text(
         text = shown,
-        color = Color.White.copy(alpha = 0.88f),
-        style = MaterialTheme.typography.labelSmall,
+        color = Color.White,
+        style = MaterialTheme.typography.labelSmall.copy(
+            // 现代短视频的通用做法（对标 BiliPai `labelSmall + shadow(黑 50%, blur 8)`）：
+            // 计数没有底衬，靠**文字阴影**在任何画面上保持可读——比再垫一层圆盘轻。
+            shadow = androidx.compose.ui.graphics.Shadow(
+                color = Color.Black.copy(alpha = 0.5f),
+                blurRadius = 8f
+            )
+        ),
         maxLines = 1,
         modifier = Modifier.graphicsLayer {
             if (!reduceMotion) {
@@ -1584,8 +1542,10 @@ private fun SwipeRailAvatar(
         modifier = Modifier
             .size(SwipeRailDiscSize)
             .clip(CircleShape)
-            .background(SwipeRailGlassBrush)
-            .border(1.dp, PlayerPlayButtonBorder, CircleShape)
+            // 头像底也是纯色暗盘（16% 黑）：没有任何白描边/玻璃渐变——
+            // 现代短视频的头像就是"图片 + 极细白环"，多余的装饰会被读成旧式。
+            .background(SwipeRailBackingColor)
+            .border(PlayerPlayButtonBorderWidth, SwipeRailAvatarRingColor, CircleShape)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(onClickLabel = "打开 UP 主主页", onClick = onClick)
@@ -1605,28 +1565,29 @@ private fun SwipeRailAvatar(
     }
 }
 
-/** 互动栏图标视觉尺寸（触摸目标由 IconButton 的 48dp 保证）。走 spacing token 的 1.5 倍档，不新增 dp 字面量。 */
-private val SwipeRailIconSize = BiliSpacing.xxl * 1.5f
+/** 互动栏图标视觉尺寸：40dp（对标 BiliPai 竖屏栏 iconSizeDp=40，token 的 1.667 倍档）。 */
+private val SwipeRailIconSize = BiliSpacing.xxl * 1.6667f
 
-/** 互动栏液态玻璃圆盘直径：图标 36dp + 玻璃留白。token 的 1.75 倍档，不新增 dp 字面量。 */
-private val SwipeRailDiscSize = BiliSpacing.xxxl * 1.75f
+/** 互动栏暗盘直径：52dp（对标 BiliPai iconBackingSizeDp=52，token 的 1.625 倍档）。 */
+private val SwipeRailDiscSize = BiliSpacing.xxxl * 1.625f
 
 /**
- * 互动栏圆盘的**静态**液态玻璃画：白色三段渐变（上亮下暗 + 中段透）模拟磨砂，
- * 叠一条白描边（[PlayerPlayButtonBorder]）。顶层 val 只构建一次，零逐帧成本——
- * 常驻控件不许用逐帧采样的真背景模糊（见 [SwipeRailAction] 的 KDoc）。
+ * 图标暗盘底色：16% 纯黑（对标 BiliPai 竖屏栏 `iconBackingAlpha=0.16f`）。
+ * 旧版这里是"静态液态玻璃渐变 + 白描边"，2026-10-02 按用户要求「换现代审美」删掉——
+ * 渐变/描边/模糊全没了，只剩一次纯色 fill：常驻控件在连播里每帧都在，少一层绘制
+ * 就少一分 GPU 开销（用户同时反馈过「减少渲染带来的性能消耗」）。
  */
-private val SwipeRailGlassBrush = Brush.verticalGradient(
-    0f to Color.White.copy(alpha = 0.28f),
-    0.55f to Color.White.copy(alpha = 0.10f),
-    1f to Color.White.copy(alpha = 0.18f)
-)
+private val SwipeRailBackingColor = Color.Black.copy(alpha = 0.16f)
+
+/** 头像极细白环（0.7 白、走 token 比例），比旧的白描边玻璃盘轻。 */
+private val SwipeRailAvatarRingColor = Color.White.copy(alpha = 0.7f)
+private val PlayerPlayButtonBorderWidth = BiliSpacing.xs / 4f
 
 /** 会话内进度条的底部内边距：抬到手势导航条之上。 */
-private val SwipeProgressBottomInset = BiliSpacing.xxxl
+internal val SwipeProgressBottomInset = BiliSpacing.xxxl
 
 /** 会话底部信息层（遮罩 + 信息列 + 互动栏 + 进度条）高度占屏比：够放下两行标题与互动栏，又不盖过画面主体。 */
-private const val SWIPE_BOTTOM_ZONE_FRACTION = 0.38f
+internal const val SWIPE_BOTTOM_ZONE_FRACTION = 0.38f
 
 /**
  * 底部渐变遮罩：上 45% 全透明、落到屏底 58% 黑。
@@ -1635,7 +1596,7 @@ private const val SWIPE_BOTTOM_ZONE_FRACTION = 0.38f
  * 横屏 letterbox 时底部大片纯黑又显得"空"。遮罩把信息区从画面里"托"出来，
  * 两种画幅下文字都稳定可读。静态画笔，顶层 val 只构建一次，零逐帧成本。
  */
-private val SwipeBottomScrimBrush = Brush.verticalGradient(
+internal val SwipeBottomScrimBrush = Brush.verticalGradient(
     0f to Color.Transparent,
     0.45f to Color.Transparent,
     1f to Color.Black.copy(alpha = 0.58f)
@@ -1667,10 +1628,9 @@ private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
  * 不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）。头像尺寸用 token 加法表达。
  */
 @Composable
-private fun SwipeSessionInfoLine(
+internal fun SwipeSessionInfoLine(
     title: String?,
     owner: String?,
-    ownerFace: String? = null,
     tags: List<String> = emptyList(),
     /** 合集名（SW-32；null = 这支不属于任何合集，不显示 chip）。 */
     seasonTitle: String? = null,
@@ -1694,7 +1654,9 @@ private fun SwipeSessionInfoLine(
             ),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
     ) {
-        // 作者行（SW-21）：头像 + @名，整体一个热区 → 进 UP 空间
+        // 作者行（SW-21）：`@名`，整行一个热区 → 进 UP 空间。
+        // **不带头像**（真机反馈：与互动栏顶部的头像重复）——抖音同款：头像只在右侧
+        // 互动栏出现，底部只留 `@名` 文本。
         val authorRowModifier = if (onOpenSpace != null) {
             Modifier.clickable(onClickLabel = "打开 UP 主主页", onClick = onOpenSpace)
         } else {
@@ -1706,16 +1668,6 @@ private fun SwipeSessionInfoLine(
             modifier = authorRowModifier
         ) {
             val name = owner?.takeIf(String::isNotBlank)
-            if (ownerFace != null || name != null) {
-                BiliAsyncImage(
-                    url = ownerFace,
-                    contentDescription = name?.let { "@$it" },
-                    modifier = Modifier
-                        .size(BiliSpacing.xxl)
-                        .clip(CircleShape),
-                    variant = BiliImageVariant.Avatar
-                )
-            }
             name?.let {
                 SwipeMarqueeText(
                     text = "@$it",

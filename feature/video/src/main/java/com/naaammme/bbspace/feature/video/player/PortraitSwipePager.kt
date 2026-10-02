@@ -500,13 +500,6 @@ internal fun PortraitSwipePager(
                     // SW-13：失败文案按类型给"人话"（网络/取流/解码）
                     swipeErrorText = swipeErrorKind?.let(SwipeErrorPolicy::messageOf),
                     onRetrySwipe = onRetryPlayback,
-                    // SW-21：底部信息层的头像/@名 → UP 空间（与互动栏头像同一出口）
-                    onOpenSpace = onOpenSpace,
-                    // SW-15：进度条拖动状态 → 抑制自动翻页 + 算作一次交互（防烧屏回满亮）
-                    onSwipeScrubbingChange = { scrubbing ->
-                        scrubbingProgress = scrubbing
-                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
-                    },
                     // 等首帧加载层用它铺底（与 SwipeCoverPage 同一个封面、同一种取景），
                     // 消灭"封面 → 一块黑布 → 视频"的遮罩观感
                     swipeCoverUrl = entry.cover,
@@ -551,6 +544,67 @@ internal fun PortraitSwipePager(
             )
         }
 
+        // ── 会话级常驻**底部三件套**（用户真机反馈：翻页时下方简介"从下往上跳动"）──────
+        // 与互动栏同一条决策：底部 chrome 曾长在 pane 里（pane 每页一个）→ 翻页时跟着
+        // 页面位移；提升为会话级单例后原地换数据、不随页面位移，且只组合一份（省重组）。
+        // 门控只有"等首帧"一条（与旧 pane 内联版本一致；面板让位由互动栏处理）。
+        // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接
+        val ownerMid = playbackState.detail?.owner?.mid
+        if (!waitingFirstFrame) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(SWIPE_BOTTOM_ZONE_FRACTION)
+                    .applyBurnIn(chromeBurnIn)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(SwipeBottomScrimBrush)
+                )
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                ) {
+                    SwipeSessionInfoLine(
+                        title = playbackState.detail?.title,
+                        owner = playbackState.detail?.owner?.name,
+                        tags = playbackState.detail?.tags.orEmpty(),
+                        seasonTitle = playbackState.detail?.season?.title,
+                        onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
+                            onOpenSpace?.let { open ->
+                                {
+                                    open(
+                                        SpaceRoute(
+                                            mid = mid,
+                                            name = playbackState.detail?.owner?.name,
+                                            fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
+                                        )
+                                    )
+                                }
+                            }
+                        },
+                        resetKey = playbackState.ids.aid.takeIf { it > 0L }
+                            ?: playbackState.ids.bvid
+                    )
+                    // SW-15：可拖进度条（拖动中抑制自动翻页）。会话级实例 → 拖动状态直接在这里
+                    SwipeProgressLine(
+                        viewModel = viewModel,
+                        onScrubbingChange = { scrubbing ->
+                            scrubbingProgress = scrubbing
+                            lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                        },
+                        modifier = Modifier.padding(
+                            top = BiliSpacing.lg,
+                            bottom = SwipeProgressBottomInset
+                        )
+                    )
+                }
+            }
+        }
+
         // ── 会话级常驻互动栏（用户定稿 v3；v4 对齐 BiliPai 手感；v6 去掉翻页闪烁）──────
         // 点赞/评论/分享**只此一份**、钉在页面层之上：
         // - 上下滑时它不再跟着整页"滑走再滑回来"（用户反馈的"整体向上调动"），
@@ -564,7 +618,7 @@ internal fun PortraitSwipePager(
         //   "每次下滑互动栏先消失再出现"（用户反馈的体验问题）。常驻件的常驻性
         //   优先于"加载层期间让位"；计数的短暂缺失由 rail 内部的粘滞值兜住。
         // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接
-        val ownerMid = playbackState.detail?.owner?.mid
+        // （声明在底部三件套之前——信息层的 @名 与互动栏头像共用这一份）
         AnimatedVisibility(
             visible = !playbackSheetVisible && !showComments && !showFavSheet,
             enter = fadeIn(),

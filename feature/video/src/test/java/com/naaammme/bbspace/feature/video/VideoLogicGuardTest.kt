@@ -1246,20 +1246,18 @@ class VideoLogicGuardTest {
         val pane = codeOf("player/VideoPlayerPane.kt")
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
-            "会话内常驻细进度条必须存在、且判据是 `swipePagingActive && !swipeWaitingFirstFrame`" +
-                "（用户定稿「常显」：控制条出现也不隐藏；等首帧时整屏是加载层）。" +
-                "控制条出现时信息层必须整体上移让位（graphicsLayer 位移，零重组）——" +
-                "否则控制条的进度滑条顶进标题/玻璃圆盘。",
-            countMatching(
-                pane,
-                """if \(swipePagingActive && !swipeWaitingFirstFrame\) \{"""
-            ) == 1 &&
-                countMatching(pane, """private fun SwipeProgressLine\(""") == 1 &&
+            "会话内常驻细进度条必须存在（定义留在 pane，与控制件玻璃同语言）。\n" +
+                "2026-10-02 变更（真机反馈「翻下一个视频时下方简介从下往上跳动」）：底部三件套" +
+                "（渐变遮罩 + 信息层 + 进度条）从 pane（每页一个）**提升为会话级单例**——" +
+                "与互动栏同一条既有决策（常驻件的常驻性优先），翻页时不再跟着页面位移、只组合一份。" +
+                "因此调用点断言由 pane 改为 pager；旧断言里的 `swipePagingActive && " +
+                "!swipeWaitingFirstFrame` 门控与 showCtrl 让位位移随内联块一起移到 pager 侧" +
+                "（让位位移属于 pane 控制条语义，见 VideoPlaybackSidebar 覆盖，不再需要）。",
+            countMatching(pane, """internal fun SwipeProgressLine\(""") == 1 &&
                 countMatching(pane, """SWIPE_PROGRESS_TRACK_FRACTION""") >= 2 &&
-                countMatching(
-                    pane,
-                    """translationY = if \(showCtrl\) -ctrlBarHeightPx\.toFloat\(\) else 0f"""
-                ) == 1
+                countMatching(pager, """SwipeProgressLine\(""") == 1 &&
+                countMatching(pager, """SwipeBottomScrimBrush""") == 1 &&
+                countMatching(pager, """SWIPE_BOTTOM_ZONE_FRACTION""") == 1
         )
         assertTrue(
             "进度条尺寸仍须走 token/比例（DesignTokenLintTest 的棘轮会判红新增 dp 字面量）。\n" +
@@ -1268,7 +1266,7 @@ class VideoLogicGuardTest {
                 "触摸带走 token 的 2 倍档（48dp）、拖手才提交（SwipeSeekPolicy 单测覆盖）。" +
                 "因此断言由「不许 pointerInput」改为「只许横向拖动 + 热区/提交判据走策略函数」。\n" +
                 "🔁 若将来改回只读指示器：把断言恢复成 none { pointerInput } 并删掉拖动接线。",
-            blockBody(pane, "private fun SwipeProgressLine(").let { body ->
+            blockBody(pane, "internal fun SwipeProgressLine(").let { body ->
                 body.none { it.contains(".dp") } &&
                     body.any { it.contains("detectHorizontalDragGestures(") } &&
                     body.none { it.contains("detectVerticalDragGestures") } &&
@@ -1277,21 +1275,25 @@ class VideoLogicGuardTest {
             }
         )
         assertTrue(
-            "拖动中必须抑制自动翻页（SW-15）：pager 把 scrubbing 喂进策略函数，pane 上报拖动状态。",
+            "拖动中必须抑制自动翻页（SW-15）：pager 把 scrubbing 喂进策略函数；" +
+                "底部三件套提升为会话级后，拖动回调由 pager 直连进度条（不再经 pane 转手）。",
             countMatching(pager, """isScrubbing = scrubbingProgress""") == 1 &&
-                countMatching(pager, """onSwipeScrubbingChange = \{ scrubbing ->""") == 1 &&
+                countMatching(pager, """onScrubbingChange = \{ scrubbing ->""") == 1 &&
                 countMatching(pane, """onScrubbingChange\(true\)""") == 1 &&
                 countMatching(pane, """onScrubbingChange\(false\)""") == 2
         )
         assertTrue(
-            "进度条必须排在加载层之前：加载层是 Box 的最后一个子节点，" +
-                "顺序反了会让进度条浮在加载动画上面。",
+            "底部三件套已提升为会话级单例（2026-10-02，真机反馈「翻页时简介从下往上跳」）：" +
+                "调用点在 pager（与互动栏并列、钉在页面层之上），不再长在 pane 里。\n" +
+                "⚠️ 不变式反转：旧断言要求「进度条排在加载层之前」——那条是为了让加载层盖住" +
+                "per-page 的进度条；提升为会话级后与互动栏同一处理（常驻件浮在加载层之上），" +
+                "理由与互动栏一致：常驻件的常驻性优先。",
             run {
-                val lineAt = pane.indexOfFirst {
-                    it.contains("SwipeProgressLine(") && !it.contains("private fun")
+                val lineAt = pager.indexOfFirst {
+                    it.contains("SwipeProgressLine(") && !it.contains("internal fun")
                 }
-                val veilAt = pane.indexOfFirst { it.trimStart().startsWith("SwipeWaitVeil(") }
-                lineAt >= 0 && veilAt >= 0 && lineAt < veilAt
+                val paneAt = pager.indexOfFirst { it.contains("VerticalPager(") }
+                lineAt >= 0 && paneAt >= 0 && paneAt < lineAt
             }
         )
     }
@@ -1337,30 +1339,35 @@ class VideoLogicGuardTest {
         val pane = codeOf("player/VideoPlayerPane.kt")
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
-            "常驻信息必须与进度条同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。" +
-                "BiliPai 手法：读本作用域已收集的 state，调用点不得重复 collectAsStateWithLifecycle。",
-            countMatching(pane, """private fun SwipeSessionInfoLine\(""") == 1 &&
-                countMatching(pane, """SwipeSessionInfoLine\(""") == 2 &&
-                countMatching(pane, """title = state\.detail\?\.title""") == 1 &&
-                countMatching(pane, """owner = state\.detail\?\.owner\?\.name""") == 1 &&
+            "常驻信息必须与底部三件套同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。" +
+                "BiliPai 手法：读本作用域已收集的 state，调用点不得重复 collectAsStateWithLifecycle。\n" +
+                "2026-10-02：调用点从 pane 提升到 pager（会话级单例，修「翻页时简介跳动」）——" +
+                "定义仍在 pane，pager 侧读自己的 playbackState（同样只订阅一份）。",
+            countMatching(pane, """internal fun SwipeSessionInfoLine\(""") == 1 &&
+                countMatching(pane, """SwipeSessionInfoLine\(""") == 1 &&
+                countMatching(pager, """SwipeSessionInfoLine\(""") == 1 &&
+                countMatching(pager, """title = playbackState\.detail\?\.title""") == 1 &&
+                countMatching(pager, """owner = playbackState\.detail\?\.owner\?\.name""") == 1 &&
                 countMatching(
-                    pane,
+                    pager,
                     """title = viewModel\.videoState\.collectAsStateWithLifecycle"""
                 ) == 0 &&
                 countMatching(pane, """val titleText = title\?\.takeIf\(String::isNotBlank\) \?: return""") == 1
         )
-        val infoLine = blockBody(pane, "private fun SwipeSessionInfoLine(")
+        val infoLine = blockBody(pane, "internal fun SwipeSessionInfoLine(")
         assertTrue(
-            "底部信息层 v2→v3（SW-21）：作者行（头像 + @名）→ 标题（两行可展开）→ 话题 chip。\n" +
+            "底部信息层 v2→v3（SW-21）：作者行（@名）→ 标题（两行可展开）→ 话题 chip。\n" +
                 "⚠️ 不变式反转：旧断言是「整层只读、不许 clickable」；任务书 SW-21 明确要求" +
                 "「只让展开/关注/chip 三个明确热区可点」，本次落地两个热区（作者行、标题），" +
-                "整层其余区域仍不消费触摸。dimension/间距必须走 token（不许 .dp 字面量）。",
+                "整层其余区域仍不消费触摸。dimension/间距必须走 token（不许 .dp 字面量）。\n" +
+                "2026-10-02：底部**不再带头像**（真机反馈与互动栏头像重复）——头像只在互动栏。",
             infoLine.none { it.contains(".dp") } &&
                 infoLine.count { it.contains("clickable(") } == 2 &&
                 // @名 一行 + 话题 chip 一行（都是单行省略）
                 infoLine.count { it.contains("maxLines = 1") } == 2 &&
                 infoLine.count { it.contains("maxLines = if (expanded) Int.MAX_VALUE else 2") } == 1 &&
                 infoLine.any { it.contains("remember(resetKey)") } &&
+                infoLine.none { it.contains("BiliAsyncImage(") } &&
                 infoLine.any { it.contains("BiliSpacing.lg") }
         )
         assertTrue(
@@ -1478,14 +1485,18 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "性能定稿（用户反馈「使用体验很卡」）：互动栏是**常驻**控件，不许用逐帧采样的真背景" +
-                "模糊——圆盘必须是静态玻璃画（SwipeRailGlassBrush 渐变 + 描边，零逐帧成本）；" +
-                "pager 层不得出现任何 playerControlGlass（玻璃管线收敛回 pane 的控制条 chrome）；" +
-                "pane 回传玻璃上下文的 onVideoGlassContext 管线必须已移除。",
+                "模糊；pager 层不得出现任何 playerControlGlass（玻璃管线收敛回 pane 的控制条 " +
+                "chrome）；pane 回传玻璃上下文的 onVideoGlassContext 管线必须已移除。\n" +
+                "2026-10-02（用户「换现代审美」）：图标底由「静态玻璃渐变 + 白描边」改为" +
+                "**纯色暗盘**（`SwipeRailBackingColor`，16% 黑，对标 BiliPai iconBackingAlpha）——" +
+                "断言随之从「必须有 SwipeRailGlassBrush」改为「不得再有渐变 Brush、必须用纯色底」，" +
+                "禁模糊/零逐帧开销这条实质约束不变（且更省：只剩一次纯色 fill）。",
             countMatching(pager, """playerControlGlass\(""") == 0 &&
                 countMatching(pager, """onVideoGlassContext""") == 0 &&
-                countMatching(pane, """SwipeRailGlassBrush""") >= 2 &&
+                countMatching(pane, """SwipeRailGlassBrush""") == 0 &&
+                countMatching(pane, """SwipeRailBackingColor""") >= 3 &&
                 blockBody(pane, "private fun SwipeRailAction(")
-                    .none { it.contains("playerControlGlass") }
+                    .none { it.contains("playerControlGlass") || it.contains("Brush") }
         )
         run {
             val pagerAt = pager.indexOfFirst { it.contains("VerticalPager(") }
@@ -1496,12 +1507,20 @@ class VideoLogicGuardTest {
             )
         }
         assertTrue(
-            "互动栏动作是**液态玻璃观感的静态画**（用户定稿「液态玻璃」+「降性能消耗」的交集）：\n" +
-                "白色三段渐变（SwipeRailGlassBrush）+ 白描边，观感与磨砂玻璃一致但零逐帧成本；\n" +
-                "圆盘尺寸走 token 1.75 倍档；真背景模糊只允许长在 showCtrl 门控的控制条 chrome 里。",
-            countMatching(pane, """SwipeRailGlassBrush""") >= 2 &&
-                countMatching(pane, """SwipeRailDiscSize""") >= 2 &&
-                countMatching(pane, """PlayerPlayButtonBorder, CircleShape""") >= 2
+            "互动栏视觉走**现代短视频参数**（2026-10-02，对标 BiliPai 竖屏栏 policy）：\n" +
+                "暗盘 52dp（token 1.625 倍档，BiliPai iconBackingSizeDp）、图标 40dp" +
+                "（token 1.667 倍档，BiliPai iconSizeDp）、16% 纯黑底、计数带文字阴影；" +
+                "互动栏不再有白描边/玻璃渐变（`.border(` / `Brush` 都不得出现在动作体内——" +
+                "中央播放键的描边是另一回事，不在本条断言范围）；尺寸全部走 token。" +
+                "计数缺失时显示动作名（BiliPai 的 countText fallback）。",
+            countMatching(pane, """SwipeRailDiscSize""") >= 2 &&
+                countMatching(pane, """SwipeRailIconSize""") >= 2 &&
+                blockBody(pane, "private fun SwipeRailAction(")
+                    .none { it.contains(".border(") || it.contains("Brush") } &&
+                countMatching(pane, """blurRadius = 8f""") == 1 &&
+                countMatching(pane, """label = stickyLike \?: "点赞"""") == 1 &&
+                countMatching(pane, """label = stickyReply \?: "评论"""") == 1 &&
+                countMatching(pane, """label = stickyFav \?: "收藏"""") == 1
         )
     }
 
