@@ -1256,6 +1256,19 @@ private fun rememberStickyText(value: String?): String? {
 }
 
 /**
+ * 列表版粘滞（SW-21/SW-32 的话题/合集用）：**非空**列表记住，直到下一个非空列表到达。
+ * 与 [rememberStickyText] 同一手法——换页瞬间新详情未到时，底部块的高度不塌陷。
+ */
+@Composable
+private fun rememberStickyTags(value: List<String>): List<String> {
+    var last by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(value) {
+        if (value.isNotEmpty()) last = value
+    }
+    return value.ifEmpty { last }
+}
+
+/**
  * 会话内互动栏（**会话级单实例**，由 `PortraitSwipePager` 常驻在页面层之上；
  * 组件实现留在本文件与控制件玻璃同语言）：**点赞 + 评论 + 分享**。
  *
@@ -1639,8 +1652,15 @@ internal fun SwipeSessionInfoLine(
     resetKey: Any? = null,
     modifier: Modifier = Modifier,
 ) {
-    val titleText = title?.takeIf(String::isNotBlank) ?: return
-    // 常驻件：跟随会话级防烧屏（静置变暗 + 缓慢像素漂移，见 SwipeChromeBurnIn）。
+    // ── 内容**粘滞**：换页时新详情还没回来（title/tags 全空），若直接跟着空值走，
+    // 这一块会先塌成 0 高度、等新详情到达再长回来——它是贴底对齐的，于是表现为
+    // 「底部的简介/标签从下往上移」（用户 2026-10-02 第二次反馈的真凶）。
+    // 与互动栏计数同一手法：非空值记住，直到新值到达（亚秒级陈旧换来零位移）。
+    val stickyTitle = rememberStickyText(title)
+    val stickyOwner = rememberStickyText(owner)
+    val stickySeason = rememberStickyText(seasonTitle)
+    val stickyTags = rememberStickyTags(tags)
+    val titleText = stickyTitle?.takeIf(String::isNotBlank) ?: return    // 常驻件：跟随会话级防烧屏（静置变暗 + 缓慢像素漂移，见 SwipeChromeBurnIn）。
     val burnIn = LocalSwipeChromeBurnIn.current
     // 展开态随页复位（SW-21）：resetKey 传当前视频的 aid
     var expanded by remember(resetKey) { mutableStateOf(false) }
@@ -1667,7 +1687,8 @@ internal fun SwipeSessionInfoLine(
             horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
             modifier = authorRowModifier
         ) {
-            val name = owner?.takeIf(String::isNotBlank)
+            // 作者行高度**恒定**：`@名` 用粘滞值（换页瞬间不会退化成空行）
+            val name = stickyOwner?.takeIf(String::isNotBlank)
             name?.let {
                 SwipeMarqueeText(
                     text = "@$it",
@@ -1681,33 +1702,47 @@ internal fun SwipeSessionInfoLine(
             color = Color.White,
             style = MaterialTheme.typography.titleMedium,
             maxLines = if (expanded) Int.MAX_VALUE else 2,
+            // **保底两行**：短标题也占两行高度 → 换页时整块高度不变、不会"从下往上长"
+            // （贴底对齐时高度变化就是位移，见上方粘滞注释）
+            minLines = if (expanded) 1 else 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.clickable(
                 onClickLabel = if (expanded) "收起标题" else "展开标题"
             ) { expanded = !expanded }
         )
-        // 话题 chip（SW-21）：前 3 个，只读展示（无话题路由，不做假 chip）
-        tags.take(3).forEach { tag ->
-            Text(
-                text = "#$tag",
-                color = Color.White.copy(alpha = 0.72f),
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        // 合集 chip（SW-32）：详情带 season 时显示合集名（只读；点击需要合集路由，不做假入口）
-        seasonTitle?.takeIf(String::isNotBlank)?.let { title ->
-            Text(
-                text = "合集 · $title",
-                color = Color.White.copy(alpha = 0.72f),
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        // 话题 / 合集：**单行内联**并**预留一行高度**。
+        // 旧实现是每条标签占一行（3 个标签 = 3 行）→ 标签数一变，整块高度就跳（用户
+        // 「标签等内容还有从下往上移动」的主因）。现在无论有没有标签，这一行高度恒定。
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            modifier = Modifier.heightIn(min = TagRowMinHeight)
+        ) {
+            stickyTags.take(3).forEach { tag ->
+                Text(
+                    text = "#$tag",
+                    color = Color.White.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            // 合集 chip（SW-32）：与话题同一行（只读；点击需要合集路由，不做假入口）
+            stickySeason?.takeIf(String::isNotBlank)?.let { season ->
+                Text(
+                    text = "合集 · $season",
+                    color = Color.White.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
+
+/** 话题/合集行的最小高度（token 的一档，与 labelSmall 一行等高）：换页时高度不跳。 */
+private val TagRowMinHeight = BiliSpacing.xl
 
 /**
  * 单行**跑马灯**文案（SW-32）：只在真的超宽时滚动（判据 [SwipeMarqueePolicy] +

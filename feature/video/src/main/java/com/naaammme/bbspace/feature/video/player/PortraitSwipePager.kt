@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.feature.video.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -71,6 +72,7 @@ import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.SpaceRoute
+import com.naaammme.bbspace.core.swipe.SwipeBackPolicy
 import com.naaammme.bbspace.core.swipe.SwipeChromeBurnInPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeErrorPolicy
@@ -421,6 +423,44 @@ internal fun PortraitSwipePager(
         }
     }
 
+    // ── 会话内 back 优先级（用户反馈：看完评论顺手侧滑 → 直接退出到推荐页）──────────
+    // 面板开着 → 只关面板；面板刚关（宽限窗口内）→ 吞掉这一次（顺手滑不该带走会话）；
+    // 否则放行给宿主（story 退出 / 全屏回缩）。
+    // Compose 的 BackHandler 是后注册优先：本层在 VideoScreen 的宿主 handler 之内，
+    // 因此这里的 enabled=true 时会先接走 back（含系统侧滑返回手势）。
+    val anySheetOpen = showComments || showFavSheet || showMoreSheet
+    var inSheetCloseGrace by remember { mutableStateOf(false) }
+    var previousSheetOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(anySheetOpen) {
+        // 只在"开 → 关"的那一次转换置位宽限；进入会话时的初始 false 不算
+        if (previousSheetOpen && !anySheetOpen) inSheetCloseGrace = true
+        previousSheetOpen = anySheetOpen
+    }
+    LaunchedEffect(inSheetCloseGrace) {
+        if (inSheetCloseGrace) {
+            delay(SwipeBackPolicy.SHEET_CLOSE_GRACE_MS)
+            inSheetCloseGrace = false
+        }
+    }
+    val backAction = SwipeBackPolicy.resolve(
+        anySheetOpen = anySheetOpen,
+        inSheetCloseGrace = inSheetCloseGrace
+    )
+    BackHandler(enabled = backAction != SwipeBackPolicy.Action.PassThrough) {
+        when (backAction) {
+            SwipeBackPolicy.Action.CloseSheet -> {
+                when {
+                    showMoreSheet -> showMoreSheet = false
+                    showComments -> showComments = false
+                    showFavSheet -> closeFavSheet()
+                }
+            }
+            // 宽限窗口内：吞掉（不退出会话）。窗口过后按钮/手势仍然能正常退出。
+            SwipeBackPolicy.Action.Swallow -> Unit
+            SwipeBackPolicy.Action.PassThrough -> Unit
+        }
+    }
+
     // VM 侧提交成功 / 用户取消都会置 dismissRequest，会话宿主必须自己收（详情页同款）。
     LaunchedEffect(favSheetState.dismissRequest) {
         if (favSheetState.dismissRequest) {
@@ -547,61 +587,62 @@ internal fun PortraitSwipePager(
         // ── 会话级常驻**底部三件套**（用户真机反馈：翻页时下方简介"从下往上跳动"）──────
         // 与互动栏同一条决策：底部 chrome 曾长在 pane 里（pane 每页一个）→ 翻页时跟着
         // 页面位移；提升为会话级单例后原地换数据、不随页面位移，且只组合一份（省重组）。
-        // 门控只有"等首帧"一条（与旧 pane 内联版本一致；面板让位由互动栏处理）。
+        // **无门控**（2026-10-02 二次修正）：曾写 `if (!waitingFirstFrame)`，而翻页 veil
+        // 每次亮 ~0.5s → 整块"消失再出现"，与互动栏同款毛病。常驻件就该常驻——
+        // 它在加载层之上（与互动栏同一 z 关系）。
+        // 块内高度也已恒定（粘滞标题/保底两行/话题单行预留），不会再靠内容高度把它顶动。
         // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接
         val ownerMid = playbackState.detail?.owner?.mid
-        if (!waitingFirstFrame) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(SWIPE_BOTTOM_ZONE_FRACTION)
+                .applyBurnIn(chromeBurnIn)
+        ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .matchParentSize()
+                    .background(SwipeBottomScrimBrush)
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .fillMaxHeight(SWIPE_BOTTOM_ZONE_FRACTION)
-                    .applyBurnIn(chromeBurnIn)
             ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(SwipeBottomScrimBrush)
-                )
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                ) {
-                    SwipeSessionInfoLine(
-                        title = playbackState.detail?.title,
-                        owner = playbackState.detail?.owner?.name,
-                        tags = playbackState.detail?.tags.orEmpty(),
-                        seasonTitle = playbackState.detail?.season?.title,
-                        onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
-                            onOpenSpace?.let { open ->
-                                {
-                                    open(
-                                        SpaceRoute(
-                                            mid = mid,
-                                            name = playbackState.detail?.owner?.name,
-                                            fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
-                                        )
+                SwipeSessionInfoLine(
+                    title = playbackState.detail?.title,
+                    owner = playbackState.detail?.owner?.name,
+                    tags = playbackState.detail?.tags.orEmpty(),
+                    seasonTitle = playbackState.detail?.season?.title,
+                    onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
+                        onOpenSpace?.let { open ->
+                            {
+                                open(
+                                    SpaceRoute(
+                                        mid = mid,
+                                        name = playbackState.detail?.owner?.name,
+                                        fromViewAid = playbackState.ids.aid.takeIf { it > 0L }
                                     )
-                                }
+                                )
                             }
-                        },
-                        resetKey = playbackState.ids.aid.takeIf { it > 0L }
-                            ?: playbackState.ids.bvid
+                        }
+                    },
+                    resetKey = playbackState.ids.aid.takeIf { it > 0L }
+                        ?: playbackState.ids.bvid
+                )
+                // SW-15：可拖进度条（拖动中抑制自动翻页）。会话级实例 → 拖动状态直接在这里
+                SwipeProgressLine(
+                    viewModel = viewModel,
+                    onScrubbingChange = { scrubbing ->
+                        scrubbingProgress = scrubbing
+                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                    },
+                    modifier = Modifier.padding(
+                        top = BiliSpacing.lg,
+                        bottom = SwipeProgressBottomInset
                     )
-                    // SW-15：可拖进度条（拖动中抑制自动翻页）。会话级实例 → 拖动状态直接在这里
-                    SwipeProgressLine(
-                        viewModel = viewModel,
-                        onScrubbingChange = { scrubbing ->
-                            scrubbingProgress = scrubbing
-                            lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
-                        },
-                        modifier = Modifier.padding(
-                            top = BiliSpacing.lg,
-                            bottom = SwipeProgressBottomInset
-                        )
-                    )
-                }
+                )
             }
         }
 

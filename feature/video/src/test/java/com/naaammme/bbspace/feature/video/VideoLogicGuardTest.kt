@@ -475,6 +475,29 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * 会话内 back 优先级（用户反馈「看完评论顺手侧滑 → 直接退出到推荐页」）：
+     * 面板开着只关面板、刚关过面板的宽限窗口内吞一次、其余才放行给宿主。
+     */
+    @Test
+    fun swipeBackClosesSheetsBeforeLeavingSession() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val policy = codeOf("SwipeBackPolicy.kt")
+        assertTrue(
+            "会话必须自己接管 back（含系统侧滑返回）：BackHandler 的 enabled 由纯判据决定，" +
+                "面板开着时只关面板、宽限窗口内吞掉、其余放行给宿主（story 退出/全屏回缩）；" +
+                "判据在 core:swipe 的 SwipeBackPolicy（单测覆盖）。",
+            countMatching(pager, """BackHandler\(enabled = backAction != SwipeBackPolicy\.Action\.PassThrough\)""") == 1 &&
+                countMatching(pager, """SwipeBackPolicy\.resolve\(""") == 1 &&
+                countMatching(pager, """SwipeBackPolicy\.Action\.CloseSheet ->""") == 1 &&
+                countMatching(pager, """showMoreSheet -> showMoreSheet = false""") == 1 &&
+                countMatching(pager, """showComments -> showComments = false""") == 1 &&
+                countMatching(pager, """showFavSheet -> closeFavSheet\(\)""") == 1 &&
+                countMatching(pager, """delay\(SwipeBackPolicy\.SHEET_CLOSE_GRACE_MS\)""") == 1 &&
+                countMatching(policy, """const val SHEET_CLOSE_GRACE_MS = 400L""") == 1
+        )
+    }
+
+    /**
      * SW-24「更多」面板与「不感兴趣」闭环的写法不变式：
      * 入口只从 rail 的 `onOpenMore` 来；不感兴趣只在 feed 源（`dislikeContext` 非空）出现；
      * 退队走纯策略（当前页被摘只前进一次）；撤回必须能落回原位置；提交成功后要补货。
@@ -1352,7 +1375,7 @@ class VideoLogicGuardTest {
                     pager,
                     """title = viewModel\.videoState\.collectAsStateWithLifecycle"""
                 ) == 0 &&
-                countMatching(pane, """val titleText = title\?\.takeIf\(String::isNotBlank\) \?: return""") == 1
+                countMatching(pane, """val titleText = stickyTitle\?\.takeIf\(String::isNotBlank\) \?: return""") == 1
         )
         val infoLine = blockBody(pane, "internal fun SwipeSessionInfoLine(")
         assertTrue(
@@ -1369,6 +1392,19 @@ class VideoLogicGuardTest {
                 infoLine.any { it.contains("remember(resetKey)") } &&
                 infoLine.none { it.contains("BiliAsyncImage(") } &&
                 infoLine.any { it.contains("BiliSpacing.lg") }
+        )
+        assertTrue(
+            "底部块**高度必须恒定**（用户 2026-10-02 二次反馈「标签等内容还有从下往上移动」）：\n" +
+                "换页瞬间新详情未到 → 标题/话题若跟着空值走，贴底对齐的整块会先塌后长 = 视觉位移。\n" +
+                "三件套：① 标题/@名/话题走粘滞值（rememberStickyText / rememberStickyTags）；" +
+                "② 标题保底两行（minLines）；③ 话题/合集合并成**单行**并预留一行高度（TagRowMinHeight）。\n" +
+                "另外整块不得再有 veil 门控（`if (!waitingFirstFrame)` 会让它每翻一页消失再出现）。",
+            countMatching(pane, """val stickyTitle = rememberStickyText\(title\)""") == 1 &&
+                countMatching(pane, """val stickyTags = rememberStickyTags\(tags\)""") == 1 &&
+                countMatching(pane, """private fun rememberStickyTags\(""") == 1 &&
+                countMatching(pane, """minLines = if \(expanded\) 1 else 2""") == 1 &&
+                countMatching(pane, """heightIn\(min = TagRowMinHeight\)""") == 1 &&
+                countMatching(pager, """if \(!waitingFirstFrame\) \{""") == 0
         )
         assertTrue(
             "互动栏 v2（SW-20）：头像在最上（点进空间）、点赞长按 = 一键三连、计数粘滞；" +
