@@ -128,6 +128,7 @@ import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
 import com.naaammme.bbspace.core.common.ShareUtils
+import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
@@ -1558,12 +1559,18 @@ private fun SwipeRailAvatar(
             ),
         contentAlignment = Alignment.Center
     ) {
-        BiliAsyncImage(
+        AvatarImage(
             url = faceUrl,
-            contentDescription = ownerName?.let { "@$it" },
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
+            contentDescription = ownerName?.let { "@$it" } ?: "UP 主",
+            modifier = Modifier.fillMaxSize(),
+            // 头像缺失/加载失败时用**首字**兜底（真机实测：部分视频详情不带 owner.face，
+            // 直接渲染图片组件会只剩一个空环）。取首个 **code point** 而不是 take(1)：
+            // UP 名以 emoji 开头时，take(1) 会截出半个代理对。
+            fallbackText = ownerName
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.let { String(Character.toChars(it.codePointAt(0))) },
+            fallbackContainerColor = SwipeRailAvatarFallbackColor
         )
     }
 }
@@ -1584,6 +1591,9 @@ private val SwipeRailBackingColor = Color.Black.copy(alpha = 0.16f)
 
 /** 头像极细白环（0.7 白、走 token 比例），比旧的白描边玻璃盘轻。 */
 private val SwipeRailAvatarRingColor = Color.White.copy(alpha = 0.7f)
+
+/** 头像缺失时的兜底底色（比图标暗盘稍实，保证白色首字读得清）。 */
+private val SwipeRailAvatarFallbackColor = Color.Black.copy(alpha = 0.32f)
 private val PlayerPlayButtonBorderWidth = BiliSpacing.xs / 4f
 
 /** 会话内进度条的底部内边距：抬到手势导航条之上。 */
