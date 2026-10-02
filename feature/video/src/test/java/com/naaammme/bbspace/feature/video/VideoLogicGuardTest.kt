@@ -1365,11 +1365,14 @@ class VideoLogicGuardTest {
                 "⚠️ 不变式反转：旧断言是「整层只读、不许 clickable」；任务书 SW-21 明确要求" +
                 "「只让展开/关注/chip 三个明确热区可点」，本次落地两个热区（作者行、标题），" +
                 "整层其余区域仍不消费触摸。dimension/间距必须走 token（不许 .dp 字面量）。\n" +
-                "2026-10-02：底部**不再带头像**（真机反馈与互动栏头像重复）——头像只在互动栏。",
+                "2026-10-02：底部**不再带头像**（真机反馈与互动栏头像重复）——头像只在互动栏。\n" +
+                "2026-10-03（PT-08）：**联合创作 chip**（作者行内，`等 N 人联合创作 ˅`，点击弹" +
+                "成员清单）——热区 +1（作者行/标题/联合创作 chip = 3）、单行省略文本 +1" +
+                "（@名/chip/合集 = 3）。",
             infoLine.none { it.contains(".dp") } &&
-                infoLine.count { it.contains("clickable(") } == 2 &&
-                // @名 一行 + 话题 chip 一行（都是单行省略）
-                infoLine.count { it.contains("maxLines = 1") } == 2 &&
+                infoLine.count { it.contains("clickable(") } == 3 &&
+                // @名 一行 + 联合创作 chip 一行 + 合集 chip 一行（都是单行省略）
+                infoLine.count { it.contains("maxLines = 1") } == 3 &&
                 infoLine.count { it.contains("maxLines = if (expanded) Int.MAX_VALUE else 2") } == 1 &&
                 infoLine.any { it.contains("remember(resetKey)") } &&
                 infoLine.none { it.contains("BiliAsyncImage(") } &&

@@ -642,6 +642,7 @@ internal fun PortraitSwipePager(
                     owner = playbackState.detail?.owner?.name,
                     tags = playbackState.detail?.tags.orEmpty(),
                     seasonTitle = playbackState.detail?.season?.title,
+                    staffs = playbackState.detail?.staffs.orEmpty(), // PT-08：联合创作成员
                     onOpenSpace = openOwnerSpace,
                     resetKey = playbackState.ids.aid.takeIf { it > 0L }
                         ?: playbackState.ids.bvid,

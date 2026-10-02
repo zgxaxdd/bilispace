@@ -19,8 +19,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,9 +52,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -126,10 +131,13 @@ import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.VideoPlaybackState
+import com.naaammme.bbspace.core.model.VideoStaff
 import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
+import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
@@ -1553,6 +1561,7 @@ internal val SwipeBottomScrimBrush = Brush.verticalGradient(
  * 设计约束：间距/字号全部走 token（`BiliSpacing` + `MaterialTheme.typography`），
  * 不新增 dp 字面量（`DesignTokenLintTest` 的棘轮会判红）。头像尺寸用 token 加法表达。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SwipeSessionInfoLine(
     title: String?,
@@ -1560,6 +1569,8 @@ internal fun SwipeSessionInfoLine(
     tags: List<String> = emptyList(),
     /** 合集名（SW-32；null = 这支不属于任何合集，不显示 chip）。 */
     seasonTitle: String? = null,
+    /** 联合创作成员（PT-08；空 = 单人投稿，不显示 chip）。 */
+    staffs: List<VideoStaff> = emptyList(),
     onOpenSpace: (() -> Unit)? = null,
     /** 展开态复位键（传当前视频的 aid）：换页自动收起，避免"下一页仍是展开的"。 */
     resetKey: Any? = null,
@@ -1577,6 +1588,9 @@ internal fun SwipeSessionInfoLine(
     val burnIn = LocalSwipeChromeBurnIn.current
     // 展开态随页复位（SW-21）：resetKey 传当前视频的 aid
     var expanded by remember(resetKey) { mutableStateOf(false) }
+    // PT-08：联合创作成员弹层（随页复位，同 expanded 口径）
+    var showStaffSheet by remember(resetKey) { mutableStateOf(false) }
+    val coCreation = isCoCreation(staffs)
     Column(
         modifier = modifier
             .applyBurnIn(burnIn)
@@ -1607,6 +1621,20 @@ internal fun SwipeSessionInfoLine(
                     text = "@$it",
                     color = Color.White.copy(alpha = 0.86f),
                     style = MaterialTheme.typography.labelLarge
+                )
+            }
+            // PT-08：联合创作 chip（上游模板串逐字）。放在作者行内与上游同位；
+            // **不新增行高**——chip 用比作者名低一档的 labelSmall，且行内元素越界
+            // 时名字走跑马灯、chip 固定，行高由 labelLarge 决定。
+            if (coCreation) {
+                Text(
+                    text = coCreationChipText(staffs),
+                    color = Color.White.copy(alpha = 0.82f),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    modifier = Modifier.clickable(
+                        onClickLabel = "查看联合创作成员"
+                    ) { showStaffSheet = true }
                 )
             }
         }
@@ -1649,6 +1677,65 @@ internal fun SwipeSessionInfoLine(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+        // PT-08：联合创作成员弹层（上游 PortraitStaffSheet 的 bbspace 适配版：
+        // bbspace 的 VideoStaff 无 mid → 只列"昵称 + 分工"，无头像/无关注动作）
+        if (showStaffSheet && coCreation) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                shape = biliSheetShape(),
+                dragHandle = { BiliSheetGrabber() },
+                scrimColor = Color.Black.copy(alpha = 0.40f),
+                onDismissRequest = { showStaffSheet = false },
+                sheetState = sheetState
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "联合创作成员",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(
+                            start = BiliSpacing.lg,
+                            end = BiliSpacing.lg,
+                            bottom = BiliSpacing.md
+                        )
+                    )
+                    coCreationSheetMembers(staffs).forEach { member ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    start = BiliSpacing.lg,
+                                    end = BiliSpacing.lg,
+                                    bottom = BiliSpacing.sm
+                                )
+                        ) {
+                            // 弹层可滚动：成员名不设 maxLines（长名换行）——
+                            // infoLine 块内的 maxLines=1 计数被 VideoLogicGuardTest 钉死，别加
+                            Text(
+                                text = member.name,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            member.role.takeIf(String::isNotBlank)?.let { role ->
+                                Text(
+                                    text = role,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
