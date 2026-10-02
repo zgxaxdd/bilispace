@@ -6,8 +6,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.error.UserFacingError
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.feed.FeedDislikeRepository
 import com.naaammme.bbspace.core.feed.FeedRepository
 import com.naaammme.bbspace.core.feed.StoryFeedRepository
 import com.naaammme.bbspace.core.settings.AppSettings
@@ -21,6 +24,8 @@ import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.FavoriteFolder
 import com.naaammme.bbspace.core.model.PlayBiz
 import com.naaammme.bbspace.core.model.PlaybackProgress
+import com.naaammme.bbspace.core.model.ThreePointReason
+import com.naaammme.bbspace.core.model.ThreePointReasonKind
 import com.naaammme.bbspace.core.model.PlayerBufferProfile
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.VideoCdnMode
@@ -153,6 +158,8 @@ class VideoViewModel @Inject constructor(
     private val playbackVideoRepository: VideoPlayerRepository,
     /** 补货兜底：拉队尾那一支的详情，用它的相关推荐补队列。 */
     private val detailRepository: VideoDetailRepository,
+    /** SW-24：会话内「不感兴趣」的负反馈通道（与首页同一套仓储）。 */
+    private val feedDislikeRepository: FeedDislikeRepository,
     /** 跨会话「已推记忆」（SW-05）：推荐流/story 流给过的视频不再进新会话。 */
     private val seenStore: SwipeSeenStore,
     /** 预取条数按网络类型决定（WiFi 才多预）。 */
@@ -512,6 +519,8 @@ class VideoViewModel @Inject constructor(
     fun clearSwipeSession() {
         swipeSession.exit()
         lastPrefetchRequest = null
+        lastDisliked = null
+        _swipeDislikeUndoable.value = false
         SwipeQoeHub.record(SwipeQoeEventType.Exit)
     }
 
@@ -969,6 +978,86 @@ class VideoViewModel @Inject constructor(
     /** 播完自动翻页回执（幂等键记账，随会话 exit 清空）。 */
     fun noteSwipeAutoAdvanced(key: String) {
         swipeSession.noteAutoAdvanced(key)
+    }
+
+    // ── SW-24：会话内「不感兴趣」（含撤回）──────────────────────────────────────
+    /** 上一次被"不感兴趣"摘掉的条目 + 原队列下标（撤回用；随会话 exit 清空）。 */
+    private var lastDisliked: Pair<SwipeEntry, Int>? = null
+
+    /** 当前是否可撤回（UI 据此显示「撤回」入口）。 */
+    val canUndoSwipeDislike: Boolean get() = lastDisliked != null
+
+    /**
+     * 提交「不感兴趣」：上报负反馈 → 从队列摘掉 → 补货 → （当前页被摘时页号不变 =
+     * 自然前进一支，见 [SwipeDislikeRemovalPolicy]）。
+     *
+     * 只有 feed 源带 `dislikeContext` 的条目才有这个入口（relate/story 源没有通道，
+     * 不做点了没反应的假按钮——UI 侧按 null 隐藏）。
+     *
+     * @return true = 已受理（UI 可以关面板）
+     */
+    fun submitSwipeDislike(entry: SwipeEntry, currentPage: Int): Boolean {
+        val context = entry.dislikeContext ?: return false
+        // 理由：优先用卡上给的第一个 DISLIKE 理由（与首页同一份数据源）；
+        // 拿不到就退到内建的"不感兴趣"（id=1，feed 接口的通用不感兴趣）
+        val reason = entry.dislikeReasons.firstOrNull { it.kind == ThreePointReasonKind.DISLIKE }
+            ?: ThreePointReason(
+                id = DEFAULT_DISLIKE_REASON_ID,
+                name = "不感兴趣",
+                toast = "已减少此类内容",
+                extra = null,
+                kind = ThreePointReasonKind.DISLIKE
+            )
+        val index = swipeSession.queueIndexOf(entry)
+        viewModelScope.launch {
+            runCatchingCancellable { feedDislikeRepository.dislike(context, reason) }
+                .onSuccess { result ->
+                    val removed = swipeSession.removeQueueEntry(entry, currentPage)
+                    if (removed) {
+                        lastDisliked = entry to index.coerceAtLeast(0)
+                        _swipeDislikeUndoable.value = true
+                        // 摘掉一条就补一条（互动闭环：队列不该因为负反馈变薄）
+                        loadMoreSwipeQueue()
+                    }
+                    _msg.tryEmit(result.toast)
+                }
+                .onFailure { e ->
+                    Logger.e(TAG, e as? Exception) { "会话内不感兴趣失败" }
+                    _msg.tryEmit(UserFacingError.messageOf(e))
+                }
+        }
+        return true
+    }
+
+    /** 撤回「不感兴趣」：取消上报 + 把条目插回原位置。 */
+    fun undoSwipeDislike() {
+        val (entry, index) = lastDisliked ?: return
+        val context = entry.dislikeContext ?: return
+        viewModelScope.launch {
+            runCatchingCancellable { feedDislikeRepository.cancelDislike(context) }
+                .onSuccess { result ->
+                    swipeSession.restoreQueueEntry(index, entry)
+                    lastDisliked = null
+                    _swipeDislikeUndoable.value = false
+                    _msg.tryEmit(result.toast)
+                }
+                .onFailure { e ->
+                    Logger.e(TAG, e as? Exception) { "撤回不感兴趣失败" }
+                    _msg.tryEmit(UserFacingError.messageOf(e))
+                }
+        }
+    }
+
+    /** 撤回入口的可见性（会话内提示条/面板用）。 */
+    private val _swipeDislikeUndoable = MutableStateFlow(false)
+    val swipeDislikeUndoable: StateFlow<Boolean> = _swipeDislikeUndoable.asStateFlow()
+
+    /** 弹幕总开关（SW-24 的"弹幕开关"入口；按已有设置写回，SW-27 再做竖屏作用域）。 */
+    fun toggleDanmaku() {
+        viewModelScope.launch {
+            val current = playerSettings.state.first().danmaku
+            playerSettings.setDanmaku(current.copy(enabled = !current.enabled))
+        }
     }
 
     fun togglePlayPause() {
@@ -1523,5 +1612,9 @@ class VideoViewModel @Inject constructor(
     private companion object {
         /** 会话快照在 SavedStateHandle 里的键（进程重建恢复，SW-02）。 */
         const val KEY_SWIPE_SESSION_SNAPSHOT = "swipe.session.snapshot"
+
+        /** SW-24：feed 接口的通用"不感兴趣"理由 id（卡上没给 reasons 时的兜底）。 */
+        const val DEFAULT_DISLIKE_REASON_ID = 1
+        const val TAG = "VideoViewModel"
     }
 }

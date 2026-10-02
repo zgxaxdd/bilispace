@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.core.swipe.session
 
+import com.naaammme.bbspace.core.swipe.SwipeDislikeRemovalPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
@@ -171,6 +172,48 @@ class SwipeSessionController {
     fun noteAutoAdvanced(key: String) {
         _lastAutoAdvancedKey.value = key
     }
+
+    /**
+     * 「不感兴趣」退队（SW-24）：把条目从队列摘掉（锚点不可摘，见 [SwipeDislikeRemovalPolicy]）。
+     * @return true = 真的摘掉了（调用方据此补货/提示）
+     */
+    fun removeQueueEntry(entry: SwipeEntry, currentPage: Int): Boolean {
+        val anchor = _anchor.value
+        val removal = SwipeDislikeRemovalPolicy.remove(
+            queue = _queue.value,
+            anchor = anchor,
+            target = entry,
+            currentPage = currentPage
+        )
+        if (!removal.removed) return false
+        _queue.value = removal.queue
+        // 当前页索引补偿（摘掉的是"已滑过的前方条目"时；摘当前页/后方条目都不补）
+        if (removal.shiftCurrentPageDown) {
+            pageChanged((currentPage - 1).coerceAtLeast(0))
+        } else {
+            val current = _state.value
+            if (current is SwipeSessionState.Ready) {
+                _state.value = current.copy(size = _queue.value.size)
+            }
+        }
+        return true
+    }
+
+    /** 「撤回不感兴趣」把条目插回原位置（SW-24 要点①：与首页一致的可撤回）。 */
+    fun restoreQueueEntry(index: Int, entry: SwipeEntry) {
+        val anchor = _anchor.value ?: return
+        if (entry.legacyKey() == anchor.legacyKey()) return
+        val safeIndex = index.coerceIn(0, _queue.value.size)
+        _queue.value = _queue.value.toMutableList().apply { add(safeIndex, entry) }
+        val current = _state.value
+        if (current is SwipeSessionState.Ready) {
+            _state.value = current.copy(size = _queue.value.size)
+        }
+    }
+
+    /** 队列里某条目的下标（不含锚点）；-1 = 不在队列。 */
+    fun queueIndexOf(entry: SwipeEntry): Int =
+        _queue.value.indexOfFirst { it.legacyKey() == entry.legacyKey() }
 
     /** @return true = 这支此前没预取过（调用方应继续执行预取）。 */
     fun markPrefetched(key: String): Boolean = prefetchedKeys.add(key)

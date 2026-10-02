@@ -475,6 +475,54 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * SW-24「更多」面板与「不感兴趣」闭环的写法不变式：
+     * 入口只从 rail 的 `onOpenMore` 来；不感兴趣只在 feed 源（`dislikeContext` 非空）出现；
+     * 退队走纯策略（当前页被摘只前进一次）；撤回必须能落回原位置；提交成功后要补货。
+     */
+    @Test
+    fun swipeMoreSheetWiresDislikeLoop() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        val vm = codeOf("VideoViewModel.kt")
+        val policy = codeOf("SwipeDislikeRemovalPolicy.kt")
+        assertTrue(
+            "更多入口由 rail 的 onOpenMore 提供（宿主不接则整颗不出现）；" +
+                "不感兴趣只在 feed 源出现（relate/story 无负反馈通道 → 不做假按钮）。",
+            countMatching(pane, """onOpenMore: \(\(\) -> Unit\)\? = null""") == 1 &&
+                countMatching(pane, """onClick = onOpenMore""") == 1 &&
+                countMatching(pager, """canDislike = currentEntry\?\.dislikeContext != null""") == 1
+        )
+        assertTrue(
+            "退队必须走 SwipeDislikeRemovalPolicy（摘当前页页号不变=前进一支、锚点不可摘）；" +
+                "撤回插回原位置；提交成功后必须补货（队列不因负反馈变薄）。",
+            countMatching(vm, """swipeSession\.removeQueueEntry\(entry, currentPage\)""") == 1 &&
+                countMatching(vm, """swipeSession\.restoreQueueEntry\(index, entry\)""") == 1 &&
+                countMatching(vm, """feedDislikeRepository\.dislike\(context, reason\)""") == 1 &&
+                countMatching(vm, """feedDislikeRepository\.cancelDislike\(context\)""") == 1 &&
+                countMatching(policy, """shiftCurrentPageDown = pageOfTarget < currentPage""") == 1
+        )
+    }
+
+    /**
+     * SW-24 的界面构成：不感兴趣/撤回/弹幕开关/复制链接/系统分享五项，
+     * 且撤回入口只在"有可撤条目"时出现。
+     */
+    @Test
+    fun swipeMoreSheetShowsOnlyRealEntries() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "「更多」面板的每一项都必须直连既有能力（举报/稍后再看/下载/画质不在会话内新造）：",
+            countMatching(pager, """text = "不感兴趣"""") == 1 &&
+                countMatching(pager, """text = "撤回不感兴趣"""") == 1 &&
+                countMatching(pager, """text = "弹幕开关"""") == 1 &&
+                countMatching(pager, """text = "复制链接"""") == 1 &&
+                countMatching(pager, """text = "系统分享"""") == 1 &&
+                countMatching(pager, """if \(canUndoDislike\) \{""") == 1 &&
+                countMatching(pager, """举报""") == 0
+        )
+    }
+
+    /**
      * SW-30 动效质感（粒子爱心 + 计数滚动）的写法不变式：
      * 数值来自纯策略（种子确定性）、读值只在 graphicsLayer、reduceMotion 必须退化。
      */

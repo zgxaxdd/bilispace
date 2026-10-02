@@ -1358,6 +1358,11 @@ internal fun SwipeSessionActionRail(
     ownerName: String? = null,
     /** 点头像进 UP 空间（`null` = 宿主不接，头像退化为不可点）。 */
     onOpenSpace: (() -> Unit)? = null,
+    /**
+     * 打开「更多」菜单（SW-24）：不感兴趣/弹幕开关/复制链接/系统分享。
+     * `null` = 宿主不接（不发这个入口）。
+     */
+    onOpenMore: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1425,6 +1430,16 @@ internal fun SwipeSessionActionRail(
                 ShareUtils.shareText(context, shareTitle, url)
             }
         )
+        // 更多（SW-24）：不感兴趣/弹幕开关/复制链接/系统分享。宿主不接则整颗不出现。
+        if (onOpenMore != null) {
+            SwipeRailAction(
+                icon = Icons.Default.MoreVert,
+                contentDescription = "更多",
+                label = null,
+                tint = Color.White,
+                onClick = onOpenMore
+            )
+        }
     }
 }
 

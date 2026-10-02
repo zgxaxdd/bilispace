@@ -50,10 +50,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
+import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.BiliParticleLoader
@@ -150,6 +156,8 @@ internal fun PortraitSwipePager(
     val pageCountState = rememberUpdatedState(pages.size)
     val pagerState = rememberPagerState { pageCountState.value }
     val scope = rememberCoroutineScope()
+    // SW-24：更多面板用到剪贴板/Toast（复制链接、系统分享）
+    val context = LocalContext.current
     // pager 认定的「应播放页」：以它为准发切换请求，而不是拿 currentId 反向比较——
     // 后者在取流完成前仍是旧值，快速往返翻页时会造成目标震荡。
     // 身份键 = SwipeEntry.id（SW-03 类型化；**只用于"已请求页"的去重震荡防护**，
@@ -393,6 +401,10 @@ internal fun PortraitSwipePager(
     // 会话内收藏（补齐互动栏 赞/评/藏/享）：宿主在这里，内容复用详情页那份
     // `FavFolderSheetContent`；收藏夹状态机整个挂在 VM 上，会话不另存一份。
     var showFavSheet by remember { mutableStateOf(false) }
+    // SW-24：会话内「更多」面板（不感兴趣/弹幕开关/复制链接/系统分享）
+    var showMoreSheet by remember { mutableStateOf(false) }
+    val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val swipeDislikeUndoable by viewModel.swipeDislikeUndoable.collectAsStateWithLifecycle()
     val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
     val favBottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -574,6 +586,11 @@ internal fun PortraitSwipePager(
                 // SW-20：UP 头像 → 主页（`onOpenSpace` 由 VideoScreen 传入；mid 为 0 时不接）
                 ownerFace = playbackState.detail?.owner?.face,
                 ownerName = playbackState.detail?.owner?.name,
+                // SW-24：更多面板（不感兴趣/弹幕开关/复制链接/系统分享）
+                onOpenMore = {
+                    showMoreSheet = true
+                    lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                },
                 onOpenSpace = ownerMid?.takeIf { it > 0L }?.let { mid ->
                     onOpenSpace?.let { open ->
                         {
@@ -677,7 +694,102 @@ internal fun PortraitSwipePager(
             )
         }
     }
+    // SW-24：「更多」面板（会话级单实例）。用 ModalBottomSheet（与收藏面板同款形态）。
+    if (showMoreSheet) {
+        val currentEntry = pages.getOrNull(pagerState.currentPage)
+        ModalBottomSheet(
+            onDismissRequest = {
+                scope.launch {
+                    runCatching { moreSheetState.hide() }
+                    showMoreSheet = false
+                }
+            },
+            sheetState = moreSheetState,
+            shape = biliSheetShape(),
+            scrimColor = Color.Black.copy(alpha = 0.40f),
+            dragHandle = { BiliSheetGrabber() }
+        ) {
+            SwipeMoreSheetContent(
+                // 不感兴趣：只有 feed 源带负反馈通道；relate/story 源没有 → 不显示（不做假按钮）
+                canDislike = currentEntry?.dislikeContext != null,
+                canUndoDislike = swipeDislikeUndoable,
+                onDislike = {
+                    val entry = currentEntry ?: return@SwipeMoreSheetContent
+                    if (viewModel.submitSwipeDislike(entry, pagerState.currentPage)) {
+                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                        showMoreSheet = false
+                    }
+                },
+                onUndoDislike = {
+                    viewModel.undoSwipeDislike()
+                    showMoreSheet = false
+                },
+                onToggleDanmaku = { viewModel.toggleDanmaku() },
+                onCopyLink = {
+                    val url = ShareUtils.videoUrl(playbackState.ids.bvid, playbackState.ids.aid, page = 0)
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("video_url", url))
+                    Toast.makeText(context, "链接已复制", Toast.LENGTH_SHORT).show()
+                    showMoreSheet = false
+                },
+                onShare = {
+                    val url = ShareUtils.videoUrl(playbackState.ids.bvid, playbackState.ids.aid, page = 0)
+                    ShareUtils.shareText(context, playbackState.detail?.title, url)
+                    showMoreSheet = false
+                }
+            )
+        }
+    }
     } // CompositionLocalProvider(LocalSwipeChromeBurnIn)
+}
+
+/**
+ * SW-24「更多」面板内容：不感兴趣（+ 撤回）/ 弹幕开关 / 复制链接 / 系统分享。
+ *
+ * 为什么只有这几项（如实）：举报无接口、稍后再看仓库只读（`WatchLaterRepository` 仅
+ * fetchPage）、下载在详情页已有完整流程（会话内不新造第二条入口）、画质在播放设置侧栏
+ * ——都不在这里做假按钮。这里的每一项都直连既有能力。
+ */
+@Composable
+private fun SwipeMoreSheetContent(
+    canDislike: Boolean,
+    canUndoDislike: Boolean,
+    onDislike: () -> Unit,
+    onUndoDislike: () -> Unit,
+    onToggleDanmaku: () -> Unit,
+    onCopyLink: () -> Unit,
+    onShare: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = BiliSpacing.lg)
+            .padding(bottom = BiliSpacing.xxxl)
+    ) {
+        if (canDislike) {
+            SwipeMoreRow(text = "不感兴趣", onClick = onDislike)
+        }
+        if (canUndoDislike) {
+            SwipeMoreRow(text = "撤回不感兴趣", onClick = onUndoDislike)
+        }
+        SwipeMoreRow(text = "弹幕开关", onClick = onToggleDanmaku)
+        SwipeMoreRow(text = "复制链接", onClick = onCopyLink)
+        SwipeMoreRow(text = "系统分享", onClick = onShare)
+    }
+}
+
+/** 「更多」面板的一行（token 间距；整行可点，触摸高度 ≥48dp）。 */
+@Composable
+private fun SwipeMoreRow(text: String, onClick: () -> Unit) {
+    Text(
+        text = text,
+        color = MaterialTheme.colorScheme.onSurface,
+        style = MaterialTheme.typography.bodyLarge,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = BiliSpacing.md)
+    )
 }
 
 /** 评论悬浮卡片高度占屏比：留出上方约 1/3 屏，视频仍然可见。 */

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.naaammme.bbspace.core.model.FeedDislikeContext
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.StoryFeedItem
+import com.naaammme.bbspace.core.model.ThreePointReason
 import com.naaammme.bbspace.core.model.VideoDimension
 import com.naaammme.bbspace.core.model.VideoRelate
 import com.naaammme.bbspace.core.model.VideoTarget
@@ -46,6 +47,12 @@ data class SwipeEntry(
      * null 时"不感兴趣"入口隐藏。
      */
     val dislikeContext: FeedDislikeContext? = null,
+    /**
+     * 负反馈理由（SW-24）：来自 feed 卡的 `three_point_v2.reasons`，与首页同一份数据源。
+     * 空表 = 拿不到理由（relate/story 源，或该卡没给），此时"不感兴趣"仍可用，
+     * 但走 [SwipeDislikeRemovalPolicy] 之外的默认理由由调用方决定（见 VM 的接线）。
+     */
+    val dislikeReasons: List<ThreePointReason> = emptyList(),
 ) {
     val displayAuthor: String? get() = author?.takeIf(String::isNotBlank)
 
@@ -154,7 +161,11 @@ fun swipeEntryFromFeedItem(item: FeedItem): SwipeEntry? {
         durationText = null,
         // feed 源有 UP mid（args.up_id）与负反馈通道；时长/尺寸待核实，留 null
         ownerMid = item.args?.upId?.takeIf { it > 0L },
-        dislikeContext = item.dislikeContext
+        dislikeContext = item.dislikeContext,
+        // SW-24：负反馈理由随条目带走（会话内选理由/直接提交都用它）
+        dislikeReasons = item.threePointV2
+            .orEmpty()
+            .flatMap { it.reasons.orEmpty() }
     )
 }
 
