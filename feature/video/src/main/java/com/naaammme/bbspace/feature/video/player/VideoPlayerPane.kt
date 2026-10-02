@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -153,7 +152,6 @@ import com.naaammme.bbspace.core.swipe.SwipeHeartBurstPolicy
 import com.naaammme.bbspace.core.swipe.SwipeLoadPhasePolicy
 import com.naaammme.bbspace.core.swipe.SwipeMarqueePolicy
 import com.naaammme.bbspace.core.swipe.SwipeHandoffTiming
-import com.naaammme.bbspace.core.swipe.SwipeSeekPolicy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -842,7 +840,7 @@ internal fun VideoPlayerPane(
             // 所以只有它晃。现在与互动栏同一处理：常驻在 PortraitSwipePager 的页面层
             // 之上、切视频原地换数据（见 pager 的底部 chrome 接线），顺带省掉每页一份
             // 的重复组合。
-            // 组件定义留在本文件（[SwipeSessionInfoLine] / [SwipeProgressLine]），
+            // 组件定义留在本文件，
             // 与控制件玻璃同语言。
 
             // 播放设置侧栏：必须排在**底部信息层之后**——它是全屏右挂面板，
@@ -1121,120 +1119,12 @@ private fun SwipeWaitVeil(
 /** 失败态配色（比正文暗一档，避免"加载失败"比视频本身还抢眼）。 */
 private val WaitVeilErrorTint = Color(0xFFB9BEC7)
 
-/**
- * 会话内常驻细进度条（**SW-15 起可拖**）：底部一条轨道 + 已播比例 + 拖动时间气泡。
- *
- * 与旧版（只读指示器）的关系：任务书 B-3 把"可拖"列为差距，本次**反转**了
- * "进度条不许 pointerInput/clickable"的旧不变式（§8.4：同批更新守卫并写明理由）。
- * 反转后的三条硬约束：
- * 1. 只认**横向拖动**（`detectHorizontalDragGestures` 在横向超过 slop 才认领；
- *    纵向手势原封不动留给翻页 pager——上下滑绝不误触 seek）；
- * 2. 触摸带 ≥48dp（走 spacing token 的 2 倍档 = 48dp，不新增 dp 字面量），
- *    视觉仍是一条细线；
- * 3. **拖手才提交**（拖动中只更新本地位置，见 `SwipeSeekPolicy.shouldCommitOnRelease`），
- *    拖动中自动翻页被抑制（pager 把 scrubbing 喂进策略）。
- *
- * 高度与宽度仍用**比例**（设计 token 的 lint 棘轮会判红新增 dp 字面量；
- * 例外只有触摸带高度——它是可访问性的硬要求，用 token 表达）。
- */
-@Composable
-internal fun SwipeProgressLine(
-    viewModel: VideoViewModel,
-    /** 拖动状态上报（SW-15）：pager 据此抑制自动翻页。 */
-    onScrubbingChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val progress by viewModel.playbackProgress.collectAsStateWithLifecycle()
-    val durationMs = progress.durationMs
-    if (durationMs <= 0L) return
-    // 常驻件：跟随会话级防烧屏（进度条是竖屏连播里最"钉死"的一条静态线，最先烧屏）。
-    val burnIn = LocalSwipeChromeBurnIn.current
-    // 拖动中的本地位置（null = 没在拖，跟随真实播放进度）
-    var scrubFraction by remember { mutableStateOf<Float?>(null) }
-    var bubbleMs by remember { mutableStateOf(0L) }
-    val trackWidthPx = remember { mutableStateOf(0) }
-    val fraction = scrubFraction
-        ?: (progress.positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // 时间气泡：只有拖动中才出现（常驻会变成另一处烧屏源）
-        if (scrubFraction != null) {
-            Text(
-                text = SwipeSeekPolicy.bubbleText(bubbleMs, durationMs),
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .padding(bottom = BiliSpacing.xs)
-                    .background(SwipeSeekBubbleColor, CircleShape)
-                    .padding(horizontal = BiliSpacing.sm, vertical = BiliSpacing.xs)
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(BiliSpacing.xxl * 2f) // 48dp 触摸带（token 2 倍档，不写字面量）
-                .onSizeChanged { trackWidthPx.value = it.width }
-                .pointerInput(durationMs) {
-                    fun fractionOf(x: Float): Float {
-                        val width = trackWidthPx.value
-                        if (width <= 0) return 0f
-                        return (x / width).coerceIn(0f, 1f)
-                    }
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
-                            scrubFraction = fractionOf(offset.x)
-                            bubbleMs = SwipeSeekPolicy.positionForFraction(
-                                fractionOf(offset.x), durationMs
-                            ) ?: 0L
-                            onScrubbingChange(true)
-                        },
-                        onHorizontalDrag = { change, _ ->
-                            change.consume()
-                            val f = fractionOf(change.position.x)
-                            scrubFraction = f
-                            bubbleMs = SwipeSeekPolicy.positionForFraction(f, durationMs) ?: bubbleMs
-                        },
-                        onDragEnd = {
-                            val f = scrubFraction
-                            scrubFraction = null
-                            onScrubbingChange(false)
-                            // **拖手才提交**（任务书要求④）：拖动中只动本地位置
-                            if (f != null && SwipeSeekPolicy.shouldCommitOnRelease(isScrubbing = true)) {
-                                SwipeSeekPolicy.positionForFraction(f, durationMs)
-                                    ?.let(viewModel::seekTo)
-                            }
-                        },
-                        onDragCancel = {
-                            scrubFraction = null
-                            onScrubbingChange(false)
-                        }
-                    )
-                },
-            contentAlignment = Alignment.BottomStart
-        ) {
-            // 视觉仍是细线：触摸带里的细线贴底（燃烧线只有 0.35% 屏高）
-            Box(
-                modifier = Modifier
-                    .applyBurnIn(burnIn)
-                    .fillMaxWidth()
-                    .fillMaxHeight(SWIPE_PROGRESS_TRACK_FRACTION)
-                    .background(SwipeProgressTrackColor)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction)
-                        .fillMaxHeight()
-                        .background(SwipeProgressBarColor)
-                )
-            }
-        }
-    }
-}
-
-/** 拖动时间气泡底色（半透明深底 + 白字，视频任意画面上都可读）。 */
-private val SwipeSeekBubbleColor = Color.Black.copy(alpha = 0.55f)
+// ── 底部细进度条 / 可拖 seek（原 SW-15）已删除 ─────────────────────────────────
+// 用户决定（2026-10-02）：「把底部细进度条这个功能删掉，我不需要」。
+// 常驻指示条、横向拖动 seek、时间气泡，以及 core:swipe 里只服务于它的判据与自动
+// 翻页的「拖动中抑制」入参一并删除；相关常量与配色也已清理（守卫：feature:video 的
+// `swipeProgressLineStaysRemoved`，那里写着将来要恢复时必须一起恢复的东西）。
+// 任务书 SW-15 因此作废（产品决定覆盖任务书，已登记在 L4 与提交信息）。
 
 /**
  * 非空展示值**粘滞**到下一个非空值到达（用户反馈「每次下滑控件消失再出现」的计数侧修复）：
@@ -1596,10 +1486,7 @@ private val SwipeRailAvatarRingColor = Color.White.copy(alpha = 0.7f)
 private val SwipeRailAvatarFallbackColor = Color.Black.copy(alpha = 0.32f)
 private val PlayerPlayButtonBorderWidth = BiliSpacing.xs / 4f
 
-/** 会话内进度条的底部内边距：抬到手势导航条之上。 */
-internal val SwipeProgressBottomInset = BiliSpacing.xxxl
 
-/** 会话底部信息层（遮罩 + 信息列 + 互动栏 + 进度条）高度占屏比：够放下两行标题与互动栏，又不盖过画面主体。 */
 internal const val SWIPE_BOTTOM_ZONE_FRACTION = 0.38f
 
 /**
@@ -1614,9 +1501,6 @@ internal val SwipeBottomScrimBrush = Brush.verticalGradient(
     0.45f to Color.Transparent,
     1f to Color.Black.copy(alpha = 0.58f)
 )
-
-/** 轨道高度占屏高比例（≈3dp）：够看清、又不抢画面。 */
-private const val SWIPE_PROGRESS_TRACK_FRACTION = 0.0035f
 
 /**
  * 会话内常驻信息：头像 + UP 名 + 标题 + 话题（左下角，与互动栏同排、压在进度条之上）。
@@ -1793,9 +1677,6 @@ private fun SwipeMarqueeText(
             .graphicsLayer { translationX = offset.value }
     )
 }
-
-private val SwipeProgressTrackColor = Color.White.copy(alpha = 0.20f)
-private val SwipeProgressBarColor = Color.White.copy(alpha = 0.86f)
 
 /** 失败态图标尺寸与间距（仍走动画 token，不新增 dp 字面量）。 */
 private val VeilErrorIconSize = 40.dp

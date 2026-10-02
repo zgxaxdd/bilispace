@@ -1256,68 +1256,50 @@ class VideoLogicGuardTest {
     }
 
     /**
-     * 会话内**常驻细进度条**（C10 信息层第一阶段）。
+     * 底部细进度条 / 可拖 seek **已按产品决定删除**（2026-10-02）。
      *
-     * 上下滑会话里控件 2 秒自动隐藏，用户没有任何"这支还剩多久"的线索；
-     * BiliPai 的竖屏页底部常驻一条细进度（`PortraitFullscreenOverlay.kt:387-394`）。
-     * 这里钉三件事：① 只在会话内且不在等首帧时出现（等首帧时整屏是加载层）；
-     * ② 尺寸只用**比例**（设计 token lint 有 `.dp` 棘轮，新增字面量会判红）；
-     * ③ 它必须排在加载层**之前**（加载层是最后一个子节点，要盖住它）。
+     * 历史：SW-15 曾要求「底部常驻细进度条 + 横向拖动 seek + 时间气泡」，本测试原先钉的
+     * 是「它必须存在、且在加载层之前」。用户真机验收明确表示不需要这条进度条
+     * （「把底部细进度条这个功能删掉，我不需要」），于是把它连同 `SwipeSeekPolicy`
+     * 与 `SwipeAutoAdvancePolicy` 里只服务于它的 `isScrubbing` 入参一起删除。
+     *
+     * §8.4：产品决定覆盖任务书 → 守卫同批反转（不留一条注定变红的旧断言）。
+     * 新断言钉三件「不许回来」：
+     * ① pane 里不再有该组件定义，pager 也不再调用；
+     * ② 相关常量与配色（轨道比例 / 轨道色 / 已播色 / 底部内边距）清干净，不留死代码；
+     * ③ 底部的「不动」不受影响：会话信息层仍在 pager 常驻，且封面页内部不再画标题条
+     *    （后者正是用户两次反馈「底部简介从下往上移动」的根因）。
+     * 将来要恢复：策略、单测、调用点与本文档一起恢复，不要只把组件加回来。
      */
     @Test
-    fun swipeSessionShowsPersistentProgressLine() {
+    fun swipeProgressLineStaysRemoved() {
         val pane = codeOf("player/VideoPlayerPane.kt")
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
-            "会话内常驻细进度条必须存在（定义留在 pane，与控制件玻璃同语言）。\n" +
-                "2026-10-02 变更（真机反馈「翻下一个视频时下方简介从下往上跳动」）：底部三件套" +
-                "（渐变遮罩 + 信息层 + 进度条）从 pane（每页一个）**提升为会话级单例**——" +
-                "与互动栏同一条既有决策（常驻件的常驻性优先），翻页时不再跟着页面位移、只组合一份。" +
-                "因此调用点断言由 pane 改为 pager；旧断言里的 `swipePagingActive && " +
-                "!swipeWaitingFirstFrame` 门控与 showCtrl 让位位移随内联块一起移到 pager 侧" +
-                "（让位位移属于 pane 控制条语义，见 VideoPlaybackSidebar 覆盖，不再需要）。",
-            countMatching(pane, """internal fun SwipeProgressLine\(""") == 1 &&
-                countMatching(pane, """SWIPE_PROGRESS_TRACK_FRACTION""") >= 2 &&
-                countMatching(pager, """SwipeProgressLine\(""") == 1 &&
-                countMatching(pager, """SwipeBottomScrimBrush""") == 1 &&
-                countMatching(pager, """SWIPE_BOTTOM_ZONE_FRACTION""") == 1
+            "底部细进度条已删除：pane 里不许再有该组件定义、pager 不许再调用。",
+            countMatching(pane, """SwipeProgressLine""") == 0 &&
+                countMatching(pager, """SwipeProgressLine""") == 0
         )
         assertTrue(
-            "进度条尺寸仍须走 token/比例（DesignTokenLintTest 的棘轮会判红新增 dp 字面量）。\n" +
-                "2026-10-01 反转（SW-15，任务书 B-3）：旧不变式是「进度条只是指示器、不许 " +
-                "pointerInput/clickable」；现在它**可拖**——但只认横向拖动（纵向让位 pager）、" +
-                "触摸带走 token 的 2 倍档（48dp）、拖手才提交（SwipeSeekPolicy 单测覆盖）。" +
-                "因此断言由「不许 pointerInput」改为「只许横向拖动 + 热区/提交判据走策略函数」。\n" +
-                "🔁 若将来改回只读指示器：把断言恢复成 none { pointerInput } 并删掉拖动接线。",
-            blockBody(pane, "internal fun SwipeProgressLine(").let { body ->
-                body.none { it.contains(".dp") } &&
-                    body.any { it.contains("detectHorizontalDragGestures(") } &&
-                    body.none { it.contains("detectVerticalDragGestures") } &&
-                    body.any { it.contains("SwipeSeekPolicy.positionForFraction(") } &&
-                    body.any { it.contains("SwipeSeekPolicy.bubbleText(") }
-            }
+            "进度条相关常量/配色必须一并清掉，不留死代码。",
+            countMatching(pane, """SWIPE_PROGRESS_TRACK_FRACTION""") == 0 &&
+                countMatching(pane, """SwipeProgressTrackColor""") == 0 &&
+                countMatching(pane, """SwipeProgressBarColor""") == 0 &&
+                countMatching(pane, """SwipeProgressBottomInset""") == 0
         )
         assertTrue(
-            "拖动中必须抑制自动翻页（SW-15）：pager 把 scrubbing 喂进策略函数；" +
-                "底部三件套提升为会话级后，拖动回调由 pager 直连进度条（不再经 pane 转手）。",
-            countMatching(pager, """isScrubbing = scrubbingProgress""") == 1 &&
-                countMatching(pager, """onScrubbingChange = \{ scrubbing ->""") == 1 &&
-                countMatching(pane, """onScrubbingChange\(true\)""") == 1 &&
-                countMatching(pane, """onScrubbingChange\(false\)""") == 2
+            "拖动 seek 的判据与「拖动中抑制自动翻页」入参也不许被引回（若引回说明有人把" +
+                "拖动 seek 加回来了，必须连同守卫一起重写，而不是绕过断言）。",
+            countMatching(pane, """SwipeSeekPolicy""") == 0 &&
+                countMatching(pager, """SwipeSeekPolicy""") == 0 &&
+                countMatching(pager, """isScrubbing""") == 0
         )
         assertTrue(
-            "底部三件套已提升为会话级单例（2026-10-02，真机反馈「翻页时简介从下往上跳」）：" +
-                "调用点在 pager（与互动栏并列、钉在页面层之上），不再长在 pane 里。\n" +
-                "⚠️ 不变式反转：旧断言要求「进度条排在加载层之前」——那条是为了让加载层盖住" +
-                "per-page 的进度条；提升为会话级后与互动栏同一处理（常驻件浮在加载层之上），" +
-                "理由与互动栏一致：常驻件的常驻性优先。",
-            run {
-                val lineAt = pager.indexOfFirst {
-                    it.contains("SwipeProgressLine(") && !it.contains("internal fun")
+            "会话级底部信息层仍在（标题/UP/标签必须钉在会话层、翻页不动）。",
+            countMatching(pager, """SwipeSessionInfoLine\(""") == 1 &&
+                blockBody(pager, "private fun SwipeCoverPage(").none {
+                    it.contains("displayAuthor") || it.contains("titleMedium")
                 }
-                val paneAt = pager.indexOfFirst { it.contains("VerticalPager(") }
-                lineAt >= 0 && paneAt >= 0 && paneAt < lineAt
-            }
         )
     }
 
@@ -1509,11 +1491,14 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "常驻控件防烧屏（用户要求）：策略在核心层（静置 15s 变暗到 0.55、每 60s ±2px 漂移），" +
-                "pager 一处计时 + CompositionLocal 下发，pane 的常驻件（信息层/进度条）必须真的读它。",
+                "pager 一处计时 + CompositionLocal 下发，pane 的常驻件必须真的读它。\n" +
+                "2026-10-02（用户决定删除底部细进度条）：pane 里读 burnIn 的常驻件由两个减为一个 ——" +
+                "只剩会话信息层（标题/UP/标签）。这是**删除功能**导致的合法减少，不是防烧屏退化：" +
+                "pager 侧的 provide / 计时 / 漂移三条断言原样保留，故这里由 `>= 2` 收紧为 `>= 1`。",
             countMatching(pager, """LocalSwipeChromeBurnIn provides chromeBurnIn""") == 1 &&
                 countMatching(pager, """SwipeChromeBurnInPolicy\.chromeAlpha\(""") == 1 &&
                 countMatching(pager, """SwipeChromeBurnInPolicy\.driftOffsetPx\(""") == 1 &&
-                countMatching(pane, """LocalSwipeChromeBurnIn\.current""") >= 2 &&
+                countMatching(pane, """LocalSwipeChromeBurnIn\.current""") >= 1 &&
                 countMatching(
                     codeOf("SwipeChromeBurnInPolicy.kt"),
                     """const val DIM_ALPHA = 0.55f"""

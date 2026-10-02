@@ -168,8 +168,8 @@ internal fun PortraitSwipePager(
     // 防烧屏的"最近交互时刻"（用户要求）：翻页回调（下方 collect）与评论/收藏面板都要写它，
     // 所以在第一个 effect 之前声明；亮度/drift 的派生在本函数更下方（要读 playerSettings）。
     var lastChromeInteractionMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
-    // SW-15：进度条拖动中（pane 里的 SwipeProgressLine 上报）→ 抑制播完自动翻页
-    var scrubbingProgress by remember { mutableStateOf(false) }
+    // 底部细进度条已移除（用户决定，2026-10-02），因此没有"拖动中"这个状态；
+    // 播完自动翻页只需四判据（见 SwipeAutoAdvancePolicy）。
     LaunchedEffect(pagerState, pages) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
@@ -270,9 +270,7 @@ internal fun PortraitSwipePager(
                     repeatOne = playerSettings.playback.repeatMode != PlayerRepeatMode.Off,
                     isLastPage = next > pages.lastIndex,
                     alreadyAdvancedForThisVideo =
-                        key.isNotEmpty() && key == viewModel.swipeLastAutoAdvancedKey.value,
-                    // SW-15：拖动进度条中不自动翻页（别把用户的操作打断并丢弃）
-                    isScrubbing = scrubbingProgress
+                        key.isNotEmpty() && key == viewModel.swipeLastAutoAdvancedKey.value
                 )
                 if (!shouldAdvance) return
                 viewModel.noteSwipeAutoAdvanced(key)
@@ -646,20 +644,15 @@ internal fun PortraitSwipePager(
                     seasonTitle = playbackState.detail?.season?.title,
                     onOpenSpace = openOwnerSpace,
                     resetKey = playbackState.ids.aid.takeIf { it > 0L }
-                        ?: playbackState.ids.bvid
+                        ?: playbackState.ids.bvid,
+                    // 进度条删除后，手势条 clearance 由信息层自己承担（见常量注释）。
+                    modifier = Modifier.padding(bottom = SwipeBottomInfoInset)
                 )
-                // SW-15：可拖进度条（拖动中抑制自动翻页）。会话级实例 → 拖动状态直接在这里
-                SwipeProgressLine(
-                    viewModel = viewModel,
-                    onScrubbingChange = { scrubbing ->
-                        scrubbingProgress = scrubbing
-                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
-                    },
-                    modifier = Modifier.padding(
-                        top = BiliSpacing.lg,
-                        bottom = SwipeProgressBottomInset
-                    )
-                )
+                // 底部**细进度条 / 可拖 seek** 已按用户决定移除（2026-10-02：
+                // 「把底部细进度条这个功能删掉，我不需要」）：常驻指示条、拖动 seek、
+                // 时间气泡，以及 core:swipe 里只服务于它的判据与自动翻页的「拖动中抑制」
+                // 入参一并删除（守卫：feature:video 的 `swipeProgressLineStaysRemoved`）。
+                // 若将来要恢复，需连同判据与守卫一起恢复，不要只把组件加回来。
             }
         }
 
@@ -899,6 +892,15 @@ private val COMMENT_CARD_ELEVATION = 8.dp
 /** 玻璃卡片描边：白色微光，勾出卡片轮廓（与中央播放键同档）。 */
 private val CommentSheetBorderColor = Color.White.copy(alpha = 0.18f)
 
+/**
+ * 会话底部信息块（@名/标题/话题）的底部内边距：抬到系统手势导航条之上。
+ *
+ * 2026-10-02：这条 clearance 原先由被删除的底部细进度条提供（它的底部内边距是
+ * `BiliSpacing.xxxl`）；进度条没了之后，若不给信息层补上，话题行会贴着屏幕下沿、
+ * 与手势条打架。值沿用同一档 token，位置改由信息层自己承担。
+ */
+private val SwipeBottomInfoInset = BiliSpacing.xxxl
+
 private const val TAG = "PortraitSwipe"
 
 /**
@@ -945,7 +947,14 @@ private const val COVER_LOADER_WIDTH_FRACTION = 0.26f
  */
 private const val SETTLED_OFFSET_EPSILON = 0.02f
 
-/** 非当前页：封面铺满 + 底部标题/UP 渐变信息条 + 当前页取流中的加载指示。 */
+/**
+ * 非当前页：封面铺满 + 当前页取流中的加载指示。
+ *
+ * ⚠️ 这里**不再有**底部标题/UP 信息条（2026-10-02 删除，用户第二次反馈"底部简介还是会动"）：
+ * 它长在**页面内部**，翻页时会跟着页面从下往上滑进来——而会话级信息层（pager 的底部三件套）
+ * 已经在同一位置常驻显示同一份 @名/标题，两者重复且后者才是"钉住不动"的那一层。
+ * 删掉后封面页只剩封面 + 加载指示，翻页时底部不再有任何东西位移。
+ */
 @Composable
 private fun SwipeCoverPage(
     entry: SwipeEntry,
@@ -978,39 +987,6 @@ private fun SwipeCoverPage(
                     .fillMaxWidth(COVER_LOADER_WIDTH_FRACTION)
                     .aspectRatio(1f)
             )
-        }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.72f)
-                    )
-                )
-                .padding(
-                    horizontal = BiliSpacing.lg,
-                    vertical = BiliSpacing.xl
-                )
-        ) {
-            Text(
-                text = entry.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            entry.displayAuthor?.let { author ->
-                Text(
-                    text = "@$author",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.78f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = BiliSpacing.xs)
-                )
-            }
         }
     }
 }
