@@ -725,21 +725,39 @@ class StreamPlaybackSessionImpl @Inject constructor(
         request: PlaybackRequest,
         source: PlaybackSource,
         prefetchedLocal: PlaybackHistory?
-    ): Long? {
-        request.seekToMs?.let { return it }
-        val report = request.toInitialReportParams() ?: return source.resumePositionMs ?: 0L
+    ): Long {
+        // PT-03：判据收口到 PlaybackResumePolicy（单一真值源）——
+        // 来源优先级不变（显式 seek > 本地 > 服务端），新增上游 95% 重播规则与钳位。
+        val explicit = request.seekToMs
+        if (explicit != null) {
+            return PlaybackResumePolicy.resolveResumePosition(
+                explicitMs = explicit,
+                localMs = null,
+                localFinished = false,
+                serverMs = null,
+                durationMs = source.durationMs
+            )
+        }
+        val report = request.toInitialReportParams()
+            ?: return PlaybackResumePolicy.resolveResumePosition(
+                explicitMs = null,
+                localMs = null,
+                localFinished = false,
+                serverMs = source.resumePositionMs,
+                durationMs = source.durationMs
+            )
         val key = PlaybackHistoryKey.video(report)
         val local = when {
             prefetchedLocal?.key == key -> prefetchedLocal
             else -> playbackHistoryRepo.getVideo(authProvider.mid, key)
         }
-        if (local != null && canResume(local.progressMs, local.finished, source.durationMs)) {
-            return local.progressMs
-        }
-        if (canResume(source.resumePositionMs, finished = false, durationMs = source.durationMs)) {
-            return source.resumePositionMs
-        }
-        return 0L
+        return PlaybackResumePolicy.resolveResumePosition(
+            explicitMs = null,
+            localMs = local?.progressMs,
+            localFinished = local?.finished ?: false,
+            serverMs = source.resumePositionMs,
+            durationMs = source.durationMs
+        )
     }
 
     private suspend fun readLocalResumeIfResolvable(request: PlaybackRequest): PlaybackHistory? {
@@ -804,16 +822,9 @@ class StreamPlaybackSessionImpl @Inject constructor(
         danmakuSession.setSource(ids, source.durationMs)
     }
 
-    private fun canResume(
-        progressMs: Long?,
-        finished: Boolean,
-        durationMs: Long
-    ): Boolean {
-        val progress = progressMs?.coerceAtLeast(0L) ?: return false
-        if (progress <= 0L || finished) return false
-        if (durationMs <= 0L) return true
-        return durationMs - progress > COMPLETE_THRESHOLD_MS
-    }
+    // PT-03：原 canResume（3s 尾规则）与 COMPLETE_THRESHOLD_MS 已删除——
+    // 判据统一收口到 PlaybackResumePolicy（isWatchedThrough / resolveResumePosition），
+    // 结构断言见 PlaybackResumePolicyTest.constantLivesInExactlyOnePlace。
 
     // vod: state mapping
     private fun refreshVideoState(isNewSeekEvent: Boolean = false) {
@@ -960,7 +971,6 @@ class StreamPlaybackSessionImpl @Inject constructor(
 
     private companion object {
         const val TAG = "StreamPlayback"
-        const val COMPLETE_THRESHOLD_MS = 3_000L
     }
 }
 
