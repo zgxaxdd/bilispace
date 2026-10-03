@@ -47,14 +47,17 @@ import kotlin.math.max
 @Singleton
 class Media3PlayerEngine @Inject constructor(
     @ApplicationContext context: Context,
-    okHttpClient: OkHttpClient
+    okHttpClient: OkHttpClient,
+    /** PB-03：播放字节缓存（两条数据源链都在最外层挂它）。 */
+    private val playbackMediaCache: PlaybackMediaCache
 ) : PlayerEngine {
 
     private val appContext = context.applicationContext
     private val videoOkHttpClient = okHttpClient
     private val singleFileDashMediaSourceFactory = SingleFileDashMediaSourceFactory(
         appContext = appContext,
-        okHttpClient = okHttpClient
+        okHttpClient = okHttpClient,
+        playbackMediaCache = playbackMediaCache
     )
 
     private val _player = MutableStateFlow<Player?>(null)
@@ -229,6 +232,8 @@ class Media3PlayerEngine @Inject constructor(
             }
             player.playWhenReady = playWhenReady
             player.prepare()
+            // PB-03：播放中禁止清理磁盘缓存（抽掉正在读的文件会中断播放）
+            playbackMediaCache.markSourceActive(true)
             updatePlaybackState { it.copy(errorMessage = null) }
             updatePlaybackProgress()
         } catch (t: Throwable) {
@@ -318,6 +323,8 @@ class Media3PlayerEngine @Inject constructor(
 
     override fun stopForReuse(resetPosition: Boolean) {
         stopProgressPolling()
+        // PB-03：媒体源已停 → 允许清理磁盘缓存
+        playbackMediaCache.markSourceActive(false)
         val player = exoPlayer ?: run {
             resetRuntimeState()
             _currentSource.value = null
@@ -337,6 +344,8 @@ class Media3PlayerEngine @Inject constructor(
 
     override fun release() {
         stopProgressPolling()
+        // PB-03：释放后没有在用的媒体源
+        playbackMediaCache.markSourceActive(false)
         val player = exoPlayer ?: return
         resetRuntimeState()
         exoPlayer = null
@@ -518,7 +527,7 @@ class Media3PlayerEngine @Inject constructor(
         }
     }
 
-    private fun buildProgressiveMediaSourceFactory(source: EngineSource): ProgressiveMediaSource.Factory {
+    private suspend fun buildProgressiveMediaSourceFactory(source: EngineSource): ProgressiveMediaSource.Factory {
         val requestSpec = source.toPlaybackRequestSpec()
         val upstreamFactory = OkHttpDataSource.Factory(videoOkHttpClient)
             .setUserAgent(requestSpec.userAgent)
@@ -531,12 +540,20 @@ class Media3PlayerEngine @Inject constructor(
                 mapOf(source.url to (listOf(source.url) + source.backupUrls).distinct())
             else -> emptyMap()
         }
-        return ProgressiveMediaSource.Factory(
-            CdnFailoverDataSourceFactory(
-                DefaultDataSource.Factory(appContext, upstreamFactory),
-                candidatesByUrl
-            )
+        // PB-03：缓存包在**换线工厂之外**（换线发生在 CdnFailoverDataSource 内部的 URI 改写；
+        // 套在内侧会让主/备线路各存一份同一分片）。file:// 由 CacheKeyFactory 返回 null 绕过。
+        val failover = CdnFailoverDataSourceFactory(
+            DefaultDataSource.Factory(appContext, upstreamFactory),
+            candidatesByUrl
         )
+        // PB-03：只有**点播**才包缓存（直播是流式边缘、file:// 是本地文件，都不该进缓存）。
+        // 闸门判据见 PlaybackCacheGate；这里只按结论选工厂。
+        val dataSourceFactory = if (PlaybackCacheGate.shouldCache(PlaybackCacheGate.kindOf(source))) {
+            playbackMediaCache.wrapForPlayback(failover)
+        } else {
+            failover
+        }
+        return ProgressiveMediaSource.Factory(dataSourceFactory)
             // CDN 偶发 403/超时配合 CdnFailoverDataSource 换线重试，重试次数过少会直接报错
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
     }

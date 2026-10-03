@@ -64,6 +64,14 @@ fun PrivacySettingsScreen(
         }
     }
 
+    // PB-03：播放缓存清理的结果（含"播放中被拒绝"）如实提示
+    LaunchedEffect(state.playbackCacheToast) {
+        state.playbackCacheToast?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumePlaybackCacheToast()
+        }
+    }
+
     CollapsingTopBarScaffold(
         topBar = { scrollBehavior ->
             TopAppBar(
@@ -198,29 +206,59 @@ fun PrivacySettingsScreen(
             }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.clearImageCache()
-                                Toast.makeText(context, "已清除图片缓存", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f)
+                    Column(modifier = Modifier.fillMaxWidth().padding(BiliSpacing.md)) {
+                        // PB-03：播放字节缓存**必须**给出占用与清理入口 ——
+                        // 128MiB 的磁盘占用不能是静默的。
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("清除图片缓存")
+                            Text("播放缓存", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                formatBytes(state.playbackCacheBytes),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        Button(
-                            onClick = {
-                                viewModel.clearAllCache()
-                                Toast.makeText(context, "已清除所有缓存", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f)
+                        Text(
+                            "回看/拖动回退时复用的媒体字节（上限 128 MB，播放中不能清理）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(BiliSpacing.sm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("清除所有缓存")
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.clearImageCache()
+                                    Toast.makeText(context, "已清除图片缓存", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("清除图片缓存")
+                            }
+                            Button(
+                                onClick = {
+                                    viewModel.clearAllCache()
+                                    // PB-03：措辞必须准确 —— 播放缓存有独立按钮且播放中拒绝清理，
+                                    // 说"已清除所有缓存"会在播放中变成假话。
+                                    Toast.makeText(context, "已清除应用缓存（播放缓存除外）", Toast.LENGTH_SHORT)
+                                        .show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("清除所有缓存")
+                            }
+                        }
+                        Spacer(Modifier.height(BiliSpacing.sm))
+                        OutlinedButton(
+                            onClick = { viewModel.clearPlaybackCache() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("清除播放缓存")
                         }
                     }
                 }

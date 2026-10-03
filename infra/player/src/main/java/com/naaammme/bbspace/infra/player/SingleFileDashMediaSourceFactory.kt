@@ -37,7 +37,9 @@ import okhttp3.Request
 @UnstableApi
 internal class SingleFileDashMediaSourceFactory(
     private val appContext: Context,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    /** PB-03：播放字节缓存（包在换线工厂之外，见 [PlaybackMediaCache] 类注释）。 */
+    private val playbackMediaCache: PlaybackMediaCache
 ) {
 
     suspend fun create(
@@ -147,7 +149,7 @@ internal class SingleFileDashMediaSourceFactory(
         )
     }
 
-    private fun buildDataSourceFactory(
+    private suspend fun buildDataSourceFactory(
         source: EngineSource.SingleFileDash,
         prefetchedRanges: Map<String, PrefetchedRange>,
         candidatesByUrl: Map<String, List<String>>
@@ -158,13 +160,19 @@ internal class SingleFileDashMediaSourceFactory(
         if (requestSpec.headers.isNotEmpty()) {
             upstreamFactory.setDefaultRequestProperties(requestSpec.headers)
         }
-        return CdnFailoverDataSourceFactory(
+        // PB-03：缓存必须在**最外层**（CdnFailoverDataSource 之外）。换线的 URI 改写发生在
+        // 它内部，而缓存键取的是 open() 收到的 DataSpec —— 套在内侧时备用线路会用另一把键
+        // 存同一分片（重复下载 + 换线命中率归零）。
+        val failover = CdnFailoverDataSourceFactory(
             PrefetchedDataSourceFactory(
                 upstreamFactory = DefaultDataSource.Factory(appContext, upstreamFactory),
                 prefetchedRanges = prefetchedRanges
             ),
             candidatesByUrl
         )
+        // SingleFileDash 恒为 VOD DASH（闸门判据见 PlaybackCacheGate），直接包缓存；
+        // 位置必须在 failover **之外**（见 PlaybackMediaCache 类注释第 1 条）。
+        return playbackMediaCache.wrapForPlayback(failover)
     }
 
     /** 主线路 URL -> 打开失败时依次尝试的候选线路（首元素为主线路本身） */

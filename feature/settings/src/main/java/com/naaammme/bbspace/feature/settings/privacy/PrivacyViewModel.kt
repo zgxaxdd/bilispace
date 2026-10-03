@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.common.cache.PlaybackCacheControl
 import javax.inject.Inject
 
 data class PrivacyUiState(
@@ -25,14 +26,20 @@ data class PrivacyUiState(
     val hdInfo: Map<String, String> = emptyMap(),
     val accounts: List<LoginCredential> = emptyList(),
     val currentMid: Long = 0L,
-    val importResult: String? = null
+    val importResult: String? = null,
+    /** PB-03：播放字节缓存占用（字节）。 */
+    val playbackCacheBytes: Long = 0L,
+    /** PB-03：清理播放缓存的结果提示（播放中被拒绝时也要说清，不能弹"已清除"）。 */
+    val playbackCacheToast: String? = null
 )
 
 @HiltViewModel
 class PrivacyViewModel @Inject constructor(
     private val authStore: AuthStore,
     private val cacheManager: CacheManager,
-    private val appSettings: AppSettings
+    private val appSettings: AppSettings,
+    /** PB-03：播放字节缓存的占用/清理（接口在 core:common，实现在 infra:player）。 */
+    private val playbackCacheControl: PlaybackCacheControl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PrivacyUiState())
@@ -46,6 +53,7 @@ class PrivacyViewModel @Inject constructor(
 
     init {
         refresh()
+        refreshPlaybackCacheSize()
     }
 
     fun refresh() {
@@ -100,4 +108,52 @@ class PrivacyViewModel @Inject constructor(
         }
         refresh()
     }
+
+    // ===== PB-03：播放字节缓存（占用 + 清理）=====
+    //
+    // 刻意**不并进 clearAllCache()**：「清除所有缓存」是同步菜单动作，而播放缓存清理
+    // ① 是挂起的、② 有"播放中拒绝"的守卫 —— 混进去会让"已清除所有缓存"在播放中变成假话。
+    // 播放缓存给独立的按钮与独立的提示。
+
+    fun refreshPlaybackCacheSize() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bytes = runCatching { playbackCacheControl.cachedBytes() }.getOrDefault(0L)
+            _uiState.value = _uiState.value.copy(playbackCacheBytes = bytes)
+        }
+    }
+
+    /**
+     * 清理播放缓存。**播放中会被拒绝**（[PlaybackCacheControl.clear] 返回 false）——
+     * 这时必须如实告诉用户"没清"，而不是弹一个"已清除"。
+     */
+    fun clearPlaybackCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val cleared = runCatching { playbackCacheControl.clear() }.getOrDefault(false)
+            val bytes = runCatching { playbackCacheControl.cachedBytes() }.getOrDefault(0L)
+            _uiState.value = _uiState.value.copy(
+                playbackCacheBytes = bytes,
+                playbackCacheToast = if (cleared) "已清除播放缓存" else "正在播放，暂不能清理播放缓存"
+            )
+        }
+    }
+
+    fun consumePlaybackCacheToast() {
+        if (_uiState.value.playbackCacheToast == null) return
+        _uiState.value = _uiState.value.copy(playbackCacheToast = null)
+    }
+}
+
+/**
+ * 字节数的人读文本（PB-03：设置页显示播放缓存占用）。
+ *
+ * 纯函数、`Locale.ROOT`（与 `WebFeedMapper.formatDuration` 同一条理由：默认 locale
+ * 会在部分语言下输出本地数字）。1 位小数、KB/MB/GB 三档 —— 与系统设置里的缓存显示同量级。
+ */
+internal fun formatBytes(bytes: Long): String {
+    if (bytes <= 0L) return "0 MB"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format(java.util.Locale.ROOT, "%.0f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return String.format(java.util.Locale.ROOT, "%.1f MB", mb)
+    return String.format(java.util.Locale.ROOT, "%.2f GB", mb / 1024.0)
 }
