@@ -1684,6 +1684,52 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SX-03：横屏（非全屏）播放时，视频画面**下方**要有悬浮「全屏」按钮，
+     * 且点击走**既有**全屏通路（任务书要点①~⑥）。
+     *
+     * 断言全部锚在**调用/表达式形态**上（W18/W20/W21），并把"尺寸不许出现 dp 字面量"
+     * 交给 DesignTokenLintTest 的棘轮兜底。
+     */
+    @Test
+    fun landscapeFloatingFullscreenButtonReusesExistingFullscreenPath() {
+        val screen = codeOf("VideoScreen.kt")
+        assertTrue(
+            "SX-03 要点①：横屏判据必须是 `Configuration.orientation`，**不是**宽度分级 ——" +
+                "横屏手机宽度 ≈800dp，低于 `isExpandedWidth` 的 840dp 阈值，" +
+                "两者混用会让按钮在横屏手机上根本不出现。",
+            countMatching(
+                screen,
+                """LocalConfiguration\.current\.orientation == Configuration\.ORIENTATION_LANDSCAPE"""
+            ) == 1
+        )
+        assertTrue(
+            "按钮只在 `isLandscapeWindow` 为真时组合（竖屏不出现）；" +
+                "而「全屏时不出现」由 `when` 分支结构保证（本分支必然 !fullOn）。",
+            countMatching(screen, """if \(isLandscapeWindow\) \{""") == 1 &&
+                countMatching(screen, """LandscapeFullscreenFab\(""") == 2
+        )
+        assertTrue(
+            "SX-03 要点③：点击必须复用**既有**全屏通路 `enterFullscreen`（不许另造全屏状态）。",
+            countMatching(screen, """onClick = enterFullscreen,""") == 1
+        )
+        assertTrue(
+            "SX-03 要点②：位置由播放带底边 `bandMorphHeightPx()` 下移一个间距驱动" +
+                "（贴在画面下方，不压画面），并随 `fullscreenMorph` 淡出（进全屏即消失）。",
+            countMatching(
+                screen,
+                """\(bandMorphHeightPx\(\) \+ with\(density\) \{ BiliSpacing\.sm\.toPx\(\) \}\)"""
+            ) == 1 &&
+                countMatching(screen, """alpha = 1f - fullscreenMorph\.value""") >= 2
+        )
+        assertTrue(
+            "SX-03 要点⑤⑥：按钮必须带 contentDescription、48dp 触摸下限（token 派生），" +
+                "且不得出现 dp 字面量尺寸。",
+            countMatching(screen, """contentDescription = "进入全屏"""") == 1 &&
+                countMatching(screen, """defaultMinSize\(minHeight = BiliSpacing\.xxxl \* 1\.5f\)""") == 1
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }

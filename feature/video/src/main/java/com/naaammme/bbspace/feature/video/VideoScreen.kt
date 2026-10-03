@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.feature.video
 
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -12,10 +13,12 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -26,9 +29,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,6 +67,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
@@ -70,11 +76,15 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -199,6 +209,12 @@ fun VideoScreen(
     }
     val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val isExpandedWidth = windowSizeClass.isWidthAtLeastBreakpoint(840)
+    // SX-03：横屏（**非全屏**）时，视频画面下方要给一个悬浮「全屏」按钮（用户需求③：
+    // "不用去顶栏点"）。判据用 `Configuration.orientation` 而**不是**宽度分级：
+    // 横屏手机宽度约 800dp，`isExpandedWidth`（840dp）仍为 false、走的是紧凑分支
+    // ——「横屏」与「展开宽度」是两件事，混用会让按钮在横屏手机上不出现。
+    val isLandscapeWindow =
+        LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val themeUsesDarkSystemBarIcons = MaterialTheme.colorScheme.background.luminance() > 0.5f
     var isFull by rememberSaveable { mutableStateOf(storyMode) }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
@@ -934,6 +950,30 @@ fun VideoScreen(
                             onGoHome = onGoHome
                         )
                     }
+                    // ── SX-03：横屏（非全屏）时，画面**下方**的悬浮「全屏」按钮 ──────
+                    //
+                    // 只在本分支出现：`when` 的第一个分支已经吃掉了 `fullOn`，所以
+                    // 走到这里必然 `!fullOn` ⇒ "全屏时不出现" 是分支结构保证的，不需要额外判据。
+                    // 竖屏不满足 isLandscapeWindow ⇒ 不出现（要点①）。
+                    if (isLandscapeWindow) {
+                        LandscapeFullscreenFab(
+                            onClick = enterFullscreen,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(end = BiliSpacing.md)
+                                // 贴在播放带**下沿**：读布局期的 bandMorphHeightPx（不在组合期
+                                // 读动画值，与文件顶部形变纪律一致）；全屏形变期间随之下移，
+                                // 同时按 morph 进度淡出（此时按钮已无意义，见 SX-05）。
+                                .offset {
+                                    IntOffset(
+                                        0,
+                                        (bandMorphHeightPx() + with(density) { BiliSpacing.sm.toPx() })
+                                            .roundToInt()
+                                    )
+                                }
+                                .graphicsLayer { alpha = 1f - fullscreenMorph.value }
+                        )
+                    }
                 }
             }
         }
@@ -985,6 +1025,58 @@ fun VideoScreen(
                 onStartDownload(request)
             }
         )
+    }
+}
+
+/**
+ * 横屏（非全屏）时，视频画面**下方**的悬浮「全屏」按钮（SX-03）。
+ *
+ * ## 为什么需要它
+ * 横屏播放时，现成的全屏入口在**顶栏**最上方（`VideoPlayerPane` 的顶栏胶囊/控制条
+ * 「全屏」键），单手横握时够不到。用户需求③明确要"视频下方给一个悬浮全屏按钮
+ * （不用去顶栏点）"。
+ *
+ * ## 设计约束（任务书要点逐条）
+ * ① 只在**横屏且非全屏**出现 —— 调用点在本分支内，而该分支由 `when` 结构保证
+ *    `!fullOn`；横屏由调用点的 `isLandscapeWindow` 判；
+ * ② 位置在**画面下方** —— 调用点用播放带底边 `bandMorphHeightPx()` 再下移一个
+ *    `BiliSpacing.sm`，不压画面、也不进底部信息层（本分支底部是详情页）；
+ * ③ 点击走**既有**全屏通路 —— 调用点直接传 `enterFullscreen`（`fullscreenMorph`
+ *    形变 + `isFull`），不另造状态；
+ * ④ 顶栏入口**保留**（本次未动 `VideoPlayerPane` 的任何入口）；
+ * ⑤ 无障碍：图标带 `contentDescription`，点击有 `onClickLabel`，
+ *    `defaultMinSize` 兜住 48dp 触摸目标（`BiliSpacing.xxxl * 1.5f`）；
+ * ⑥ 尺寸全部走 token（`BiliSpacing`），圆角用百分比 pill，**不新增 dp 字面量**
+ *    （DesignTokenLintTest 棘轮）。
+ *
+ * 观感与 SX-02/SX-10 同一套语言：半透明主题面 + 轻投影，**不做模糊**（D-2）。
+ */
+@Composable
+private fun LandscapeFullscreenFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = CircleShape,
+        shadowElevation = BiliSpacing.xs,
+        modifier = modifier
+            .defaultMinSize(minHeight = BiliSpacing.xxxl * 1.5f)
+            .clickable(onClickLabel = "进入全屏", onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = BiliSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Fullscreen,
+                contentDescription = "进入全屏",
+                modifier = Modifier.size(BiliSpacing.xl)
+            )
+            Text(
+                text = "全屏",
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
     }
 }
 
