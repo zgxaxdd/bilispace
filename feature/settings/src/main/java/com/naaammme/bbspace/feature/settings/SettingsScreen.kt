@@ -44,6 +44,7 @@ import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
 import com.naaammme.bbspace.feature.settings.components.SettingCategory
 import com.naaammme.bbspace.feature.settings.navigation.APPEARANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.AUDIO_VIDEO_ROUTE
+import com.naaammme.bbspace.feature.settings.navigation.BLOCKED_UP_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.FEED_SETTINGS_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PRIVACY_ROUTE
@@ -60,6 +61,7 @@ fun SettingsScreen(
     onNavigateToAudioVideo: () -> Unit,
     onNavigateToSponsorBlock: () -> Unit,
     onNavigateToPrivacy: () -> Unit,
+    onNavigateToBlockedUp: () -> Unit,
     onNavigateToErrorLog: () -> Unit,
     onNavigateToSwipeQoe: () -> Unit,
     onNavigateToAbout: () -> Unit,
@@ -76,6 +78,8 @@ fun SettingsScreen(
         AUDIO_VIDEO_ROUTE to onNavigateToAudioVideo,
         SPONSOR_BLOCK_ROUTE to onNavigateToSponsorBlock,
         PRIVACY_ROUTE to onNavigateToPrivacy,
+        // NX-08：搜索索引里有「拉黑名单」，这里必须也能导航——否则搜索结果是死入口
+        BLOCKED_UP_ROUTE to onNavigateToBlockedUp,
         SWIPE_QOE_ROUTE to onNavigateToSwipeQoe,
     )
     val filtered = remember(query) {

@@ -11,6 +11,7 @@ import com.naaammme.bbspace.feature.settings.audioVideo.AudioVideoSettingsScreen
 import com.naaammme.bbspace.feature.settings.errorlog.ErrorLogScreen
 import com.naaammme.bbspace.feature.settings.feed.FeedSettingsScreen
 import com.naaammme.bbspace.feature.settings.performance.PerformanceSettingsScreen
+import com.naaammme.bbspace.feature.settings.privacy.BlockedUpScreen
 import com.naaammme.bbspace.feature.settings.privacy.PrivacySettingsScreen
 import com.naaammme.bbspace.feature.settings.qoe.SwipeDiagnosticsScreen
 import com.naaammme.bbspace.feature.settings.sponsorblock.SponsorBlockSettingsScreen
@@ -19,6 +20,9 @@ const val SETTINGS_ROUTE = "settings"
 const val APPEARANCE_ROUTE = "settings/appearance"
 const val PERFORMANCE_ROUTE = "settings/performance"
 const val PRIVACY_ROUTE = "settings/privacy"
+
+/** NX-08：本地拉黑名单（可见 / 可撤销）。 */
+const val BLOCKED_UP_ROUTE = "settings/blocked_up"
 const val FEED_SETTINGS_ROUTE = "settings/feed"
 const val AUDIO_VIDEO_ROUTE = "settings/audio_video"
 const val SPONSOR_BLOCK_ROUTE = "settings/sponsor_block"
@@ -39,6 +43,7 @@ fun NavGraphBuilder.settingsScreen(
             onNavigateToAudioVideo = { navController.navigate(AUDIO_VIDEO_ROUTE) },
             onNavigateToSponsorBlock = { navController.navigate(SPONSOR_BLOCK_ROUTE) },
             onNavigateToPrivacy = { navController.navigate(PRIVACY_ROUTE) },
+            onNavigateToBlockedUp = { navController.navigate(BLOCKED_UP_ROUTE) },
             onNavigateToErrorLog = { navController.navigate(ERROR_LOG_ROUTE) },
             onNavigateToSwipeQoe = { navController.navigate(SWIPE_QOE_ROUTE) },
             onNavigateToAbout = { navController.navigate(ABOUT_ROUTE) }
@@ -58,7 +63,14 @@ fun NavGraphBuilder.settingsScreen(
     }
 
     composable(PRIVACY_ROUTE) {
-        PrivacySettingsScreen(onBack = { navController.popBackStack() })
+        PrivacySettingsScreen(
+            onBack = { navController.popBackStack() },
+            onNavigateToBlockedUp = { navController.navigate(BLOCKED_UP_ROUTE) }
+        )
+    }
+
+    composable(BLOCKED_UP_ROUTE) {
+        BlockedUpScreen(onBack = { navController.popBackStack() })
     }
 
     composable(FEED_SETTINGS_ROUTE) {

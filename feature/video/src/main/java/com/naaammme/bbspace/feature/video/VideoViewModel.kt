@@ -10,7 +10,7 @@ import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.common.relation.UpBlocker
-import com.naaammme.bbspace.feature.video.blocked.BlockedUpStore
+import com.naaammme.bbspace.core.settings.blocked.BlockedUpStore
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.feed.FeedDislikeRepository
 import com.naaammme.bbspace.core.feed.FeedRepository
@@ -1040,10 +1040,10 @@ class VideoViewModel @Inject constructor(
      * `SpaceRepository.modifyBlacklist`）失败只记日志，不打断用户。
      * `mid <= 0` 的来源（story/relate 无 ownerMid）直接忽略——不做假入口。
      */
-    fun blockSwipeUp(mid: Long) {
+    fun blockSwipeUp(mid: Long, name: String? = null) {
         if (mid <= 0L) return
         viewModelScope.launch {
-            blockedUpStore.add(mid)
+            blockedUpStore.add(mid, name)
             runCatchingCancellable { upBlocker.modifyBlacklist(mid, isBlack = true) }
                 .onSuccess {
                     blockedUpStore.markSynced(mid)

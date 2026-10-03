@@ -406,6 +406,8 @@ internal fun PortraitSwipePager(
     var showMoreSheet by remember { mutableStateOf(false) }
     // PT-06：拉黑二次确认的挂起 mid（非 null = 弹确认框；确认后才对账号实际生效）
     var pendingBlockUpMid by remember { mutableStateOf<Long?>(null) }
+    // NX-08：拉黑当时记下 UP 名，供设置页的名单列表显示（不再逐条回查网络）
+    var pendingBlockUpName by remember { mutableStateOf<String?>(null) }
     val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val swipeDislikeUndoable by viewModel.swipeDislikeUndoable.collectAsStateWithLifecycle()
     val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
@@ -821,6 +823,7 @@ internal fun PortraitSwipePager(
                 canBlockUp = (currentEntry?.ownerMid ?: 0L) > 0L,
                 onBlockUp = {
                     pendingBlockUpMid = currentEntry?.ownerMid?.takeIf { it > 0L }
+                    pendingBlockUpName = currentEntry?.author
                     showMoreSheet = false
                 },
                 onToggleDanmaku = { viewModel.toggleDanmaku() },
@@ -842,22 +845,24 @@ internal fun PortraitSwipePager(
         // PT-06：拉黑**二次确认**（拉黑对账号实际生效，必须显式确认后才调用）
         pendingBlockUpMid?.let { mid ->
             AlertDialog(
-                onDismissRequest = { pendingBlockUpMid = null },
+                onDismissRequest = { pendingBlockUpMid = null; pendingBlockUpName = null },
                 title = { Text("拉黑该 UP 主？") },
                 text = {
                     Text("拉黑后其投稿将不再推荐给你，且该操作会对你的 B 站账号实际生效（可随时在网页端撤销）。")
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        viewModel.blockSwipeUp(mid)
+                        // NX-08：连名字一起记下，设置页的名单才能显示"拉了谁"
+                        viewModel.blockSwipeUp(mid, pendingBlockUpName)
                         Toast.makeText(context, "已拉黑该 UP 主", Toast.LENGTH_SHORT).show()
                         pendingBlockUpMid = null
+                        pendingBlockUpName = null
                     }) {
                         Text("确认拉黑")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { pendingBlockUpMid = null }) {
+                    TextButton(onClick = { pendingBlockUpMid = null; pendingBlockUpName = null }) {
                         Text("取消")
                     }
                 }

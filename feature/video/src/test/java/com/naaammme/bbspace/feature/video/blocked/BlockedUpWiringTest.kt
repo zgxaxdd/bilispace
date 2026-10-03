@@ -93,10 +93,10 @@ class BlockedUpWiringTest {
                 "破坏性验证口径：删掉该守卫 → 本测试必须红",
             code.any { it.contains("mid <= 0L") }
         )
-        val localAt = code.indexOfFirst { it.contains("blockedUpStore.add(mid)") }
+        val localAt = code.indexOfFirst { it.contains("blockedUpStore.add(mid, name)") }
         val grpcAt = code.indexOfFirst { it.contains("upBlocker.modifyBlacklist(") }
         assertTrue(
-            "必须**先写本地名单**（blockedUpStore.add）再发 gRPC（PT-06 要点①：本地先生效）" +
+            "必须**先写本地名单**（blockedUpStore.add(mid, name)）再发 gRPC（PT-06 要点①：本地先生效）" +
                 "local@$localAt grpc@$grpcAt",
             localAt in 0 until grpcAt
         )

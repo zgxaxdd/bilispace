@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -49,6 +50,7 @@ import java.util.Locale
 @Composable
 fun PrivacySettingsScreen(
     onBack: () -> Unit,
+    onNavigateToBlockedUp: () -> Unit = {},
     viewModel: PrivacyViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -100,6 +102,38 @@ fun PrivacySettingsScreen(
                             Text("阻止应用列表风控数据上报", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(checked = blockGaia, onCheckedChange = { viewModel.setBlockGaia(it) })
+                    }
+                }
+            }
+
+            // NX-08：本地拉黑名单（可见 / 可撤销）——PT-06 只建了名单与写入路径，
+            // 查看与撤销入口在本项补齐。间距走 token，不给 dp 棘轮添字面量。
+            item {
+                SectionTitle("拉黑与屏蔽")
+            }
+            item {
+                Card(
+                    onClick = onNavigateToBlockedUp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = BiliSpacing.lg,
+                                vertical = BiliSpacing.md
+                            ),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("拉黑名单", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "查看并撤销在刷视频页拉黑的 UP 主",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

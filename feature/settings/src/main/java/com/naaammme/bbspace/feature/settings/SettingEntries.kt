@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.feature.settings
 
 import com.naaammme.bbspace.feature.settings.navigation.APPEARANCE_ROUTE
+import com.naaammme.bbspace.feature.settings.navigation.BLOCKED_UP_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.FEED_SETTINGS_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.AUDIO_VIDEO_ROUTE
@@ -43,6 +44,8 @@ val feedEntries = listOf(
 
 val privacyEntries = listOf(
     SettingEntry("禁止 Gaia 上报", "阻止应用列表风控数据上报", PRIVACY_ROUTE),
+    // NX-08：拉黑名单（搜索索引；实际入口在隐私页内）
+    SettingEntry("拉黑名单", "查看并撤销在刷视频页拉黑的 UP 主", BLOCKED_UP_ROUTE),
 )
 
 val sponsorBlockEntries = listOf(
