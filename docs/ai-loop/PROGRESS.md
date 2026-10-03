@@ -711,11 +711,16 @@ media3 1.11 的 `CacheKeyFactory` 返回非空 String，"返回 null 即绕过"�
 | `166be8c2` | **SX-01** | **缺陷根因**：页面级门控只看简介列表 `detailListState`，而评论列表/pager 在 `VideoDetailPage` 内部 ⇒ 评论页下滑被判"列表已到顶→接管"。修法：上报"当前是不是简介页"，门控分层 `!detailIntroPageVisible \|\| detailListState.canScrollBackward`（简介页判据逐字未变 ⇒ 原入口零回归）。既有形态守卫 `swipeModeEntryIsIntroEdgePullOnly` 同批更新（W27） |
 | `3c193ee5` | **SX-09** | 点赞两态改为**描边 ↔ 填充 + 颜色**（`Outlined.ThumbUp` ↔ `Rounded.ThumbUp`），与同栏收藏按钮同款语言；核实并钉住"单一真值源 + likeDelta ±1 + 失败提示"。**未改乐观更新**（登记 BACKLOG LK-01）。行号登记表漂移：新增 1 行 import 使 `VideoPlayerPane.kt` 玻璃挂载点 402→403、688→689，按失败消息照抄修表（W44） |
 | `7c2ab9af` | **SX-07** | 评论面板从 `if (showComments)` 瞬变改为 `AnimatedVisibility`：遮罩只淡入淡出、卡片从下方 1/3 屏滑入；时长/曲线全走 `LocalAnimations` token；固定占比高度 ⇒ 无高度动画、不抖邻居 |
+| `2817b5d0` | **SX-05** | 先核实"大部分本来就成立"（系统栏 immersive `VideoScreen.kt:402-414`、`fullOn` 下详情不组合、顶栏/控制条由 `showCtrl` 门控、进全屏 `showCtrl` 初值 false）；真正缺的两条：①超时去裸字面量 → 新增 `PlayerChromePolicy`（`AUTO_HIDE_MS` 与改动前**同值** 2s + 纯判据 `shouldAutoHide`）；②补「**拖动**唤出」控件。新增 `PlayerChromePolicyTest`（5 例纯 JVM） |
+| `3705d18a` | **SX-08** | 现状核实：`VerticalPager` 的 `flingBehavior` **0 命中** ⇒ 框架默认 spring，且**不理会** `reduceMotion`（本仓其它动效全都降级了，唯独 pager 没有）。改为显式 `PagerDefaults.flingBehavior(snapAnimationSpec = tween(animations.long, animations.emphasized))` —— 时长/曲线走 token、reduceMotion 瞬时吸附；**只换吸附**，`beyondViewportPageCount`/越界阻尼/veil 判据未动 |
 
-**本批未做（3 项，理由见执行报告 §2.2）**：**SX-06 阻塞**（"先测量"类，无真机拿不到基线，
-先改再补测会永久丢失归因能力 —— W41）、**SX-05 未做**（大面 UI 重塑，隐藏哪些控件是观感判断、
-验收全在设备侧）、**SX-08 未做**（要点①自己就要求"先确认现在是没有动画还是动画不合适"，
-Compose 默认快照已是弹簧动画，必须先目视定位再动手）。
+**本批未做（1 项，理由见执行报告 §2.2）**：**SX-06 阻塞**（"先测量"类任务，无真机拿不到基线，
+先改再补测会永久丢失归因能力 —— W41）。
+
+> 更正上一轮的判断：SX-05 / SX-08 上一轮被判为"观感/手感类、CI 咬不住"而搁置；本轮重读源码后
+> 发现**各自的实质约束里都有一部分是 CI 能咬住的**（SX-05 的"判据去字面量 + 拖动唤出"、
+> SX-08 的"曲线走 token + reduceMotion 降级"），于是拆出来做掉了；剩下的纯观感/手感部分
+> 仍留在设备侧（L4-116 / L4-119，不写结论）。
 
 **SX-11 结论（只读，不落地）**：上游 16 提交里**没有任何一项是本批 12 项的可直接搬运实现**；
 A 级仅 3 组（评论头像 `crossfade(true)`、评论字阶 bodyMedium、TOP 标签光学居中），
