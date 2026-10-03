@@ -2004,26 +2004,39 @@ private fun VideoPlayerOverlay(
     val audioManager = remember(context) { context.getSystemService(AudioManager::class.java) }
     val act = LocalActivity.current
 
+    // ── 控制件（chrome）显隐：SX-05 ────────────────────────────────────────────
+    // 判据与超时都收进纯策略（`PlayerChromePolicy`，可纯 JVM 单测）；这里只做"事实汇总"。
+    // `chromeGestureActive` 含长按加速徽标（它同样算"手上有动作"）；
+    // `dragGestureActive` 只算**真正的拖动**（亮度/音量/快进）—— 长按加速时弹控制条会更闹。
+    val dragGestureActive = dragMs != null || gestureState.dragType != DragType.None
+    val chromeGestureActive = dragGestureActive || gestureState.showSpeedBadge
     LaunchedEffect(
         showCtrl,
         state.isPlaying,
-        dragMs,
-        gestureState.dragType,
-        gestureState.showSpeedBadge,
+        chromeGestureActive,
         activeDialog,
         showPlaybackSheet
     ) {
         if (
-            showCtrl &&
-            state.isPlaying &&
-            dragMs == null &&
-            gestureState.dragType == DragType.None &&
-            !gestureState.showSpeedBadge &&
-            activeDialog == null &&
-            !showPlaybackSheet
+            PlayerChromePolicy.shouldAutoHide(
+                controlsVisible = showCtrl,
+                isPlaying = state.isPlaying,
+                gestureActive = chromeGestureActive,
+                dialogOpen = activeDialog != null,
+                sheetOpen = showPlaybackSheet
+            )
         ) {
-            delay(2_000)
+            // SX-05 要点①：超时是**具名常量**（`PlayerChromePolicy.AUTO_HIDE_MS`），不是裸字面量。
+            delay(PlayerChromePolicy.AUTO_HIDE_MS)
             onShowCtrlChange(false)
+        }
+    }
+    // SX-05 要点①："任意点击、**拖动**唤出"。点击唤出早已存在（videoGestures 的
+    // onToggleControls）；拖动原本只被自动隐藏排除、并不唤出 —— 横屏全屏里上下拖调亮度时
+    // 控件始终不出现。这里补上；只在控件不可见时才写一次 state（避免每帧续期自动隐藏计时）。
+    LaunchedEffect(dragGestureActive, showCtrl) {
+        if (PlayerChromePolicy.shouldRevealOnGesture(dragGestureActive, showCtrl)) {
+            onShowCtrlChange(true)
         }
     }
 

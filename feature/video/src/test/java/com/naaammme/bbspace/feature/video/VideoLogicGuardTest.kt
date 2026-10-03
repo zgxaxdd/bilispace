@@ -1879,6 +1879,56 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SX-05：横屏全屏的"沉浸"三态（进入即隐藏 / 点击**与拖动**唤出 / 数秒无操作再隐藏），
+     * 且超时**不许是裸字面量**。
+     *
+     * 本轮读源码核实：**大部分本来就成立** ——
+     * ① `fullOn` 时系统栏已走 immersive（`VideoScreen.kt:402-414`：`hide(systemBars())` +
+     *    `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`，退出时 `show(...)` 恢复）；
+     * ② 详情页内容在 `fullOn` 分支根本不组合（`VideoScreen.kt:493` 的 `when` 第一支）；
+     * ③ 顶栏/控制条由 `showCtrl` 门控（pane 的 `AnimatedVisibility(visible = showCtrl)`）；
+     * ④ 进入全屏时 `showCtrl` 初值就是 `false`（换分支 = 换组合，remember 重置）。
+     * 所以本项**真正缺的只有两条**，本题看守它们：
+     * · 超时是裸 `delay(2_000)` ⇒ 收进具名常量；
+     * · **拖动不唤出**控件（点击唤出早有）⇒ 补上。
+     */
+    @Test
+    fun playerChromeImmersivePolicyIsNamedAndRevealsOnDrag() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "SX-05 要点①：自动隐藏的超时必须走具名常量（`PlayerChromePolicy.AUTO_HIDE_MS`），" +
+                "不许再出现裸的 `delay(2_000)`。",
+            countMatching(pane, """delay\(PlayerChromePolicy\.AUTO_HIDE_MS\)""") == 1 &&
+                countMatching(pane, """delay\(2_000\)""") == 0
+        )
+        assertTrue(
+            "SX-05 要点①：显隐判据必须收在纯策略里（可纯 JVM 单测），不再在 effect 里散成一串 &&。",
+            countMatching(pane, """PlayerChromePolicy\.shouldAutoHide\(""") == 1 &&
+                countMatching(pane, """PlayerChromePolicy\.shouldRevealOnGesture\(""") == 1
+        )
+        assertTrue(
+            "SX-05 要点②：弹层在场时必须把控件留着（退出/返回可用性）—— 判据要把 dialog/sheet 传进去。",
+            countMatching(pane, """dialogOpen = activeDialog != null,""") == 1 &&
+                countMatching(pane, """sheetOpen = showPlaybackSheet""") == 1
+        )
+        assertTrue(
+            "SX-05 要点④：竖屏刷视频的常驻信息层不受影响 —— 本项不得动 " +
+                "`PortraitSwipePager` 的 chrome 静置（防烧屏）策略。",
+            countMatching(
+                codeOf("player/PortraitSwipePager.kt"),
+                """SwipeChromeBurnInPolicy\.chromeAlpha\("""
+            ) == 1
+        )
+        assertTrue(
+            "SX-05 要点③：与 SX-03 的悬浮按钮互斥 —— 进全屏时它必须淡出（随 fullscreenMorph 归零）。",
+            countMatching(
+                codeOf("VideoScreen.kt"),
+                """alpha = 1f - fullscreenMorph\.value"""
+            ) >= 2
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
