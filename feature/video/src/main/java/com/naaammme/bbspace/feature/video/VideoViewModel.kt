@@ -935,7 +935,15 @@ class VideoViewModel @Inject constructor(
      *
      * 走 `openVideo(当前目标)` 而不是 `openSwipeTarget(...)`：后者对"同一支视频"会短路
      * （那是**切页**语义，防重复开播），重试要的正是"再开一次"——
-     * `openVideo` 内部会自增 `openId`，等于一次全新的取流尝试。
+     * `openVideo` 内部会自增 `openId`，等于一次全新的会话。
+     *
+     * ⚠️ **PB-01 修正**：只自增 `openId` **并不等于全新的取流** —— 取流入口
+     * （`VideoPlayerRepositoryImpl.fetchPlaybackSource`）是**缓存优先**，而自动重试的退避
+     * 是 1s / 3s、缓存 TTL 是 90s，于是重试必然命中缓存、拿回**同一份失效 URL**
+     * （URL 失效 / 403 / 404 / 签名过期 这类失败结构性地不可能成功）。
+     * 所以这里在 `openVideo` **之前**先失效该视频的播放地址缓存
+     * （[VideoPlayerRepository.invalidatePlayUrl]，按 `aid#` 前缀覆盖所有 flavor，
+     * 用户切了清晰度再重试也生效）。代价是多一次 gRPC 往返 —— 这正是修复的目的。
      */
     /**
      * 重试当前页（veil 里那个"重试"按钮，SW-13）：
@@ -955,6 +963,10 @@ class VideoViewModel @Inject constructor(
     private fun retryCurrentPlaybackInternal(fromAuto: Boolean) {
         val target = _targetStack.value.lastOrNull() ?: return
         android.util.Log.i("PortraitSwipe", "retry: target=$target auto=$fromAuto")
+        // PB-01：**必须先失效缓存再 openVideo**。顺序反了（放在 openVideo 之后）等于没做 ——
+        // 取流已经发生、缓存里的失效 URL 也已经被重新写回，重试照旧拿旧地址。
+        // 手动与自动重试共用本函数，故两条路径都被覆盖。
+        playbackVideoRepository.invalidatePlayUrl(target.toPlayableParams().getResolveParams())
         swipeSession.retry() // PlaybackFailed → Ready（状态机不变式 2）
         playbackController.openVideo(target)
     }

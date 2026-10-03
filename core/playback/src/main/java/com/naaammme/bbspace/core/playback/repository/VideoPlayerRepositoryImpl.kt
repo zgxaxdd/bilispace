@@ -96,6 +96,14 @@ class VideoPlayerRepositoryImpl @Inject constructor(
             request.ids.cid > 0L
     }
 
+    override fun invalidatePlayUrl(request: PlaybackRequest): Int {
+        val removed = playUrlCache.invalidateByPrefix(PlayUrlCache.prefixOf(request))
+        Logger.d(TAG) {
+            "playurl invalidate aid=${request.ids.aid} removed=$removed（重试要拿到新签名 URL）"
+        }
+        return removed
+    }
+
     override fun clearPlayUrlCache() {
         playUrlCache.clear()
     }

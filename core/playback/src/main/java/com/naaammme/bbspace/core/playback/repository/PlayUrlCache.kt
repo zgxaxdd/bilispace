@@ -49,6 +49,25 @@ class PlayUrlCache(
         lru[key] = Entry(source, clock())
     }
 
+    /**
+     * 按键前缀失效（PB-01）：删除所有以 [prefix] 开头的条目，返回删除数。
+     *
+     * 为什么需要它：**重试必须是一次全新的取流**。自动重试的退避是 1s / 3s
+     * （`SwipeErrorPolicy`），必然落在 [TTL_MS]（90s）之内 —— 对"URL 失效 / 403 / 404 /
+     * 签名过期"这类失败，重试若命中缓存就只会拿回**同一份失效 URL**，结构性地不可能成功。
+     *
+     * 为什么用前缀而不是精确键：键里带 `flavor`（HDR/编码/试看/forceHost 的摘要，
+     * 见 [keyOf]），而**用户切了清晰度后重试**也要生效 —— 前缀取 `aid#` 即可覆盖
+     * 同一支视频的所有 flavor。键的其余部分（cid/epId/seasonId）在同一支视频内是固定的。
+     *
+     * 先收集后删除：`lru.keys` 的迭代器不允许在遍历中结构性修改。
+     */
+    fun invalidateByPrefix(prefix: String): Int {
+        val matched = lru.keys.filter { it.startsWith(prefix) }
+        matched.forEach { lru.remove(it) }
+        return matched.size
+    }
+
     fun clear() {
         lru.clear()
     }
@@ -85,6 +104,13 @@ class PlayUrlCache(
                 append(flavor)
             }
         }
+
+        /**
+         * 前缀失效用的键前缀（PB-01）：**单一真值源**。
+         * 与 [keyOf] 的拼接顺序强绑定（`aid` 是第一段），改 [keyOf] 必须同时改这里 ——
+         * 守卫 `PlayUrlCachePrefixMatchesKeyTest` 用 [keyOf] 的产出反推前缀。
+         */
+        fun prefixOf(request: PlaybackRequest): String = "${request.ids.aid}#"
 
         /** 请求内容相关设置的摘要（与 [VideoPlayerRepositoryImpl.buildRequest] 读的那几项一一对应）。 */
         fun flavorOf(
