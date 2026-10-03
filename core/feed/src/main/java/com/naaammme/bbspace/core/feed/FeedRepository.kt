@@ -2,6 +2,9 @@ package com.naaammme.bbspace.core.feed
 
 import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.BiliConstants
+import com.naaammme.bbspace.core.common.BiliWebHeaderTool
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.common.media.httpsImageUrl
 import com.naaammme.bbspace.core.model.DescButton
 import com.naaammme.bbspace.core.model.FeedArgs
@@ -23,14 +26,23 @@ import com.naaammme.bbspace.core.model.VideoSrc
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
 import com.naaammme.bbspace.core.settings.AppSettings
+import com.naaammme.bbspace.core.settings.FeedApiType
+import com.naaammme.bbspace.infra.crypto.WbiSigner
 import com.naaammme.bbspace.infra.network.BiliRestClient
 import com.naaammme.bbspace.infra.network.BiliRestParamBuilder
 import com.naaammme.bbspace.infra.network.BiliRestProfile
+import com.naaammme.bbspace.infra.web.WbiKeyProvider
+import com.naaammme.bbspace.infra.web.WbiKeys
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 data class FeedResult(val items: List<FeedItem>, val toast: FeedToast?, val interestChoose: InterestChoose? = null)
@@ -40,11 +52,17 @@ class FeedRepository @Inject constructor(
     private val restClient: BiliRestClient,
     private val restParamBuilder: BiliRestParamBuilder,
     private val authStore: AuthStore,
-    private val appSettings: AppSettings
+    private val appSettings: AppSettings,
+    private val wbiKeyProvider: WbiKeyProvider
 ) {
 
     companion object {
+        private const val TAG = "FeedRepository"
+
         private const val FEED_ENDPOINT = "/x/v2/feed/index"
+
+        /** WEB 档推荐流端点（WBI 签名，方案 §4.2 / 上游 `HomeFeedAnonymizerPlugin` 同址）。 */
+        private const val WEB_FEED_ENDPOINT = "/x/web-interface/wbi/index/top/feed/rcmd"
 
         /**
          * 单次请求期望的卡片数（服务端参数 `ps`，官方 feed/index 支持，留空默认约 10~12）。
@@ -58,7 +76,39 @@ class FeedRepository @Inject constructor(
     private val _toastFlow = MutableSharedFlow<FeedToast>(extraBufferCapacity = 1)
     val toastFlow: SharedFlow<FeedToast> = _toastFlow
 
+    /**
+     * 既有入口，**签名保持逐字不变**（方案 §4.2），且**恒走 app 协议**。
+     *
+     * ⚠️ 这里偏离了任务书 §4.2 的字面要求（"只在内部按来源分派"）：本入口不只首页在用——
+     * 刷视频的无限接力（`feature/video/.../swipe/SwipeSources.kt`）也调它，并且**依赖
+     * app 协议的 `idx` 回传**翻页。web 协议不下发 `idx`（恒 0），一旦把这条路径也按设置
+     * 切到 WEB，接力会拿着 `idx=0` 反复拉同一页 —— 静默的死循环。
+     * 所以：**跟随设置切换来源的只有首页**（[HomeViewModel] 走下面的游标重载），
+     * 其余调用点维持历史行为（app 协议）。切换来源不影响它们。
+     */
     suspend fun fetchFeed(idx: Long, pull: Boolean, flush: Int): FeedResult {
+        return fetchMobile(idx, pull, flush)
+    }
+
+    /**
+     * 按 **首页推荐来源** 分派（PT-10 §4.2）：
+     * - [FeedApiType.MOBILE] → [fetchMobile]（= 改动前的主体，逐字照搬）；
+     * - [FeedApiType.WEB] → [fetchWebFeed]（WBI 签名；密钥取不到时回退 MOBILE 并记日志）；
+     * - [FeedApiType.MERGED] → [fetchMergedFeed]（双源并行交错合并，单边失败返回存活边）。
+     */
+    suspend fun fetchFeed(cursor: FeedCursor, pull: Boolean, flush: Int): FeedResult {
+        return when (appSettings.feedApiType.first()) {
+            FeedApiType.MOBILE -> fetchMobile(cursor.appIdx, pull, flush)
+            FeedApiType.WEB -> fetchWebFeed(cursor, pull, flush)
+            FeedApiType.MERGED -> fetchMergedFeed(cursor, pull, flush)
+        }
+    }
+
+    /**
+     * MOBILE 档取流 = 改动前的 `fetchFeed` 主体**逐字照搬**（PT-10 最重要的安全措施）：
+     * URL 拼接、签名方式、参数集、解析路径一行未动 —— 默认路径零回归的红线（V2/V3）。
+     */
+    private suspend fun fetchMobile(idx: Long, pull: Boolean, flush: Int): FeedResult {
         val hdFeed = appSettings.hdFeed.first()
         val profile = if (hdFeed) BiliRestProfile.HD else BiliRestProfile.APP
         val json = restClient.getSigned(
@@ -68,6 +118,89 @@ class FeedRepository @Inject constructor(
         )
         return parseResponse(json, hdFeed)
     }
+
+    /**
+     * WEB 档取流（WBI 签名）。**WBI 密钥取不到时回退 MOBILE 一次并记日志**——
+     * 不静默降级（方案 §4.7 与 §6 V8：密钥失败必须留下痕迹）。
+     */
+    private suspend fun fetchWebFeed(cursor: FeedCursor, pull: Boolean, flush: Int): FeedResult {
+        val keys = try {
+            wbiKeyProvider.getKeys()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.w(TAG) {
+                "WEB 档无法获取 WBI 密钥（${e.message}），本次回退 MOBILE 取流"
+            }
+            return fetchMobile(cursor.appIdx, pull, flush)
+        }
+        val json = requestWebFeed(keys, cursor.webPage, pull)
+        return withContext(Dispatchers.Default) {
+            FeedResult(items = WebFeedMapper.mapResponse(json), toast = null)
+        }
+    }
+
+    /**
+     * WEB 档单次请求。参数口径见方案 §4.4：
+     * `fresh_idx` / `y_num` = web 页序号，`feed_version` = 当前时间戳（上游做法），
+     * `fresh_type`：首屏/翻页 = 3、下拉刷新 = 4。
+     */
+    private suspend fun requestWebFeed(keys: WbiKeys, page: Int, pull: Boolean): JSONObject {
+        val params = mapOf(
+            "ps" to FEED_PAGE_SIZE.toString(),
+            "fresh_type" to if (pull) "4" else "3",
+            "fresh_idx" to page.toString(),
+            "fresh_idx_1h" to page.toString(),
+            "feed_version" to System.currentTimeMillis().toString(),
+            "y_num" to page.toString()
+        )
+        val signed = WbiSigner.sign(params = params, imgKey = keys.imgKey, subKey = keys.subKey)
+        return restClient.getWeb(
+            url = "${BiliConstants.BASE_URL_API}$WEB_FEED_ENDPOINT",
+            query = signed,
+            headers = webHeaders()
+        )
+    }
+
+    /**
+     * WEB 档请求头：带 Cookie（有登录态则个性化，无 Cookie 也能匿名取流 —— 方案 §4.2）。
+     * 第一版**不剥 Cookie**（上游 `HomeFeedAnonymizerPlugin` 是反回流方向，与本方案目标相反）。
+     */
+    private fun webHeaders(): Map<String, String> {
+        return BiliWebHeaderTool.build(
+            cookieHeader = authStore.cookieHeader(),
+            referer = "${BiliConstants.BASE_URL_WEB}/"
+        ).filterValues { it.isNotBlank() }
+    }
+
+    /**
+     * MERGED 档：双源并行取流后按 [FeedMergePolicy] 交错合并去重。
+     * 单边失败返回存活边；两边都失败才抛错（方案 §4.5）。
+     */
+    private suspend fun fetchMergedFeed(cursor: FeedCursor, pull: Boolean, flush: Int): FeedResult =
+        coroutineScope {
+            val webDeferred = async { runCatchingCancellable { fetchWebFeed(cursor, pull, flush) } }
+            val mobileDeferred = async { runCatchingCancellable { fetchMobile(cursor.appIdx, pull, flush) } }
+            val webResult = webDeferred.await()
+            val mobileResult = mobileDeferred.await()
+            val webItems = webResult.getOrNull()?.items.orEmpty()
+            val mobileItems = mobileResult.getOrNull()?.items.orEmpty()
+            if (webItems.isEmpty() && mobileItems.isEmpty()) {
+                val error = webResult.exceptionOrNull() ?: mobileResult.exceptionOrNull()
+                Logger.w(TAG) { "MERGED 档两侧都为空/都失败：${error?.message}" }
+                throw (error as? Exception) ?: IllegalStateException("合并推荐流两侧都没有可用内容")
+            }
+            Logger.d(TAG) { "MERGED 档：web=${webItems.size} mobile=${mobileItems.size}" }
+            FeedResult(
+                items = withContext(Dispatchers.Default) {
+                    FeedMergePolicy.mergeFeeds(web = webItems, app = mobileItems)
+                },
+                // toast 只由 app 协议下发；两侧都有时取 app 侧
+                toast = mobileResult.getOrNull()?.toast ?: webResult.getOrNull()?.toast,
+                // 兴趣选择器同样只由 app 协议下发（MERGED 含 app 半边 → 不丢这个功能）
+                interestChoose = mobileResult.getOrNull()?.interestChoose
+            )
+        }
 
     suspend fun fetchFeedWithInterest(
         idx: Long,

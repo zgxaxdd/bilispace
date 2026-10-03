@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.auth.AuthRepository
 import com.naaammme.bbspace.core.settings.AppSettings
+import com.naaammme.bbspace.core.settings.FeedApiType
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.theme.AnimationSpeed
 import com.naaammme.bbspace.core.designsystem.theme.CornerStyle
@@ -42,6 +43,17 @@ class SettingsViewModel @Inject constructor(
 
     fun updateHomeFeedSingleColumn(enabled: Boolean) {
         viewModelScope.launch { appSettings.setHomeFeedSingleColumn(enabled) }
+    }
+
+    // ===== 推荐来源（PT-10） =====
+    val feedApiType = appSettings.feedApiType.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        FeedApiType.MOBILE
+    )
+
+    fun updateFeedApiType(type: FeedApiType) {
+        viewModelScope.launch { appSettings.updateFeedApiType(type) }
     }
 
     // ===== 空降助手 =====
