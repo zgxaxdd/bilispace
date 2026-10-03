@@ -1383,15 +1383,12 @@ private fun SwipeRailAction(
         }
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // SX-02：视觉缩小（暗盘 52→≈46dp、图标 40→≈35dp，统一 SwipeRailScale），
+        // 但**热区不缩** —— 外层 Box 兜住 48dp 无障碍下限，内层才是缩小后的暗盘。
+        // 缩的是观感，不是可点区域（要点②：视觉缩小时热区用透明留白补回）。
         Box(
             modifier = Modifier
-                .size(SwipeRailDiscSize)
-                .clip(CircleShape)
-                // 现代化观感（2026-10-02，用户 "ui 不好看，要现代审美"）：图标底改成
-                // **纯色暗盘**（16% 黑，对标 BiliPai 竖屏栏 `iconBackingAlpha = 0.16f`）——
-                // 原来的"玻璃渐变 + 白描边"读起来沉、像上一代的拟物玻璃。
-                // 顺带更省：没有渐变/描边/模糊，只有一次纯色绘制。
-                .background(SwipeRailBackingColor)
+                .size(SwipeRailTouchTarget)
                 .combinedClickable(
                     onClickLabel = contentDescription,
                     onLongClickLabel = if (onLongClick != null) onLongClickLabel else null,
@@ -1400,17 +1397,29 @@ private fun SwipeRailAction(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = tint,
+            Box(
                 modifier = Modifier
-                    .size(SwipeRailIconSize)
-                    .graphicsLayer {
-                        scaleX = pop.value
-                        scaleY = pop.value
-                    }
-            )
+                    .size(SwipeRailDiscSize)
+                    .clip(CircleShape)
+                    // 现代化观感（2026-10-02，用户 "ui 不好看，要现代审美"）：图标底改成
+                    // **纯色暗盘**（16% 黑，对标 BiliPai 竖屏栏 `iconBackingAlpha = 0.16f`）——
+                    // 原来的"玻璃渐变 + 白描边"读起来沉、像上一代的拟物玻璃。
+                    // 顺带更省：没有渐变/描边/模糊，只有一次纯色绘制。
+                    .background(SwipeRailBackingColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = tint,
+                    modifier = Modifier
+                        .size(SwipeRailIconSize)
+                        .graphicsLayer {
+                            scaleX = pop.value
+                            scaleY = pop.value
+                        }
+                )
+            }
         }
         label?.let { count ->
             Spacer(modifier = Modifier.height(BiliSpacing.xs))
@@ -1469,14 +1478,10 @@ private fun SwipeRailAvatar(
     ownerName: String?,
     onClick: (() -> Unit)?,
 ) {
+    // SX-02：与动作圆盘同一套缩放与热区口径（缩观感、不缩可点区域）。
     Box(
         modifier = Modifier
-            .size(SwipeRailDiscSize)
-            .clip(CircleShape)
-            // 头像底也是纯色暗盘（16% 黑）：没有任何白描边/玻璃渐变——
-            // 现代短视频的头像就是"图片 + 极细白环"，多余的装饰会被读成旧式。
-            .background(SwipeRailBackingColor)
-            .border(PlayerPlayButtonBorderWidth, SwipeRailAvatarRingColor, CircleShape)
+            .size(SwipeRailTouchTarget)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(onClickLabel = "打开 UP 主主页", onClick = onClick)
@@ -1486,27 +1491,61 @@ private fun SwipeRailAvatar(
             ),
         contentAlignment = Alignment.Center
     ) {
-        AvatarImage(
-            url = faceUrl,
-            contentDescription = ownerName?.let { "@$it" } ?: "UP 主",
-            modifier = Modifier.fillMaxSize(),
-            // 头像缺失/加载失败时用**首字**兜底（真机实测：部分视频详情不带 owner.face，
-            // 直接渲染图片组件会只剩一个空环）。取首个 **code point** 而不是 take(1)：
-            // UP 名以 emoji 开头时，take(1) 会截出半个代理对。
-            fallbackText = ownerName
-                ?.trim()
-                ?.takeIf(String::isNotEmpty)
-                ?.let { String(Character.toChars(it.codePointAt(0))) },
-            fallbackContainerColor = SwipeRailAvatarFallbackColor
-        )
+        Box(
+            modifier = Modifier
+                .size(SwipeRailDiscSize)
+                .clip(CircleShape)
+                // 头像底也是纯色暗盘（16% 黑）：没有任何白描边/玻璃渐变——
+                // 现代短视频的头像就是"图片 + 极细白环"，多余的装饰会被读成旧式。
+                .background(SwipeRailBackingColor)
+                .border(PlayerPlayButtonBorderWidth, SwipeRailAvatarRingColor, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            AvatarImage(
+                url = faceUrl,
+                contentDescription = ownerName?.let { "@$it" } ?: "UP 主",
+                modifier = Modifier.fillMaxSize(),
+                // 头像缺失/加载失败时用**首字**兜底（真机实测：部分视频详情不带 owner.face，
+                // 直接渲染图片组件会只剩一个空环）。取首个 **code point** 而不是 take(1)：
+                // UP 名以 emoji 开头时，take(1) 会截出半个代理对。
+                fallbackText = ownerName
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+                    ?.let { String(Character.toChars(it.codePointAt(0))) },
+                fallbackContainerColor = SwipeRailAvatarFallbackColor
+            )
+        }
     }
 }
 
-/** 互动栏图标视觉尺寸：40dp（对标 BiliPai 竖屏栏 iconSizeDp=40，token 的 1.667 倍档）。 */
-private val SwipeRailIconSize = BiliSpacing.xxl * 1.6667f
+/**
+ * 刷视频互动栏的**统一缩放比例**（SX-02 / 用户需求②「侧边 UI 控件变小，少挡画面」）。
+ *
+ * 为什么是一个比例而不是逐个改数：侧栏有 头像 + 4~5 颗动作圆盘 + 若干计数文案，
+ * 逐个调必然彼此不成比例（任务书要点④："**先定一套比例再动手**，避免两处各自缩"）。
+ * 这里只压**横向占位与图标视觉尺寸**，比例取 0.88（≈12% 小一档，肉眼可辨但不"缩水"）。
+ *
+ * ⚠️ 与 SX-10 的评论卡片同属一套视觉语言：两处的"缩小/透明"都朝同一个方向
+ * （画面露出更多），所以比例定死在这里、评论侧只动透明度，不再各自调尺寸。
+ */
+private const val SwipeRailScale = 0.88f
 
-/** 互动栏暗盘直径：52dp（对标 BiliPai iconBackingSizeDp=52，token 的 1.625 倍档）。 */
-private val SwipeRailDiscSize = BiliSpacing.xxxl * 1.625f
+/**
+ * 互动栏图标视觉尺寸：40dp × 0.88 ≈ 35dp
+ * （原 40dp 对标 BiliPai 竖屏栏 iconSizeDp=40，token 的 1.667 倍档）。
+ */
+private val SwipeRailIconSize = BiliSpacing.xxl * 1.6667f * SwipeRailScale
+
+/** 互动栏暗盘直径：52dp × 0.88 ≈ 46dp（原 52dp 对标 BiliPai iconBackingSizeDp=52）。 */
+private val SwipeRailDiscSize = BiliSpacing.xxxl * 1.625f * SwipeRailScale
+
+/**
+ * 互动栏的**触摸目标下限**（SX-02 要点②）：48dp = `BiliSpacing.xxxl * 1.5f`。
+ *
+ * 视觉缩小后暗盘只有 ≈46dp，**低于无障碍 48dp 下限** —— 所以外层用一个 48dp 的
+ * 透明 Box 兜住热区，可点区域**不随观感缩小**（也不新增 dp 字面量，仍从 token 派生）。
+ */
+private val SwipeRailTouchTarget = BiliSpacing.xxxl * 1.5f
 
 /**
  * 图标暗盘底色：16% 纯黑（对标 BiliPai 竖屏栏 `iconBackingAlpha=0.16f`）。

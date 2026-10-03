@@ -1535,10 +1535,12 @@ class VideoLogicGuardTest {
         }
         assertTrue(
             "互动栏视觉走**现代短视频参数**（2026-10-02，对标 BiliPai 竖屏栏 policy）：\n" +
-                "暗盘 52dp（token 1.625 倍档，BiliPai iconBackingSizeDp）、图标 40dp" +
-                "（token 1.667 倍档，BiliPai iconSizeDp）、16% 纯黑底、计数带文字阴影；" +
+                "暗盘、图标尺寸全部从 token 派生、16% 纯黑底、计数带文字阴影；" +
                 "互动栏不再有白描边/玻璃渐变（`.border(` / `Brush` 都不得出现在动作体内——" +
-                "中央播放键的描边是另一回事，不在本条断言范围）；尺寸全部走 token。" +
+                "中央播放键的描边是另一回事，不在本条断言范围）。\n" +
+                "**SX-02 更新**：尺寸表达式多了统一缩放因子 `SwipeRailScale`（0.88）——" +
+                "用户需求②「侧边 UI 控件变小，少挡画面」；断言仍只要求「尺寸走 token 派生」这个" +
+                "形态，不钉具体数值（具体比例与 48dp 热区由 swipeRailShrinksWithoutShrinkingTouchTarget 守）。" +
                 "计数缺失时显示动作名（BiliPai 的 countText fallback）。",
             countMatching(pane, """SwipeRailDiscSize""") >= 2 &&
                 countMatching(pane, """SwipeRailIconSize""") >= 2 &&
@@ -1553,6 +1555,34 @@ class VideoLogicGuardTest {
                 countMatching(pane, """label = stickyLike \?: "点赞"""") == 1 &&
                 countMatching(pane, """label = stickyReply \?: "评论"""") == 1 &&
                 countMatching(pane, """label = stickyFav \?: "收藏"""") == 1
+        )
+    }
+
+    /**
+     * SX-02：侧边互动栏整体缩小，**但触摸目标不得小于 48dp**。
+     *
+     * 用户需求②「刷视频的侧边 UI 控件变小，少挡画面」。两条实质约束：
+     * ① 缩小必须走**一套统一比例**（要点④：先定比例再动手，避免各处各自缩）；
+     * ② 缩的是**观感**，不是**可点区域** —— 视觉尺寸缩到 ≈46dp 后已低于无障碍
+     *    48dp 下限，必须用透明留白把热区补回来（要点②）。
+     * 锚在标识符的使用形态上（W18/W20/W21），并把"不许新增 dp 字面量"交给
+     * DesignTokenLintTest 的棘轮兜底。
+     */
+    @Test
+    fun swipeRailShrinksWithoutShrinkingTouchTarget() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "SX-02：互动栏缩小必须走**统一比例** SwipeRailScale，且尺寸仍由 token 派生" +
+                "（`BiliSpacing.xxl * 1.6667f * SwipeRailScale` / `BiliSpacing.xxxl * 1.625f * SwipeRailScale`）。",
+            countMatching(pane, """private const val SwipeRailScale = """) == 1 &&
+                countMatching(pane, """BiliSpacing\.xxl \* 1\.6667f \* SwipeRailScale""") == 1 &&
+                countMatching(pane, """BiliSpacing\.xxxl \* 1\.625f \* SwipeRailScale""") == 1
+        )
+        assertTrue(
+            "SX-02 要点②：视觉缩小后**触摸目标不得小于 48dp** —— 动作圆盘与头像都要用 " +
+                "SwipeRailTouchTarget（= BiliSpacing.xxxl * 1.5f = 48dp）兜住热区。",
+            countMatching(pane, """private val SwipeRailTouchTarget = BiliSpacing\.xxxl \* 1\.5f""") == 1 &&
+                countMatching(pane, """size\(SwipeRailTouchTarget\)""") >= 2
         )
     }
 
