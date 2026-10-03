@@ -63,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -129,7 +130,19 @@ internal fun VideoDetailPage(
     onOpenSpace: (SpaceRoute) -> Unit,
     onDownloadClick: () -> Unit,
     onOpenEpisode: (VideoTarget) -> Unit,
-    onSwitchPage: (Long) -> Unit
+    onSwitchPage: (Long) -> Unit,
+    /**
+     * SX-01：把"当前显示的是不是**简介页**（pager 第 0 页）"上报给 VideoScreen，
+     * 供页面级下滑手势（`pullDownToFullscreen`）做**分层仲裁**。
+     *
+     * 为什么必须由本组件上报：`pagerState` / `commentListState` / `commentThreadListState`
+     * 都创建在**本组件内部**（[pagerState] 在 `rememberPagerState`），VideoScreen 只知道
+     * 简介列表的 [detailListState] —— 上一版的手势门控因此**在评论页上也会去看简介列表的
+     * 滚动位置**，于是"评论里下滑"会被判成"想进刷视频"（用户缺陷①）。
+     * `isIntroVisible` 只关心"哪一页"，不关心评论列表滚到哪 —— 这是有意的：
+     * 任务书要点③要求"评论列表到顶继续上滑 = 关闭面板/不动，**不是**进刷视频"。
+     */
+    onIntroPageVisibleChange: (Boolean) -> Unit = {}
 ) {
     val aidKey = ids.aid.takeIf { it > 0L }
     val curCid = ids.cid.takeIf { it > 0L }
@@ -179,6 +192,14 @@ internal fun VideoDetailPage(
 
     LaunchedEffect(aidKey) {
         pagerState.scrollToPage(0)
+    }
+
+    // SX-01：页面级下拉手势只在「简介页」武装 —— 把当前页上报给 VideoScreen。
+    // 用 snapshotFlow 而不是"在组合期直接写 state"：组合期写外部 state 会触发重组循环；
+    // 这里只在页面真正改变时推一次。
+    LaunchedEffect(pagerState, onIntroPageVisibleChange) {
+        snapshotFlow { pagerState.currentPage }
+            .collect { page -> onIntroPageVisibleChange(page == 0) }
     }
 
     fun closeSheet(afterClose: (() -> Unit)? = null) {

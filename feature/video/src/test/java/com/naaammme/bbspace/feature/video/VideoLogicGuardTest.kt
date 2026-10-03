@@ -777,11 +777,15 @@ class VideoLogicGuardTest {
         assertTrue(
             "手势边界（A7/A8）：让位判据 canListScrollDown 必须还在（简介能滚就不接管）；" +
                 "播放器面板不得挂这个手势；会话内 pager 仍以 swipePagingActive = true " +
-                "组合播放器（播放器手势语义不变）。",
-            countMatching(
-                screen,
-                """canListScrollDown\s*=\s*\{ detailListState\.canScrollBackward \}"""
-            ) == 1 &&
+                "组合播放器（播放器手势语义不变）。\n" +
+                "**SX-01 更新（W27）**：判据由 `{ detailListState.canScrollBackward }` 变成" +
+                "**分层**形态 `{ !detailIntroPageVisible || detailListState.canScrollBackward }`" +
+                "（评论页一律让位，缺陷①）。所以这里改为断言两件事：①门控调用点仍在、只有一处；" +
+                "②简介页判据 `detailListState.canScrollBackward` 仍在且**只有一处**" +
+                "（零回归；多一处就是没分层的旧门控又回来了）。分层语义由 " +
+                "`commentPageNeverArmsThePageLevelPullDownGesture` 单独咬住。",
+            countMatching(screen, """canListScrollDown\s*=\s*\{""") == 1 &&
+                countMatching(screen, """detailListState\.canScrollBackward""") == 1 &&
                 countMatching(pane, """pullDownToFullscreen""") == 0 &&
                 countMatching(codeOf("player/PortraitSwipePager.kt"), """swipePagingActive = true""") == 1
         )
@@ -1727,6 +1731,54 @@ class VideoLogicGuardTest {
                 "且不得出现 dp 字面量尺寸。",
             countMatching(screen, """contentDescription = "进入全屏"""") == 1 &&
                 countMatching(screen, """defaultMinSize\(minHeight = BiliSpacing\.xxxl \* 1\.5f\)""") == 1
+        )
+    }
+
+    /**
+     * SX-01：评论页（含楼中楼）**不得**参与页面级下滑手势（用户缺陷①：
+     * "评论区里下滑后再上滑，被判定为想进刷视频模式"）。
+     *
+     * ## 缺陷根因（本轮读源码定位，W4）
+     * 页面级手势是 [VideoScreen] 的 `pullDownToFullscreen`，它的门控参数原本是
+     * `{ detailListState.canScrollBackward }` —— 而 `detailListState` 是**简介列表**的状态。
+     * 评论列表（`commentListState`）与详情页 pager（`pagerState`）都创建在
+     * [VideoDetailPage] **内部**，VideoScreen 拿不到。于是在评论页上，门控看的是
+     * **简介列表**滚到哪：只要简介列表停在顶部，评论页里的下滑就会被判成
+     * "列表已到顶 → 接管" ⇒ 进刷视频。这与用户描述完全一致。
+     *
+     * ## 修法（分层仲裁，零回归）
+     * 由 [VideoDetailPage] 把"当前是不是简介页"上报上来，门控改成
+     * `!introVisible || detailListState.canScrollBackward`：
+     * 评论页上一律返回 true = 全部让给列表 ⇒ 评论里任何滚动/边界情形都不进刷视频
+     * （要点②③）；简介页上的判据**逐字未变** ⇒ 原入口零回归（验收②）。
+     *
+     * 断言锚在**调用/表达式形态**上（W18/W20/W21）。
+     */
+    @Test
+    fun commentPageNeverArmsThePageLevelPullDownGesture() {
+        val screen = codeOf("VideoScreen.kt")
+        val detail = codeOf("detail${java.io.File.separator}VideoDetailPage.kt")
+        assertTrue(
+            "手势门控必须**分层**：`!detailIntroPageVisible || detailListState.canScrollBackward`；" +
+                "缺了前半段，评论页就会退回「看简介列表滚到哪」的老缺陷。",
+            countMatching(screen, """!detailIntroPageVisible \|\| detailListState\.canScrollBackward""") == 1
+        )
+        assertTrue(
+            "零回归（验收②）：简介页的判据必须仍然是 `detailListState.canScrollBackward`，" +
+                "且**只允许出现这一处** —— 多出来的第二处就是没分层的旧门控又回来了。",
+            countMatching(screen, """detailListState\.canScrollBackward""") == 1
+        )
+        assertTrue(
+            "页面级手势本身必须还在（本次只改门控，不删手势）。",
+            countMatching(screen, """private fun Modifier\.pullDownToFullscreen\(""") == 1
+        )
+        assertTrue(
+            "「当前是不是简介页」必须由 VideoDetailPage 依据 `pagerState.currentPage` 上报" +
+                "（pager 与评论列表都在它内部，VideoScreen 猜不出来）。",
+            countMatching(detail, """onIntroPageVisibleChange\(page == 0\)""") == 1 &&
+                countMatching(detail, """snapshotFlow \{ pagerState\.currentPage \}""") == 1 &&
+                countMatching(screen, """var detailIntroPageVisible by remember \{ mutableStateOf\(true\) \}""") == 1 &&
+                countMatching(screen, """onIntroPageVisibleChange = \{ detailIntroPageVisible = it \}""") >= 1
         )
     }
 

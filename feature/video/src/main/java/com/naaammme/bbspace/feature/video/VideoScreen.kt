@@ -289,6 +289,10 @@ fun VideoScreen(
     // 向下拖才接管为进全屏形变。原状态在 VideoDetailPage 内按 aidKey 创建，
     // 提升后键语义不变（切视频仍重置），且平板/竖排两个分支共用同一份。
     val detailListState = remember(videoState.ids.aid.takeIf { it > 0L }) { LazyListState() }
+    // SX-01：详情页当前显示的是不是「简介」页（pager 第 0 页）。由 [VideoDetailPage] 上报 ——
+    // pager 与评论列表都创建在它内部，本层拿不到（见该参数 KDoc）。
+    // 默认 true：未上报前按"简介页"处理 = 与改动前行为一致（零回归）。
+    var detailIntroPageVisible by remember { mutableStateOf(true) }
     // 退出全屏时读最新宽度分级：平板/横屏全屏没有紧凑形变链，直接回零
     // （等价于原来的瞬时切换），否则竖向 compact 分支重挂后播放回缩动画。
     val isExpandedWidthState = rememberUpdatedState(isExpandedWidth)
@@ -819,7 +823,16 @@ fun VideoScreen(
                                 statusTopPx + lerp(baseVideoPx, targetVideoPx, aspectMorph.value)
                             },
                             windowBottomPx = maxHeightPx,
-                            canListScrollDown = { detailListState.canScrollBackward },
+                            // ── SX-01 要点②③：页面级下滑手势**只在简介页武装** ──────────
+                            // 这个 lambda 的返回值语义是"让列表自己接管吗"：
+                            // · 简介页：与改动前**逐字一致**（`detailListState.canScrollBackward`）
+                            //   ⇒ 原入口「简介区下滑进刷视频」零回归（验收②）；
+                            // · 评论页（含楼中楼）：一律返回 true = 全部让给列表 ⇒ 在评论里
+                            //   上下滚动**任何边界情形**都不会被判定为"想进刷视频"（缺陷①）。
+                            //   评论列表到顶继续下滑 = 列表自己的 overscroll，不是进刷视频（要点③）。
+                            canListScrollDown = {
+                                !detailIntroPageVisible || detailListState.canScrollBackward
+                            },
                             onSettle = { commit ->
                                 scope.launch {
                                     if (commit) {
@@ -903,7 +916,9 @@ fun VideoScreen(
                             onOpenSpace = onOpenSpace,
                             onDownloadClick = downloadClick,
                             onOpenEpisode = switchEpisode,
-                            onSwitchPage = switchPage
+                            onSwitchPage = switchPage,
+                            // SX-01：把"当前是不是简介页"接进上面的手势门控。
+                            onIntroPageVisibleChange = { detailIntroPageVisible = it }
                         )
                     }
                     // 播放带：黑底 + 底部圆角，高度随形变插值；底边压一道高光描边
