@@ -1,15 +1,19 @@
 package com.naaammme.bbspace.infra.player
 
 import android.content.Context
+import android.net.Uri
 import androidx.annotation.WorkerThread
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import com.naaammme.bbspace.core.common.cache.PlaybackCacheControl
+import com.naaammme.bbspace.core.common.cache.PlaybackHeadPrewarmer
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -19,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 
 /**
  * 播放媒体**字节缓存**（PB-03，语义移植自上游 BiliPai `core/player/PlaybackMediaCache.kt`）。
@@ -43,8 +48,10 @@ import kotlinx.coroutines.withContext
 @UnstableApi
 @Singleton
 class PlaybackMediaCache @Inject constructor(
-    @ApplicationContext private val context: Context
-) : PlaybackCacheControl {
+    @ApplicationContext private val context: Context,
+    /** PB-04：预热要用与播放同一条上行链（同一个 OkHttp 客户端）。 */
+    private val okHttpClient: OkHttpClient
+) : PlaybackCacheControl, PlaybackHeadPrewarmer {
 
     @Volatile
     private var cache: SimpleCache? = null
@@ -132,9 +139,57 @@ class PlaybackMediaCache @Inject constructor(
         }
     }
 
+    // ===== PB-04：起播头部预热 =====
+
+    /**
+     * 把视频/音频的头部若干字节先读进缓存（"真正开播前"少等一段网络）。
+     *
+     * 实现方式是**通过缓存链做一次有界读取**（读多少 = 预热多少，读完即弃）——
+     * 缓存本身就在读路径上写入，所以不需要额外的 CacheWriter：
+     * 用 `CacheWriter` 也行，但它的契约（要求上游是 CacheDataSource 实例）在没有真机的情况下
+     * 无法验证，而有界读取只用 DataSource 的标准 API，行为可预期。
+     *
+     * 失败一律吞掉（尽力而为）；蜂窝下 [PlaybackHeadPrewarmPolicy] 直接返回空目标表，不下载。
+     */
+    override suspend fun prewarm(videoUrl: String?, audioUrl: String?, isUnmetered: Boolean) =
+        withContext(Dispatchers.IO) {
+            val targets = PlaybackHeadPrewarmPolicy.targets(videoUrl, audioUrl, isUnmetered)
+            if (targets.isEmpty()) return@withContext
+            targets.forEach { target ->
+                runCatchingCancellable { readHeadIntoCache(target) }
+                    .onFailure { Logger.d(TAG) { "prewarm failed url=${target.url.take(64)} msg=${it.message}" } }
+            }
+            Logger.d(TAG) { "prewarm done targets=${targets.size} unmetered=$isUnmetered" }
+        }
+
+    /** 有界读取：读满 [PlaybackHeadPrewarmPolicy.PrewarmTarget.lengthBytes] 或流结束即停。 */
+    private suspend fun readHeadIntoCache(target: PlaybackHeadPrewarmPolicy.PrewarmTarget) {
+        val cacheFactory = CacheDataSource.Factory()
+            .setCache(awaitCache())
+            .setUpstreamDataSourceFactory(OkHttpDataSource.Factory(okHttpClient))
+            .setCacheKeyFactory(PlaybackCacheKeyFactory())
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val dataSource = cacheFactory.createDataSource()
+        try {
+            val spec = DataSpec(Uri.parse(target.url), 0L, target.lengthBytes)
+            dataSource.open(spec)
+            val buffer = ByteArray(READ_BUFFER_BYTES)
+            var read = 0L
+            while (read < target.lengthBytes) {
+                val n = dataSource.read(buffer, 0, buffer.size)
+                if (n < 0) break
+                read += n
+            }
+        } finally {
+            runCatching { dataSource.close() }
+        }
+    }
+
     private companion object {
         const val TAG = "PlaybackMediaCache"
 
+        /** 预热读取缓冲（64KiB：一次读满一个常见分片头）。 */
+        const val READ_BUFFER_BYTES = 64 * 1024
         /** 与上游同量级：128MiB（上游注释记录 512MB 曾涨到 500MB+ 被下调）。 */
         const val MAX_BYTES = 128L * 1024L * 1024L
 

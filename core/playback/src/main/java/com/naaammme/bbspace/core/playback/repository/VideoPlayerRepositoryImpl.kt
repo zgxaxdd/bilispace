@@ -12,7 +12,10 @@ import com.bapis.bilibili.playershared.Stream
 import com.bapis.bilibili.playershared.StreamInfo
 import com.bapis.bilibili.playershared.VideoVod
 import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.cache.PlaybackHeadPrewarmer
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.playback.VideoPlayerRepository
 import com.naaammme.bbspace.core.model.PlaybackAudio
@@ -36,7 +39,11 @@ class VideoPlayerRepositoryImpl @Inject constructor(
     private val grpcClient: BiliGrpcClient,
     private val appSettings: AppSettings,
     private val authProvider: AuthProvider,
-    private val webPlaybackResolver: VideoWebPlaybackResolver
+    private val webPlaybackResolver: VideoWebPlaybackResolver,
+    /** PB-04：头部字节预热（接口在 core:common，实现在 infra:player）。 */
+    private val headPrewarmer: PlaybackHeadPrewarmer,
+    /** PB-04 的门控输入：只有非计量网络才预热。 */
+    private val networkTypeProvider: NetworkTypeProvider
 ) : VideoPlayerRepository {
 
     /** 播放地址进程内 LRU：正常开播与相邻页预取共用（见 [PlayUrlCache] 的 KDoc）。 */
@@ -71,15 +78,38 @@ class VideoPlayerRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 相邻页预取：与正常开播**共用同一份 LRU**（同键同 TTL），命中即直接可播。
+     * 相邻页预取：与正常开播**共用同一份 LRU**（同键同 TTL），命中即直接播。
      * 失败一律吞掉（预取是尽力而为，绝不冒泡成播放错误）。
+     *
+     * PB-04：取流成功后就地**预热头部字节**（PB-03 的字节缓存）——接口返回类型不变，
+     * 预热失败也只吞掉。门控（仅 Wi-Fi）在 [PlaybackHeadPrewarmer] 实现内部，
+     * 这里只把网络类型传进去。
      */
     override suspend fun preloadPlayUrl(request: PlaybackRequest): Boolean {
         if (request.ids.aid <= 0L || request.ids.cid <= 0L) return false
         return runCatching { fetchPlaybackSource(request) }
+            .onSuccess { source ->
+                runCatchingCancellable {
+                    headPrewarmer.prewarm(
+                        videoUrl = source.prewarmVideoUrl(),
+                        audioUrl = source.prewarmAudioUrl(),
+                        isUnmetered = networkTypeProvider.isUnmetered()
+                    )
+                }
+            }
             .onFailure { Logger.d(TAG) { "preload failed aid=${request.ids.aid} msg=${it.message}" } }
             .isSuccess
     }
+
+    /** 预热用视频 URL：DASH 取第一条流的 videoUrl；progressive 取首段。 */
+    private fun PlaybackSource.prewarmVideoUrl(): String? = when (val s = streams.firstOrNull()) {
+        is PlaybackStream.Dash -> s.videoUrl
+        is PlaybackStream.Progressive -> s.segments.firstOrNull()?.url
+        null -> null
+    }
+
+    /** 预热用音频 URL：第一条音频轨。 */
+    private fun PlaybackSource.prewarmAudioUrl(): String? = audios.firstOrNull()?.url
 
     /** 与 [buildRequest] 读的设置一一对应：它们变了，响应内容就变了，缓存键必须跟着变。 */
     private suspend fun flavorOf(): String = PlayUrlCache.flavorOf(

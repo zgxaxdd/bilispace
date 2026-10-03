@@ -2,6 +2,7 @@ package com.naaammme.bbspace.infra.player.di
 
 import androidx.media3.common.util.UnstableApi
 import com.naaammme.bbspace.core.common.cache.PlaybackCacheControl
+import com.naaammme.bbspace.core.common.cache.PlaybackHeadPrewarmer
 import com.naaammme.bbspace.infra.player.Media3PlayerEngine
 import com.naaammme.bbspace.infra.player.PlaybackMediaCache
 import com.naaammme.bbspace.infra.player.PlayerEngine
@@ -29,4 +30,12 @@ abstract class PlayerModule {
     @UnstableApi
     @Singleton
     abstract fun bindPlaybackCacheControl(impl: PlaybackMediaCache): PlaybackCacheControl
+
+    /**
+     * PB-04：把同一个缓存实例同时暴露成"头部预热器"（预热就是往这份缓存里写头部字节）。
+     */
+    @Binds
+    @UnstableApi
+    @Singleton
+    abstract fun bindPlaybackHeadPrewarmer(impl: PlaybackMediaCache): PlaybackHeadPrewarmer
 }
