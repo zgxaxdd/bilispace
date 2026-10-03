@@ -667,3 +667,44 @@ media3 1.11 的 `CacheKeyFactory` 返回非空 String，"返回 null 即绕过"�
 
 **编号冲突（如实登记）**：任务书给 PB 的 L4 编号是 L4-98~L4-107，而 **L4-98 已被 NX 批次占用**
 （debug 详情页骨架屏）→ PB 顺延为 **L4-99~L4-108**。
+
+## 批次 SX · 2026-10-04 · 刷视频体验与推荐流（12 项，**进行中**）
+
+**分区**：刷视频 / 推荐流 / 评论区｜**分支**：`build/sx-swipe-experience`（自 `2dd2cf4a`）
+｜**任务书**：[`docs/2026-10-03-刷视频体验与推荐流-任务书-SX.md`](../2026-10-03-刷视频体验与推荐流-任务书-SX.md)（v1）
+｜**上游**：`_ref/BiliPai-025`，基线 `79e8fa301`（v0.2.5）→ **推进到 `5dd628c81`（v0.2.7）**，
+16 提交 / 122 文件；清单见 [`docs/2026-10-04-上游同步清单-SX11.md`](../2026-10-04-上游同步清单-SX11.md)
+
+**两个已拍板决策**：**D-1** 刷视频推荐流必须跟随设置里的「推荐来源」；**D-2** 评论区只用透明、
+禁止模糊、流畅度优先。
+
+**第 0 批：改造前基线（2026-10-04 00:41–01:00）**
+逐**单任务** `--rerun`（W22 口径，每条命令只跑一个模块），7 模块全绿且日志含裸
+`> Task :x:testDebugUnitTest`（无 UP-TO-DATE / FROM-CACHE）：
+
+| 模块 | 结果 |
+|---|---|
+| `:core:feed` | EXIT=0 |
+| `:core:swipe` | EXIT=0 |
+| `:core:settings` | EXIT=0 |
+| `:core:playback` | EXIT=0 |
+| `:core:designsystem` | EXIT=0 |
+| `:feature:video` | EXIT=0 |
+| `:app` | EXIT=0 |
+| `:app:compileDebugKotlin` | EXIT=0 |
+
+合计用时 **945s**。
+
+**设备实际状态**：⚠️ 任务书 §0 写「真机在线：OPPO PLC110 / Android 16」，实测
+`adb devices -l` **为空**（`reconnect` + `kill-server`/`start-server` 后仍为空）。
+⇒ 本批全部**真机项转「未能验证」**，理由与缺口逐条写进执行报告，**不把"没测"写成"通过"**（铁律 3）。
+
+| commit | 项 | 要点 |
+|---|---|---|
+| `60e8a450` | **SX-04**（决策 D-1） | 接力从「恒 app 协议」改为跟随 `feedApiType`：`SwipeCursor` 增 `webPage`（两套分页空间）；新增纯函数 `SwipeFeedCursorPolicy`；`HomeFeedSwipeSource` 改走游标重载；**删除**旧三参入口 `fetchFeed(idx,…)`（grep 确认只剩接力一个调用点）；VM 换来源整体重置游标 + 补货日志打双游标。守卫 `legacyThreeArgEntryAlwaysUsesAppProtocol` **反转为** `swipeRelayFollowsFeedSourceWithSourceOwnedCursor` 并写明理由；`VideoLogicGuardTest:1633` 形态同批更新。新增 `SwipeFeedCursorPolicyTest`（7 例）。破坏性验证：把接力改回只推进 idx → 守卫红（`FeedSourceDispatchGuardTest.kt:94`），还原后 sha256 一致 |
+
+**SX-11 结论（只读，不落地）**：上游 16 提交里**没有任何一项是本批 12 项的可直接搬运实现**；
+A 级仅 3 组（评论头像 `crossfade(true)`、评论字阶 bodyMedium、TOP 标签光学居中），
+B 级 5 组（全屏 chrome 收缩/竖屏声明/弹幕密度兜底/弹幕点赞状态一致性/AnimatedCountText），
+其余 10 组 C 级（TV 端、上游独有功能、基础设施、文档）。上游 feed 取流路径本区间**零改动**。
+
