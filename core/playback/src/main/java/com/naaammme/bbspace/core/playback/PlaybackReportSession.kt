@@ -81,9 +81,10 @@ internal fun PlaybackReportSession.isComplete(
     if (source.isPreview) return false
     if (playbackState == PlaybackState.Ended) return true
     if (allowEndedOnly) return false
-    val durationMs = source.durationMs
-    if (durationMs <= 0L) return false
-    return durationMs - positionMs <= COMPLETE_THRESHOLD_MS
+    // PT-03：阈值收敛到 PlaybackResumePolicy.COMPLETE_TAIL_MS（原本文件的同名
+    // private 常量已删除）。上报侧语义刻意保持"只看 3s 尾"不看 95%——
+    // 改上报语义会改变发往 B 站的 payload，属网络行为变化，不在移植范围内。
+    return PlaybackResumePolicy.isWithinTail(positionMs, source.durationMs)
 }
 
 internal fun msToSec(value: Long): Int {
@@ -93,5 +94,3 @@ internal fun msToSec(value: Long): Int {
 internal fun nowSec(): Long {
     return System.currentTimeMillis() / 1000L
 }
-
-private const val COMPLETE_THRESHOLD_MS = 3_000L

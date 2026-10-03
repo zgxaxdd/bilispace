@@ -337,3 +337,61 @@ B20 两次被自己的守卫骗过去，形状都很典型：
 **How to apply**：任务书给的是"哪一类问题 + 大概在哪"，不是事实认定书（W4 的强化版）。
 每条动手前 `grep + 读现场`，与自己读到的不一致时以源码为准，并把更正写进执行报告。
 
+
+## W30 · 任务书写在"依赖核查"里的结论是断言，不是事实（2026-10-03）
+
+`S-A-feed-api-type-plan.md` §2 结论白纸黑字：「**前置能力全部就绪**，不需要新增任何依赖或跨模块能力」，
+依据是「已有 WBI 能力 `WbiSigner.sign` + `WbiKeyProvider`，已在排行页用通」。但 `WbiSigner` 在
+`infra:crypto`、`WbiKeyProvider` 在 `infra:network-web`（`infra/web/WbiKeyProvider.kt:23`），
+而 `core:feed/build.gradle.kts` **只依赖 `infra:crypto` + `infra:network-http`** ——
+`WbiKeyProvider` 根本不在 core:feed 的编译类路径上。落 PT-10 必须新增一条
+`implementation(project(":infra:network-web"))`（与 `core:rank` 同口径，属仓内既有先例）。
+**How to apply**：任务书写"零新依赖"时，去 `build.gradle.kts` 里把每个要用的类型所属模块
+逐个对一遍 `implementation/api` 列表；跨模块能力"已在别的模块用通"≠"本模块能直接用"。
+
+## W31 · 既有工具"看起来能处理"要读实现，读名字/注释都会错（2026-10-03）
+
+`S-A` §4.3 映射表写「`pic` → `cover` 需走 `httpsImageUrl()`（web 返回 `//i0.hdslb.com/...`
+协议相对地址）」。实际 `core/common/.../BiliImageUrl.kt:35-41` 的 `httpsImageUrl()` 只做
+`http:// → https://` 替换，**`else -> this` 把 `//` 开头的地址原样返回** ——
+照任务书照抄会让 WEB 档所有封面拿到 `//` 地址（Coil 加载失败），且因为很多图床域名
+在 app 协议里都是完整 https，这个缺陷**只在 WEB 档出现**，最容易漏测。
+**How to apply**：任务书点名的"既有工具"必须打开读那 6 行实现；记不清就写一条覆盖
+该输入形态的单测（本轮落在 `WebFeedMapperTest.protocolRelativeUrlIsMadeAbsolute`）。
+
+## W32 · 改"共享入口"的分派语义前，必须 grep 全部调用点（2026-10-03）
+
+`S-A` §4.2 的落地方案是「`fetchFeed` 签名不变，内部按来源分派」。但 `FeedRepository.fetchFeed(idx,…)`
+**不只首页在用**：`feature/video/.../swipesource/SwipeSources.kt:24`（刷视频无限接力）也调它，
+而刷视频接力的翻页**依赖 app 协议回传的 `idx`**。web 协议不下发 `idx`（恒 0）→ 若这条路径也
+按设置切到 WEB，接力会拿 `idx=0` 反复拉同一页 = **静默死循环**（无异常、无日志、只是列表不再增长）。
+落地方案：旧入口**恒走 app 协议**（`return fetchMobile(...)`），只有首页走感知来源的游标重载。
+**How to apply**：把"某设置项决定的行为"塞进一个被多处复用的方法以前，先 `grep` 调用点并逐个判
+"新语义对它是合理还是灾难"；对灾难的那条，宁可在入口上分层（旧入口保持历史语义），
+也不要为了方案的字面整齐把它一起改掉。
+
+## W33 · 破坏性探针要"一次只改一处，且改在守卫真正锚的地方"（2026-10-03）
+
+本批 7 处探针里两次值得记：
+- **改对了锚点**：`fetchMobileIsTheOldImplementationVerbatim` 的探针是把
+  `buildParams(idx, pull, flush, profile, hdFeed)` 改成 `buildParams(..., false)` ——
+  只改这一个实参，红的正好是这一条（9 条里 1 条），说明它锚的确实是那行代码形态，
+  而不是"某个字符串在文件里出现过"。
+- **一次探针红了两条（必须如实记录）**：给 `WebFeedMapper.mapItem` 塞一个非空
+  `dislikeContext` 时，红的是 `webItemCarriesNoDislikeContext` **和** `missingFieldsDoNotCrash`
+  —— 后者断言"缺字段不崩"时顺手也断言了 `dislikeContext == null`。这本身没问题，
+  但记成"1 条红"就是假报告。
+**How to apply**：写探针前先回读守卫用的是哪个 `contains`/`assertEquals`，把改坏点**对准那一条**；
+一次探针只改一处；跑完把"实际红了几条、分别是哪几条"逐条抄进验证记录
+（红多了要解释，别只写"FAILED"二字）。反之，探针若改在一个"守卫根本没锚的位置"上，
+红不红都不能当证据（W7）。
+
+## W34 · W26 的复发点：把"守卫必须过滤注释"变成新守卫的模板，而不是每次靠记性（2026-10-03）
+
+PT-04 的 `endHeartbeatCancelsTheLoop` 又把调用**注释掉**当探针，守卫照样绿（W26 原样复发）。
+本轮之后的处理：把 `codeLines()`（过滤 `//`、`*`、`/*`、`import` 行）写进 PT-10 的**每一个**新守卫，
+包括 `FeedSourceDispatchGuardTest` / `FeedApiTypeSettingsGuardTest` 的 `codeOf()`；
+并且"块体内必须调用 X"的断言一律先过滤再 `contains`。
+**How to apply**：新建守卫文件时直接从这两个模板抄 `codeOf`/`codeLines`/`blockBody` 三件套，
+不要在裸 `readLines()` 上写 `contains` —— 注释行里出现目标字符串是**最常见**的假绿来源
+（本仓的注释习惯是把被修的旧写法抄进注释说明为什么改）。

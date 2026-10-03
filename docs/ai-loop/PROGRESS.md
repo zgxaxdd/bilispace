@@ -569,3 +569,43 @@
 ## 批次 U2+ · （阻塞）需要真机：L4-23~L4-28 走查后才能继续推 C-好看区
 
 
+
+## 批次 PT · 2026-10-03 · BiliPai 缺失能力移植（6 项 + 3 项工程纪律）
+
+**分区**：移植（架构性缺口，**不是** v0.2.4 的版本增量）｜**级别**：B 级·可静态判定
+（真机项见 `L4-待真机清单.md` PT-T1~PT-T12）
+｜**任务书**：[`docs/2026-10-03-BiliPai移植-任务书.md`](../2026-10-03-BiliPai移植-任务书.md)（v2.1）
+｜**执行报告**：[`docs/2026-10-03-BiliPai移植-执行报告.md`](../2026-10-03-BiliPai移植-执行报告.md)
+｜**分支**：`port/bilipai-v024`（自 AP 批次提交 `44e419cd` 起）
+
+**上游**：`_ref/BiliPai-024`（`origin/main` = `6e6bdce36`，tag `v0.2.4`）＋旧基线 `_ref/BiliPai`（`34d189620`）。
+→ **当前同步基线 = `6e6bdce36`**（本次更新；此前记的是 `34d189620`）。
+
+**第一要务是"不要误以为这是版本增量"**：`U1-v024-delta.md`、`U2-bilipai-home-feed.md` 与 Lead 的
+逐提交复核三方一致确认 —— v0.2.4 的 8 个提交**没有改动推荐来源数据链路**（`HomeViewModel.kt` 仅 3 行、
+`VideoRepository` 仅搬家）。本批补的是 bbspace 从未有过的能力。
+
+| commit | 项 | 类型 | 要点 |
+|---|---|---|---|
+| （`44e419cd`） | PT-01 + PT-02 | 工程纪律 | 104 项 AP 改动**先提交再开分支**（用户决定）；移植回归基线：9 个模块逐模块 `--rerun` 全绿，含 AP 批次 13 个新守卫 |
+| `60917bdc` | PT-03 续播语义 | B·语义移植 | 新增 `PlaybackResumePolicy`（95% 视为看完 + 钳到 `duration−1000`），保留 bbspace 的来源优先级；**两处同名 `COMPLETE_THRESHOLD_MS` 收敛为一处** |
+| `b82f9d42` | PT-04 周期心搏 | B·重写适配 | 搬 5 个判据函数到 `PlaybackHeartbeatPolicy` + 30s 循环；退出条件三覆盖（暂停/后台/会话结束），`endHeartbeat` 取消 loop |
+| `d54899e1` | PT-09 三个小工具 | A·等价移植 | `findHostActivity`（**全仓只允许一处定义**，上游有 3 份）/ `resolveVideoListColumns` / `resolveBottomInputOverlayMaxWidthDp` |
+| `cc6f451a` | PT-08 联合创作 | B·只差渲染 | `staffs` 已解析但从未渲染 → 作者行 chip「等 N 人联合创作 ˅」+ 成员弹层；文案对齐上游 |
+| `573ef0c1` | PT-06 拉黑入口 | B·重写适配 | **不移植 REST**：复用既有 gRPC `SpaceRepository.modifyBlacklist`；新增 `BlockedUpStore`（DataStore，不 bump Room version）+ 刷视频"更多"面板入口 + 二次确认 |
+| `2f55f95b` | PT-10 推荐来源三档 | B·重写适配 | WEB/MOBILE/MERGED，**默认 MOBILE**；`fetchMobile` 逐字照搬；`WebFeedMapper`/`FeedMergePolicy`/`FeedCursor(+Policy)` 三个纯 JVM 单元；设置页三档单选 + 限制说明 |
+
+**撤销两项（不要按 v1 施工）**：
+- **PT-05 整项删除**：bbspace 后台模型是"设置门控的暂停/续播"，不存在"后台优化播放器实例"这个对象。
+- **PT-07 整项撤销**：上游负反馈**只允许一个理由**（`require((reasonId != null) xor (feedbackId != null))`），
+  "多理由透传"不是"上游有而 bbspace 没有"的能力，照做反而违反上游契约。
+
+**验证**：PT-10 的 V1~V10 共 39 条单测全绿；本批共 6 处破坏性探针（改坏 → FAILED → 还原 → sha256 一致）；
+`:app:assembleDebug` 成功；9 个模块逐模块 `--rerun` 全绿。
+
+**台账更新**：`BACKLOG` 的 **ST-04 已确认关闭**（复核：`GeetestDialog.kt` 有 `onRelease` + destroy，
+`ResourceReleaseGuardTest` 三条断言在位——AP-33 已落地，本条本轮只做确认，未改代码）。
+
+**已知台账缺口（诚实记录）**：AP/FL 批次（`docs/2026-10-02-BBSpace全场景性能-执行报告.md`）
+在 PROGRESS 里**没有对应的批次条目**——本批接手时即为如此，不是本批造成的。其成果已由 `44e419cd`
+承载并由本批的回归基线覆盖，但"每批次收尾必须更新本文件"这条纪律在那批漏了一次。

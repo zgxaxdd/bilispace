@@ -115,6 +115,7 @@ class AppSettings @Inject constructor(
     private val topProgressiveFadeKey = booleanPreferencesKey("top_progressive_fade")
     private val playerControlsBlurKey = booleanPreferencesKey("player_controls_blur")
     private val playerControlsMaterialKey = stringPreferencesKey("player_controls_material")
+    private val feedApiTypeKey = intPreferencesKey("feed_api_type")
 
     val themeConfig: Flow<ThemeConfig> = context.appSettingsDataStore.data
         .map { prefs ->
@@ -493,6 +494,19 @@ class AppSettings @Inject constructor(
 
     suspend fun updatePlayerControlsMaterial(material: GlassMaterial) {
         editSettingsMirrored { it[playerControlsMaterialKey] = material.name }
+    }
+
+    /**
+     * 首页推荐来源（PT-10）。缺省 [FeedApiType.MOBILE] —— **与历史行为逐字一致**
+     * （脏值/未写入都落到 MOBILE，见 [FeedApiType.fromValue]）。
+     */
+    val feedApiType: Flow<FeedApiType> =
+        context.appSettingsDataStore.data.map {
+            FeedApiType.fromValue(it[feedApiTypeKey] ?: FeedApiType.MOBILE.value)
+        }
+
+    suspend fun updateFeedApiType(type: FeedApiType) {
+        editSettingsMirrored { it[feedApiTypeKey] = type.value }
     }
 
     suspend fun markInterestDone() {

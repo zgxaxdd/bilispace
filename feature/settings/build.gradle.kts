@@ -23,4 +23,7 @@ dependencies {
     api(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+
+    // PT-10 V9：推荐来源设置页文案守卫（纯 JVM 源码结构断言）
+    testImplementation(libs.junit)
 }

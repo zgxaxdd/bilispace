@@ -5,10 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.feed.FeedCursor
+import com.naaammme.bbspace.core.feed.FeedCursorPolicy
 import com.naaammme.bbspace.core.feed.FeedDislikeRepository
 import com.naaammme.bbspace.core.feed.PageActionTracker
 import com.naaammme.bbspace.core.feed.FeedRepository
 import com.naaammme.bbspace.core.settings.AppSettings
+import com.naaammme.bbspace.core.settings.FeedApiType
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.ThreePointReason
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -83,6 +86,18 @@ class HomeViewModel @Inject constructor(
 
     private var flush = 0
 
+    /**
+     * 首页推荐来源（PT-10）。默认 [FeedApiType.MOBILE] = 维持现状；
+     * 由 [init] 里的收集器跟随设置实时更新。
+     */
+    private var feedSource = FeedApiType.MOBILE
+
+    /**
+     * 当前取流游标（来源自持，方案 §4.4）。app 游标与 web 页序号分开持有，
+     * MERGED 档下两者独立推进；切换来源时整体重置。
+     */
+    private var feedCursor = FeedCursor.Initial
+
     /** 本轮列表（首屏/刷新后）已执行的自动补页次数。 */
     private var autoFillCount = 0
 
@@ -114,6 +129,23 @@ class HomeViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            var firstEmission = true
+            appSettings.feedApiType.collect { source ->
+                if (firstEmission) {
+                    // 首次发射 = 当前落盘值，[loadInitial] 已用它取过流，不重复刷新
+                    firstEmission = false
+                    feedSource = source
+                    return@collect
+                }
+                if (source == feedSource) return@collect
+                feedSource = source
+                // 切换来源：两套游标语义不同，必须整体重置并重新取首屏（方案 §4.4）
+                feedCursor = FeedCursor.Initial
+                Logger.d(TAG) { "推荐来源切换为 $source，重置游标并刷新" }
+                refresh()
+            }
+        }
         loadInitial()
     }
 
@@ -128,8 +160,12 @@ class HomeViewModel @Inject constructor(
                 }
                 flush = 0
                 resetPagingGuards()
-                val feed = feedRepo.fetchFeed(idx = 0L, pull = true, flush = flush)
+                // 来源在取流前读一次真实落盘值：收集器的首次发射可能还没到（方案 §4.4）
+                feedSource = appSettings.feedApiType.first()
+                val cursor = FeedCursorPolicy.refreshCursor(feedSource, appIdx = 0L)
+                val feed = feedRepo.fetchFeed(cursor, pull = true, flush = flush)
                 _uiState.update { it.copy(items = feed.items) }
+                if (feed.items.isNotEmpty()) feedCursor = cursor
                 flush++
                 if (feed.interestChoose != null) {
                     val done = appSettings.interestDone.first()
@@ -216,7 +252,8 @@ class HomeViewModel @Inject constructor(
                 val currentTopIdx = _uiState.value.items.firstOrNull()?.idx ?: 0L
                 flush = 0
                 resetPagingGuards()
-                val feed = feedRepo.fetchFeed(idx = currentTopIdx, pull = true, flush = flush)
+                val cursor = FeedCursorPolicy.refreshCursor(feedSource, appIdx = currentTopIdx)
+                val feed = feedRepo.fetchFeed(cursor, pull = true, flush = flush)
                 if (feed.items.isNotEmpty()) {
                     val merged = withContext(Dispatchers.Default) {
                         // 按 (goto|param|idx) 去重：服务端偶发重复下发卡片，
@@ -226,6 +263,7 @@ class HomeViewModel @Inject constructor(
                             .take(MAX_FEED_ITEMS)
                     }
                     _uiState.update { it.copy(items = merged) }
+                    feedCursor = cursor
                     flush++
                 }
             } catch (e: CancellationException) {
@@ -252,7 +290,8 @@ class HomeViewModel @Inject constructor(
             try {
                 _uiState.update { it.copy(isLoadingMore = true) }
                 val lastIdx = _uiState.value.items.lastOrNull()?.idx ?: 0L
-                val feed = feedRepo.fetchFeed(idx = lastIdx, pull = false, flush = flush)
+                val cursor = FeedCursorPolicy.loadMoreCursor(feedSource, feedCursor, appIdx = lastIdx)
+                val feed = feedRepo.fetchFeed(cursor, pull = false, flush = flush)
                 if (feed.items.isNotEmpty()) {
                     val before = _uiState.value.items
                     val merged = withContext(Dispatchers.Default) {
@@ -260,6 +299,7 @@ class HomeViewModel @Inject constructor(
                         (before + feed.items).distinctBy { it.actionKey }
                     }
                     _uiState.update { it.copy(items = merged) }
+                    feedCursor = cursor
                     flush++
                     // 去重后条目没增长 → 服务端在下发重复卡片，累计停滞次数
                     if (merged.size > before.size) {

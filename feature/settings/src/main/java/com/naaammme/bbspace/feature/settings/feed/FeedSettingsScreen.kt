@@ -2,16 +2,21 @@ package com.naaammme.bbspace.feature.settings.feed
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.settings.FeedApiType
 import com.naaammme.bbspace.feature.settings.SettingsViewModel
 import kotlin.math.roundToInt
 
@@ -29,6 +34,7 @@ fun FeedSettingsScreen(
     val teenagersMode by viewModel.teenagersMode.collectAsStateWithLifecycle()
     val teenagersAge by viewModel.teenagersAge.collectAsStateWithLifecycle()
     val homeSingleColumn by viewModel.homeFeedSingleColumn.collectAsStateWithLifecycle()
+    val feedApiType by viewModel.feedApiType.collectAsStateWithLifecycle()
     var teenagersAgeDraft by remember(teenagersAge) { mutableFloatStateOf(teenagersAge.toFloat()) }
     val teenagersAgeText = teenagersAgeDraft.roundToInt().coerceIn(1, 17).toString()
 
@@ -56,6 +62,44 @@ fun FeedSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectableGroup()
+                            .padding(BiliSpacing.lg)
+                    ) {
+                        Text("推荐来源", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(BiliSpacing.xs))
+                        Text(
+                            "选择首页推荐取流方式；切换后首页会自动重新加载。默认为手机端推荐（与旧版一致）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(BiliSpacing.sm))
+                        FeedApiTypeOption(
+                            title = "手机端推荐（默认）",
+                            description = "B 站 App 推荐算法；内容最全，含直播卡 / 番剧卡 / 课堂卡等，登录后更准确",
+                            selected = feedApiType == FeedApiType.MOBILE,
+                            onSelect = { viewModel.updateFeedApiType(FeedApiType.MOBILE) }
+                        )
+                        FeedApiTypeOption(
+                            title = "网页端推荐",
+                            description = "B 站网页版推荐算法；只返回普通视频（没有直播 / 番剧 / 课堂卡），" +
+                                "且该档下卡片的「不感兴趣」不可用",
+                            selected = feedApiType == FeedApiType.WEB,
+                            onSelect = { viewModel.updateFeedApiType(FeedApiType.WEB) }
+                        )
+                        FeedApiTypeOption(
+                            title = "双源合并",
+                            description = "同时请求手机端与网页端，交错合并去重；单边失败自动返回另一边（可能更费流量）",
+                            selected = feedApiType == FeedApiType.MERGED,
+                            onSelect = { viewModel.updateFeedApiType(FeedApiType.MERGED) }
+                        )
+                    }
+                }
+            }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
@@ -249,6 +293,43 @@ fun FeedSettingsScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 推荐来源单选行（PT-10 §4.6）。
+ *
+ * 用 [selectable] + [Role.RadioButton] 而不是 `Modifier.clickable`：整行可点、无障碍语义正确，
+ * 且与 [RadioButton] 共用同一份 [selected]（`onClick = null` 避免重复点击区域）。
+ */
+@Composable
+private fun FeedApiTypeOption(
+    title: String,
+    description: String,
+    selected: Boolean,
+    onSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onSelect
+            )
+            .padding(vertical = BiliSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(BiliSpacing.md))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

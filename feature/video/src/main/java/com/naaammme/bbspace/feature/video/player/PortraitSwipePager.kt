@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.naaammme.bbspace.feature.comment.CommentPanel
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -402,6 +404,8 @@ internal fun PortraitSwipePager(
     var showFavSheet by remember { mutableStateOf(false) }
     // SW-24：会话内「更多」面板（不感兴趣/弹幕开关/复制链接/系统分享）
     var showMoreSheet by remember { mutableStateOf(false) }
+    // PT-06：拉黑二次确认的挂起 mid（非 null = 弹确认框；确认后才对账号实际生效）
+    var pendingBlockUpMid by remember { mutableStateOf<Long?>(null) }
     val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val swipeDislikeUndoable by viewModel.swipeDislikeUndoable.collectAsStateWithLifecycle()
     val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
@@ -642,6 +646,7 @@ internal fun PortraitSwipePager(
                     owner = playbackState.detail?.owner?.name,
                     tags = playbackState.detail?.tags.orEmpty(),
                     seasonTitle = playbackState.detail?.season?.title,
+                    staffs = playbackState.detail?.staffs.orEmpty(), // PT-08：联合创作成员
                     onOpenSpace = openOwnerSpace,
                     resetKey = playbackState.ids.aid.takeIf { it > 0L }
                         ?: playbackState.ids.bvid,
@@ -812,6 +817,12 @@ internal fun PortraitSwipePager(
                     viewModel.undoSwipeDislike()
                     showMoreSheet = false
                 },
+                // PT-06：拉黑该 UP（ownerMid > 0 才显示——story/relate 源没有 mid，不做假入口）
+                canBlockUp = (currentEntry?.ownerMid ?: 0L) > 0L,
+                onBlockUp = {
+                    pendingBlockUpMid = currentEntry?.ownerMid?.takeIf { it > 0L }
+                    showMoreSheet = false
+                },
                 onToggleDanmaku = { viewModel.toggleDanmaku() },
                 onCopyLink = {
                     val url = ShareUtils.videoUrl(playbackState.ids.bvid, playbackState.ids.aid, page = 0)
@@ -824,6 +835,31 @@ internal fun PortraitSwipePager(
                     val url = ShareUtils.videoUrl(playbackState.ids.bvid, playbackState.ids.aid, page = 0)
                     ShareUtils.shareText(context, playbackState.detail?.title, url)
                     showMoreSheet = false
+                }
+            )
+        }
+
+        // PT-06：拉黑**二次确认**（拉黑对账号实际生效，必须显式确认后才调用）
+        pendingBlockUpMid?.let { mid ->
+            AlertDialog(
+                onDismissRequest = { pendingBlockUpMid = null },
+                title = { Text("拉黑该 UP 主？") },
+                text = {
+                    Text("拉黑后其投稿将不再推荐给你，且该操作会对你的 B 站账号实际生效（可随时在网页端撤销）。")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.blockSwipeUp(mid)
+                        Toast.makeText(context, "已拉黑该 UP 主", Toast.LENGTH_SHORT).show()
+                        pendingBlockUpMid = null
+                    }) {
+                        Text("确认拉黑")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingBlockUpMid = null }) {
+                        Text("取消")
+                    }
                 }
             )
         }
@@ -847,6 +883,9 @@ private fun SwipeMoreSheetContent(
     onToggleDanmaku: () -> Unit,
     onCopyLink: () -> Unit,
     onShare: () -> Unit,
+    // PT-06：拉黑该 UP（ownerMid > 0 才显示；二次确认在调用方）
+    canBlockUp: Boolean = false,
+    onBlockUp: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -859,6 +898,9 @@ private fun SwipeMoreSheetContent(
         }
         if (canUndoDislike) {
             SwipeMoreRow(text = "撤回不感兴趣", onClick = onUndoDislike)
+        }
+        if (canBlockUp) {
+            SwipeMoreRow(text = "拉黑该 UP 主", onClick = onBlockUp)
         }
         SwipeMoreRow(text = "弹幕开关", onClick = onToggleDanmaku)
         SwipeMoreRow(text = "复制链接", onClick = onCopyLink)
