@@ -395,3 +395,35 @@ PT-04 的 `endHeartbeatCancelsTheLoop` 又把调用**注释掉**当探针，守�
 **How to apply**：新建守卫文件时直接从这两个模板抄 `codeOf`/`codeLines`/`blockBody` 三件套，
 不要在裸 `readLines()` 上写 `contains` —— 注释行里出现目标字符串是**最常见**的假绿来源
 （本仓的注释习惯是把被修的旧写法抄进注释说明为什么改）。
+
+## W35 · 破坏性验证里的 `git reset --hard` 会连**未提交的其它工作**一起清掉（2026-10-03）
+
+NX-01 验收⑤要证明"合并提交可单独 revert"，我用了 `git revert --no-commit -m 1 <merge>` →
+看 diff → `git reset --hard HEAD` 还原。**探针本身没问题，代价是当时未提交的两处改动
+（`.github/workflows/pr.yml` 的 CI 修复、AP 报告的 NX-02 口径说明）被一并清掉**，
+直到 `git add` 报 "nothing added to commit" 才发现，两处全部返工。
+**How to apply**：任何"改坏 → 还原"的验证，**上手前先 commit 或 stash**；
+批量还原优先用 `git stash` + `git stash pop`，或把探针放进独立 worktree；
+`git reset --hard` 只允许在"工作区确认无未提交成果"时使用。
+（判据：跑完验证后 `git status` 里出现的"未修改"列表，必须与你验证前的列表逐项对得上。）
+
+## W36 · 扫源码型守卫的 `codeOf(后缀)` 会**静默命中错文件**（2026-10-03）
+
+NX-08 的守卫写了 `codeOf("SettingsScreen.kt")`，而仓里有 `AppearanceSettingsScreen.kt` /
+`FeedSettingsScreen.kt` / `PerformanceSettingsScreen.kt` … 一串**同后缀**文件；
+`firstOrNull { it.path.endsWith(normalized) }` 命中的是遍历顺序里的第一个，
+于是断言跑在**错的文件**上并给出误导性的失败（"routeNav 里没有 BLOCKED_UP_ROUTE"，
+而目标文件里明明有）。
+**How to apply**：`codeOf` 这类按后缀找文件的 helper，必须**收集全部匹配并断言恰好 1 个**
+（本轮已把这条写进 `BlockedUpSettingsGuardTest.codeOf` 的消息里：多命中就直接报出候选文件名）；
+调用侧尽量用足够长的路径后缀（`settings${FS}SettingsScreen.kt`）而不是裸文件名。
+
+## W37 · 报缺陷之前先做**对照实验**（2026-10-03）
+
+Track B 里遇到"点 WEB 档的卡片打开详情页永远停在骨架屏"，第一反应是 PT-10 的映射缺陷
+（`id → param` 路由或 aid/bvid 不完整）。**做了两次对照才定性**：
+① 同变体切 MOBILE 档点卡片 → 同样骨架屏（说明与来源分派无关）；
+② 换 release 变体点卡片 → 详情完整加载（说明与"详情链路本身"也无关，是变体/登录态问题）。
+若跳过对照，会以"PT-10 缺陷"上报，浪费一轮修复且**改错地方**。
+**How to apply**：任何"新功能看起来坏了"的观察，先问一句"**同一路径在旧路径/另一变体/另一来源下是什么表现**"，
+把"新引入"与"环境既有"分开；对照结果要写进记录（本轮写进 L4-98）。
