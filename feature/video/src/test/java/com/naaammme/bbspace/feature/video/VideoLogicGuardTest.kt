@@ -1782,6 +1782,53 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SX-09（用户需求⑨）：互动栏点赞按钮的「未赞 / 已赞」必须有**两种视觉**。
+     *
+     * 改动前两态共用 `Icons.Rounded.ThumbUp`、只靠 `tint` 区分 —— 深色主题下低饱和
+     * 主题色与白色的差别不够醒目。现在按 `liked` 在**描边 / 填充**之间切换，
+     * 与同栏收藏按钮（`Star` / `StarBorder`）同款语言。
+     *
+     * 同时钉住另外三条实质约束（这些**本来就已经成立**，本条守卫防回潮）：
+     * ③ 数字跟着变（`likeDelta` ±1）+ 失败有用户可见提示（`emitActionError`）；
+     * ④ `liked` 来自**单一真值源**（详情 `userState`），不在本地另存一份；
+     * ⑤ 写操作只允许在调试包真机验证 —— 属设备侧纪律，代码侧不涉及。
+     *
+     * 断言锚在**表达式/调用形态**上（W18/W20/W21）。
+     */
+    @Test
+    fun swipeRailLikeButtonDistinguishesLikedStateVisually() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val vm = codeOf("VideoViewModel.kt")
+        assertTrue(
+            "SX-09 要点②：点赞图标必须按 liked 在**描边/填充**之间切换（不能只换颜色）——" +
+                "与同栏收藏按钮的 Star/StarBorder 同款语言。",
+            countMatching(
+                pane,
+                """icon = if \(liked\) Icons\.Rounded\.ThumbUp else Icons\.Outlined\.ThumbUp,"""
+            ) == 1
+        )
+        assertTrue(
+            "颜色维度必须**同时保留**（描边/填充 + 主题色叠加，不是二选一）。",
+            countMatching(
+                pane,
+                """tint = if \(liked\) MaterialTheme\.colorScheme\.primary else Color\.White,"""
+            ) >= 1
+        )
+        assertTrue(
+            "SX-09 要点④：liked 必须是**单一真值源** —— 由调用点从 playbackState.detail.userState " +
+                "传入，组件内不得另存一份本地 liked。",
+            countMatching(pager, """liked = playbackState\.detail\?\.userState\?\.liked == true""") == 1 &&
+                countMatching(pane, """liked: Boolean,""") == 1
+        )
+        assertTrue(
+            "SX-09 要点③：数字要跟着变（likeDelta ±1），失败要有用户可见提示。",
+            countMatching(vm, """likeDelta = it\.likeDelta \+ if \(target\) 1 else -1""") == 1 &&
+                countMatching(vm, """emitActionError\(it, "点赞失败"\)""") == 1
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }

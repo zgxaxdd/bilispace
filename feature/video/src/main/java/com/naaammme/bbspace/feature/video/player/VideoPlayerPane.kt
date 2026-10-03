@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -1266,10 +1267,14 @@ internal fun SwipeSessionActionRail(
         )
         // 现代短视频的互动栏：图标大、计数在图标**下方**、层间距均匀（抖音/B 站竖屏同款）
         SwipeRailAction(
-            // 现代审美（2026-10-02）：用 **Rounded 系图标**（BiliPai/抖音同款圆润轮廓），
-            // 点赞态用主题色（B 站品牌粉由主题给，不再写死颜色）；计数缺失时显示动作名
-            // （BiliPai 的 countText fallback："0 条也读得懂这颗是什么"）。
-            icon = Icons.Rounded.ThumbUp,
+            // SX-09（用户需求⑨）：**未赞/已赞必须有两种视觉**。原来两态共用同一个
+            // 填充图标、只靠 tint 区分 —— 在深色主题下低饱和主题色与白色的差别不够醒目。
+            // 现在按 liked 在**描边 / 填充**之间切换，与同一栏的收藏按钮
+            // （Star / StarBorder）同款语言，也与全站"收藏态用填充"的习惯一致；
+            // 颜色区分同时保留（两个维度叠加，不是互相替代）。
+            // 已赞/未赞两态都用 **Rounded 系**（BiliPai/抖音同款圆润轮廓，2026-10-02 定稿）；
+            // 计数缺失时显示动作名（BiliPai 的 countText fallback：「0 条也读得懂这颗是什么」）。
+            icon = if (liked) Icons.Rounded.ThumbUp else Icons.Outlined.ThumbUp,
             contentDescription = if (liked) "取消点赞" else "点赞",
             label = stickyLike ?: "点赞",
             tint = if (liked) MaterialTheme.colorScheme.primary else Color.White,

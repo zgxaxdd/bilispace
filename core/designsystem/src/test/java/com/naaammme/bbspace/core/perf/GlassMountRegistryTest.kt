@@ -114,14 +114,14 @@ class GlassMountRegistryTest {
         ),
         GlassMount(
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt",
-            "drawBackdrop", 402,
+            "drawBackdrop", 403,
             surface = "playerControlGlass 工厂（播放控件采样）",
             gating = "!enabled || backdrop==null || material==OFF 早退；videoGlassTick 逐帧；" +
                 "AP-25 已接 LocalGlassGuard + resolveGlassBudget（降级档早退为纯底色）"
         ),
         GlassMount(
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt",
-            "layerBackdrop", 688,
+            "layerBackdrop", 689,
             surface = "播放页视频层背板（录制源）",
             gating = "videoGlassTick 驱动重录（AP-25：守卫降级时 tick 循环同停）"
         ),

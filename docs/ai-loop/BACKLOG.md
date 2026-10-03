@@ -119,6 +119,8 @@
 
 | MG-01 | MERGED 档 app 半边对齐上游 `android_hd` 身份链路 | `core/feed/FeedRepository.kt` 的 `fetchMergedFeed` / `fetchMobile`；需要一条新的签名链路（`android_hd` 身份头 + percent-encode 原样发送 + cookie 剥离 + buvid3 引导） | 上游 `BP:app/src/main/java/com/android/purebilibili/data/repository/VideoRepository.kt:787-833` `fetchMergedMobileFeed`：`mobi_app="android_hd"`、`force_host=2`、`fnval=976`、`pull = idx==0`、已登录补 `access_key`、`signForAndroidHdLogin` + `percentEncode`；bbspace 直接复用 `fetchMobile`（appkey+sign）。**SX-12 结论：不并入本批、单独立项** —— ①需要新增签名能力（铁律 11）；②收益是"app 半边推荐桶"（内容构成），不是正确性修复，现有 MERGED 语义上确实合并了两路；③无真机无法判断收益正负；④与 SX-04 同批会放大数据层变更面、出问题无法归因（W37） | B | **需真机 AB**：三档各滑 ≥5 页 + 看 `MERGED 档：web=N mobile=M webErr=… mobileErr=…`（release 可见，SX-12 已加）+ 内容构成目视对照。纯逻辑侧先单测（参数集/签名/去重键）；设备侧只做只读走查 | 待办（**单独立项 + 需真机**） |
 
+| LK-01 | 点赞改成**乐观更新**（先改 UI 再发请求，失败回滚） | `feature/video/VideoViewModel.kt` 的 `toggleLike`（现为**悲观**：只在 `onSuccess` 里改 `liked` + `likeDelta`，失败走 `emitActionError` 弹 toast） | 任务书 SX-09 要点③的字面要求是"数字要跟着变（+1/-1），**失败要回滚**"，而"回滚"只在乐观更新下才有意义 —— 现状是悲观更新，所以**没有可回滚的中间态**（数字确实会变、失败确实有提示，功能上不缺）。**本轮未改**：①这是**写路径**的行为变化，验收全部在真机（L4-120：连点、杀进程重进、与账号一致）；②上游同类实现（弹幕点赞 `BP:app/src/main/java/com/android/purebilibili/feature/video/viewmodel/VideoPlaybackViewModel.kt:4817` 的 `pendingDanmakuLikes`）**必须配一套请求去重**才安全——连点竞态没有真机就是盲改；③无真机无法判断"手感变快"是否值得这份风险 | B | **需真机**：连点 5 次 → 只发 1 个有效请求、无状态漂移；断网/失败 → UI 回滚到原态且提示可见；杀进程重进 → 与账号一致 | 待办（**需真机**） |
+
 ---
 
 ## 已关闭 / 不需再做（防重复劳动）
