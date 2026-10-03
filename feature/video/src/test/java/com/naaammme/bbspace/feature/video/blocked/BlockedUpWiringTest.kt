@@ -120,6 +120,39 @@ class BlockedUpWiringTest {
         )
     }
 
+    /**
+     * 入口守卫（任务书 PT-06 验收⑤）：**`ownerMid > 0` 是"更多"面板出现「拉黑该 UP 主」的唯一条件**。
+     *
+     * 为什么必须钉在**调用点**（W20）而不是只钉 `SwipeMoreSheetContent` 内部的 `if (canBlockUp)`：
+     * 面板本身对所有人可见，真正决定"这个来源能不能拉黑"的是调用方传进去的那个布尔表达式。
+     * story / relate 来源的 `ownerMid` 为 0（`PortraitSwipeQueue`），没有 mid 就没有可拉黑的对象 ——
+     * 点了只会静默失败，是"假入口"。破坏性验证口径：把这里改成 `true`（或删掉 `> 0L`）→ 本测试必须红。
+     */
+    @Test
+    fun blockEntryOnlyAppearsForPositiveOwnerMid() {
+        val pager = codeLines(
+            codeOf("feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/PortraitSwipePager.kt")
+        )
+        assertTrue(
+            "调用点必须传 `canBlockUp = (currentEntry?.ownerMid ?: 0L) > 0L`" +
+                "（缺 mid 的来源不做假入口）。",
+            pager.any { it.contains("canBlockUp = (currentEntry?.ownerMid ?: 0L) > 0L") }
+        )
+        assertTrue(
+            "确认后取 mid 也必须过 `takeIf { it > 0L }`（同一判据的第二道，防止 0 传下去）。",
+            pager.any { it.contains("pendingBlockUpMid = currentEntry?.ownerMid?.takeIf { it > 0L }") }
+        )
+        assertTrue(
+            "`canBlockUp` 的参数默认值必须是 false（默认不显示，而不是默认显示）",
+            pager.any { it.contains("canBlockUp: Boolean = false") }
+        )
+        val rowAt = pager.indexOfFirst { it.trimStart().startsWith("if (canBlockUp) {") }
+        assertTrue(
+            "「拉黑该 UP 主」那一行必须被 `if (canBlockUp)` 包住（入口自身也要门控，不只靠调用方）。",
+            rowAt >= 0 && pager.drop(rowAt).take(4).any { it.contains("拉黑该 UP 主") }
+        )
+    }
+
     /** false 断言的守卫自检（W21 反例）：正常文件不应命中"禁止字面量"。 */
     @Test
     fun scannerSelfCheck() {

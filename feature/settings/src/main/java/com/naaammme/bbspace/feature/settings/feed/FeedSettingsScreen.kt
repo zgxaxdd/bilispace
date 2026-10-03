@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.settings.FeedApiType
 import com.naaammme.bbspace.feature.settings.SettingsViewModel
 import kotlin.math.roundToInt
@@ -67,16 +68,16 @@ fun FeedSettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .selectableGroup()
-                            .padding(16.dp)
+                            .padding(BiliSpacing.lg)
                     ) {
                         Text("推荐来源", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(BiliSpacing.xs))
                         Text(
                             "选择首页推荐取流方式；切换后首页会自动重新加载。默认为手机端推荐（与旧版一致）",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(BiliSpacing.sm))
                         FeedApiTypeOption(
                             title = "手机端推荐（默认）",
                             description = "B 站 App 推荐算法；内容最全，含直播卡 / 番剧卡 / 课堂卡等，登录后更准确",
@@ -317,11 +318,11 @@ private fun FeedApiTypeOption(
                 role = Role.RadioButton,
                 onClick = onSelect
             )
-            .padding(vertical = 8.dp),
+            .padding(vertical = BiliSpacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         RadioButton(selected = selected, onClick = null)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(BiliSpacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(

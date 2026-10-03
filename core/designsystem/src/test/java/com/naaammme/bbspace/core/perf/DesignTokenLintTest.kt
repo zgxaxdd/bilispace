@@ -203,7 +203,12 @@ class DesignTokenLintTest {
             // 也就是**漂移已经发生过**）。现在它们引用 `BiliCardDensity` 的语义常量，
             // 数值仍全部指回 `BiliSpacing` 档位（该对象本身零 dp 字面量，
             // 见 CardDensitySingleSourceTest）。逐像素无变化，收的是"改动点数量"。
-            limit = 960,
+            // 上限 960 → 957（2026-10-03，PT-11 收口；实测 actual = 957）：
+            // 移植批次（PT-06/08/10）的 UI 新增一度让本值升到 962（+5 处：推荐来源设置页
+            // 的 16/8/8/12/4 dp），**当批即按 token 纪律全部改回 `BiliSpacing.lg/xs/sm/md`**，
+            // 回落 957；顺手把此前残留的 3 处余量收掉，棘轮恢复"贴着实测值"的状态。
+            // 读法照 W24：把 assertRatchet 临时改成恒失败，从失败消息里读 actual，再还原。
+            limit = 957,
             what = "theme 包外的 `N.dp` 字面量",
             why = "同一语义的尺寸散在各处就没有单一改动点。要降它就把语义明确的" +
                 "重复值收敛进 BiliRadius/BiliSpacing；一次性尺寸（图标、分隔线粗细、" +
