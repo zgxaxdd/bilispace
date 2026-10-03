@@ -702,6 +702,20 @@ media3 1.11 的 `CacheKeyFactory` 返回非空 String，"返回 null 即绕过"�
 | commit | 项 | 要点 |
 |---|---|---|
 | `60e8a450` | **SX-04**（决策 D-1） | 接力从「恒 app 协议」改为跟随 `feedApiType`：`SwipeCursor` 增 `webPage`（两套分页空间）；新增纯函数 `SwipeFeedCursorPolicy`；`HomeFeedSwipeSource` 改走游标重载；**删除**旧三参入口 `fetchFeed(idx,…)`（grep 确认只剩接力一个调用点）；VM 换来源整体重置游标 + 补货日志打双游标。守卫 `legacyThreeArgEntryAlwaysUsesAppProtocol` **反转为** `swipeRelayFollowsFeedSourceWithSourceOwnedCursor` 并写明理由；`VideoLogicGuardTest:1633` 形态同批更新。新增 `SwipeFeedCursorPolicyTest`（7 例）。破坏性验证：把接力改回只推进 idx → 守卫红（`FeedSourceDispatchGuardTest.kt:94`），还原后 sha256 一致 |
+| `476c8188` | **SX-11** | 上游 delta 清单（`79e8fa301`→`5dd628c81`，16 提交/122 文件，A/B/C 分级 + 12 项逐项对应关系）；上游基线推进写回本文件 |
+| `a4bf9731` | **SX-12** | MERGED 三态结论 = **部分有效**（机制层两条独立证据；运行时层无真机未验）；与上游 9 条差异；**决定不对齐上游、单独立项**（BACKLOG MG-01）；计数日志 `Logger.d`→直写 `android.util.Log.i`（release 可见，解除 L4-123 取证障碍） |
+| `97569862` | **SX-10**（决策 D-2） | 评论面板 `surface` → `surface.copy(alpha = 0.72f)`，**零模糊、不新增图层**；守卫 `swipeCommentCardIsTranslucentAndBlurFree` 咬住"模糊入口计数 = 0" |
+| `47cb00b7` | **SX-02** | 侧栏统一比例 `SwipeRailScale = 0.88f`（暗盘 52→≈46dp、图标 40→≈35dp）；**热区不缩**：外层 48dp `SwipeRailTouchTarget` 兜底 |
+| `ae7eb27e` | 收口① | 执行报告 + FINDINGS W41~W43 + L4-112~123 全表 + 稳定版打包与验签 |
+| `5b8f9af7` | **SX-03** | 横屏（非全屏）画面下方悬浮「全屏」按钮；判据用 `Configuration.orientation`（**不是**宽度分级）；走既有 `enterFullscreen`。棘轮事故：首版用 `shape = RoundedCornerShape(percent = 50)` 撞 `ListAllocationStructureTest` 上限，**改代码**（换共享单例 `CircleShape`）而非调上限（铁律 7） |
+| `166be8c2` | **SX-01** | **缺陷根因**：页面级门控只看简介列表 `detailListState`，而评论列表/pager 在 `VideoDetailPage` 内部 ⇒ 评论页下滑被判"列表已到顶→接管"。修法：上报"当前是不是简介页"，门控分层 `!detailIntroPageVisible \|\| detailListState.canScrollBackward`（简介页判据逐字未变 ⇒ 原入口零回归）。既有形态守卫 `swipeModeEntryIsIntroEdgePullOnly` 同批更新（W27） |
+| `3c193ee5` | **SX-09** | 点赞两态改为**描边 ↔ 填充 + 颜色**（`Outlined.ThumbUp` ↔ `Rounded.ThumbUp`），与同栏收藏按钮同款语言；核实并钉住"单一真值源 + likeDelta ±1 + 失败提示"。**未改乐观更新**（登记 BACKLOG LK-01）。行号登记表漂移：新增 1 行 import 使 `VideoPlayerPane.kt` 玻璃挂载点 402→403、688→689，按失败消息照抄修表（W44） |
+| `7c2ab9af` | **SX-07** | 评论面板从 `if (showComments)` 瞬变改为 `AnimatedVisibility`：遮罩只淡入淡出、卡片从下方 1/3 屏滑入；时长/曲线全走 `LocalAnimations` token；固定占比高度 ⇒ 无高度动画、不抖邻居 |
+
+**本批未做（3 项，理由见执行报告 §2.2）**：**SX-06 阻塞**（"先测量"类，无真机拿不到基线，
+先改再补测会永久丢失归因能力 —— W41）、**SX-05 未做**（大面 UI 重塑，隐藏哪些控件是观感判断、
+验收全在设备侧）、**SX-08 未做**（要点①自己就要求"先确认现在是没有动画还是动画不合适"，
+Compose 默认快照已是弹簧动画，必须先目视定位再动手）。
 
 **SX-11 结论（只读，不落地）**：上游 16 提交里**没有任何一项是本批 12 项的可直接搬运实现**；
 A 级仅 3 组（评论头像 `crossfade(true)`、评论字阶 bodyMedium、TOP 标签光学居中），
