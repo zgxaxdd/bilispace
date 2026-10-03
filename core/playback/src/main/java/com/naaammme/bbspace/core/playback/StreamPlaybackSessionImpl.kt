@@ -132,6 +132,10 @@ class StreamPlaybackSessionImpl @Inject constructor(
             playerEngine.playbackProgress.collect { progress ->
                 if (_currentTarget.value is StreamPlaybackTarget.Video) {
                     danmakuSession.onProgress(progress.positionMs)
+                    // L4-101：进度脉搏转给上报器做**周期性本地历史检查点**。
+                    // 挂这条流（约 0.5s 一跳）而不是 playbackState（只在状态变化时发）——
+                    // 后者在稳态播放期间不触发，检查点等于没有。
+                    reporter.onPlaybackProgress(progress.positionMs)
                 }
             }
         }

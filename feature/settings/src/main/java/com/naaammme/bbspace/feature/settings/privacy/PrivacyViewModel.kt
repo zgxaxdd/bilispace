@@ -132,7 +132,11 @@ class PrivacyViewModel @Inject constructor(
             val bytes = runCatching { playbackCacheControl.cachedBytes() }.getOrDefault(0L)
             _uiState.value = _uiState.value.copy(
                 playbackCacheBytes = bytes,
-                playbackCacheToast = if (cleared) "已清除播放缓存" else "正在播放，暂不能清理播放缓存"
+                // L4-109 修复：文案必须与**实际判据**一致。判据是「会话仍持有媒体源」
+                // （`PlaybackMediaCache.isSourceActive`），它比"正在播放"宽——用户已离开播放页、
+                // 甚至没有在播（只是会话没释放）时同样会被拒。原文案"正在播放"会让人以为
+                // 自己没在播放却被拒（真机实测：从详情页返回 5 分钟后仍被拒）。
+                playbackCacheToast = if (cleared) "已清除播放缓存" else "播放会话仍在使用中，暂不能清理播放缓存"
             )
         }
     }

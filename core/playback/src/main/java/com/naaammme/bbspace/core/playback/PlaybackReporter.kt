@@ -2,6 +2,8 @@ package com.naaammme.bbspace.core.playback
 
 import android.os.SystemClock
 import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.model.PlayReportParams
 import com.naaammme.bbspace.core.model.PlaybackProgress
@@ -54,11 +56,85 @@ class PlaybackReporter @Inject constructor(
     @Volatile
     private var lastKnownPositionMs = 0L
 
+    /** 上一次写本地历史检查点的时间（`elapsedRealtime`，见 [checkpointLocalHistory]）。 */
+    private var lastHistoryCheckpointAt = 0L
+
     private var heartbeatLoopJob: Job? = null
 
-    /** PT-04：宿主前后台信号入口（app 层生命周期调用；默认值 = 前台）。 */
+    /**
+     * 一次性后台任务的作用域（退出时落历史）。与 `heartbeatScope` 分开只为**可读性**：
+     * 一个是循环、一个是一次性写入，混在一起以后不好判断"谁在跑"。
+     */
+    private val flushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * PT-04：宿主前后台信号入口（app 层生命周期调用；默认值 = 前台）。
+     *
+     * **L4-101 修复（2026-10-03 真机实测发现）**：进后台时顺手把**当前进度落本地历史**。
+     *
+     * 为什么必须有这一条：本地历史只在 ① 首帧 ② 暂停沿 ③ 播完沿 ④ 会话结束时写；
+     * 而本机默认配置下**后台播放是开着的**（`PlaybackService` 前台保活），于是
+     * "按返回键 / 回桌面"**既不暂停也不结束会话** → 进度一直停在**首帧写的 0:00**，
+     * 直到用户主动暂停才补上。
+     *
+     * 实测证据（OPPO PLC110 / debug）：详情页播放 30s 后返回，历史里该视频仍是
+     * `进度 00:00 / 17:44`；同一行在显式暂停后**立刻**变成 `600.1s / 1063.4s`
+     * （与 logcat `AudioTrack: pause(...) prior state:STATE_ACTIVE` 同秒）。
+     * 影响：用户"看一半就退出/切后台"，重启后续播丢失（回到 0:00）。
+     *
+     * 只写**本地**历史，不触发远端 `reportPlaybackHistory`：远端上报仍在暂停/播完沿做，
+     * 避免每次切后台都多一次网络请求。
+     */
     fun setHostBackground(inBackground: Boolean) {
         isHostInBackground = inBackground
+        if (inBackground) {
+            flushLocalHistoryOnBackground()
+        }
+    }
+
+    /**
+     * 进度脉搏（L4-101 修复的**驱动源**）：由会话在 `playerEngine.playbackProgress` 的
+     * 收集器里调用（稳态播放约 0.5s 一次）。
+     *
+     * 为什么不能用 [onPlaybackState] 驱动检查点：那个函数由 `playbackState` 这个
+     * **StateFlow** 驱动，只在状态**变化**时发（起播/缓冲/暂停/播完），稳态播放期间一声不响
+     * —— 真机实测把检查点放在那里时，播 25s 后返回，历史仍是 `0.0s`。
+     *
+     * 顺带把 [lastKnownPositionMs] 刷新得更及时（心搏上报的位置也吃这个值）。
+     */
+    fun onPlaybackProgress(positionMs: Long) {
+        lastKnownPositionMs = positionMs
+        checkpointLocalHistory(positionMs)
+    }
+
+    private fun flushLocalHistoryOnBackground() {
+        flushScope.launch {
+            // 快照会话：进后台**瞬间**的位置才是"用户离开时看到的位置"
+            val active = mu.withLock { ctx?.takeIf { it.playbackHistoryStarted }?.copy() } ?: return@launch
+            val positionMs = lastKnownPositionMs
+            runCatchingCancellable { localHistoryRecorder.record(active, positionMs) }
+                .onFailure { Logger.w(TAG) { "退出时写本地历史失败 pos=$positionMs msg=${it.message}" } }
+        }
+    }
+
+    /**
+     * 周期检查点（L4-101）：播放中每 [HISTORY_CHECKPOINT_INTERVAL_MS] 把进度写一次**本地**历史。
+     *
+     * 只写本地（不发远端上报）、只在历史已开始且会话未终结时写、按时间节流
+     * （[onPlaybackProgress] 约 0.5s 一次，不节流会变成每 0.5s 一次 Room 写）。
+     * 落库在 [flushScope]（IO）上做，不占用状态管线的线程。
+     */
+    private fun checkpointLocalHistory(positionMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastHistoryCheckpointAt < HISTORY_CHECKPOINT_INTERVAL_MS) return
+        lastHistoryCheckpointAt = now
+        flushScope.launch {
+            val active = mu.withLock {
+                ctx?.takeIf { it.playbackHistoryStarted && !it.finalized }?.copy()
+            } ?: return@launch
+            runCatchingCancellable { localHistoryRecorder.record(active, positionMs) }
+                .onFailure { Logger.w(TAG) { "周期写本地历史失败 pos=$positionMs msg=${it.message}" } }
+        }
     }
 
     /**
@@ -173,6 +249,10 @@ class PlaybackReporter @Inject constructor(
             )
         }
         current ?: return
+
+        // L4-101：状态变化时也补一次检查点（起播/暂停/播完这些**变化**点本来就该落进度）。
+        // 稳态播放靠 StreamPlaybackSessionImpl 的进度脉搏调 [onPlaybackProgress]。
+        checkpointLocalHistory(progress.positionMs)
 
         if (current.firstFrame) {
             startHeartbeat(current.ctx)
@@ -310,6 +390,15 @@ class PlaybackReporter @Inject constructor(
 
     private companion object {
         const val DEFAULT_QN = 64
+        const val TAG = "PlaybackReporter"
+
+        /**
+         * 本地历史检查点间隔（L4-101）。5s 的取舍：
+         * - 上界：即使用户"看一半直接退出/被杀"，最多丢 5s 进度（此前是"丢到 0:00"）；
+         * - 下界：稳态播放约 12 次 Room upsert/分钟（单行、几十字节），相对已有的
+         *   30s 心搏与暂停/播完上报可忽略。
+         */
+        const val HISTORY_CHECKPOINT_INTERVAL_MS = 5_000L
     }
 }
 
