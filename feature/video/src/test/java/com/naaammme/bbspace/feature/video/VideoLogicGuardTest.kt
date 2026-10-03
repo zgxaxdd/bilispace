@@ -1557,26 +1557,42 @@ class VideoLogicGuardTest {
     }
 
     /**
-     * 会话内评论悬浮卡片（v5 定稿）：**主题实底面板 + 贴底顶部圆角**。
+     * 会话内评论悬浮卡片：**半透明主题面板 + 贴底顶部圆角**（SX-10 / 决策 D-2）。
      *
      * 收敛史：v1 主题亮色 surface 铺在视频上读作"白补丁"→ v2 强制深色（被质疑
      * 「为什么默认深色」）→ v3 真液态玻璃（大面逐帧 RenderEffect，评论滚动期间
-     * 持续吃 GPU，且"磨砂板上浮白卡"双层观感奇怪）→ v5 终版：主题 surface 实底
-     * 面板（浅/深主题自适应）、条目自然融合、零模糊成本。形状 remember 一次。
+     * 持续吃 GPU，且"磨砂板上浮白卡"双层观感奇怪）→ v5 主题 surface 实底
+     * → **v6（SX-10/D-2）：`surface + alpha` 半透明，透出背后画面，零模糊**。
+     *
+     * ## 为什么断言形态要改（W27：形态变了必须同批改守卫并写明理由）
+     * 决策 D-2（用户 2026-10-03：「评论区不要模糊，用透明就可以，保证流畅度」）
+     * 把 v5 的"实底 surface"改成了"半透明 surface"，所以：
+     * ① 底色断言从 `colorScheme.surface,` 改为 `surface.copy(alpha = COMMENT_CARD_ALPHA),`；
+     * ② **新增** D-2 的硬门禁（结构侧）：面板文件里 `hazeBlur(` / `drawBackdrop(` 命中必须为 0
+     *    —— 离屏模糊每帧都要重新录制整屏内容，与"流畅度优先"直接冲突；
+     * ③ 其余不变：不强制深色、sheetTop 圆角、形状 remember、CommentPanel 在 Surface 之内。
      */
     @Test
-    fun swipeCommentCardUsesThemedSurfaceSheet() {
+    fun swipeCommentCardIsTranslucentAndBlurFree() {
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
-            "评论卡片必须是**主题实底面板**：color = colorScheme.surface、contentColor = onSurface" +
-                "（不强制深色：darkColorScheme 计数为 0；不做背景模糊：pager 内 playerControlGlass " +
-                "计数为 0）；只用 sheetTop 顶部圆角，且形状必须 remember（不许每次重组重建）。",
-            countMatching(pager, """color = MaterialTheme\.colorScheme\.surface,""") == 1 &&
+            "评论卡片必须是**半透明主题面板**：color = colorScheme.surface.copy(alpha = …)、" +
+                "contentColor = onSurface（不强制深色：darkColorScheme 计数为 0）；" +
+                "只用 sheetTop 顶部圆角，且形状必须 remember（不许每次重组重建）。",
+            countMatching(pager, """color = MaterialTheme\.colorScheme\.surface\.copy\(alpha = COMMENT_CARD_ALPHA\),""") == 1 &&
                 countMatching(pager, """contentColor = MaterialTheme\.colorScheme\.onSurface""") == 1 &&
                 countMatching(pager, """darkColorScheme\(""") == 0 &&
-                countMatching(pager, """playerControlGlass\(""") == 0 &&
                 countMatching(pager, """BiliRadius\.sheetTop""") >= 2 &&
-                countMatching(pager, """val commentCardShape = remember""") == 1
+                countMatching(pager, """val commentCardShape = remember""") == 1 &&
+                countMatching(pager, """private const val COMMENT_CARD_ALPHA = """) == 1
+        )
+        assertTrue(
+            "**D-2 硬门禁（结构侧）：评论面板所在文件里不得出现任何模糊入口** —— " +
+                "`hazeBlur(` / `drawBackdrop(` / `playerControlGlass(` 命中数必须全为 0。" +
+                "大面模糊是逐帧离屏 RenderEffect，评论滚动期间持续吃 GPU，是卡顿主因。",
+            countMatching(pager, """hazeBlur\(""") == 0 &&
+                countMatching(pager, """drawBackdrop\(""") == 0 &&
+                countMatching(pager, """playerControlGlass\(""") == 0
         )
         run {
             val surfaceAt = pager.indexOfFirst { it.contains("Surface(") }

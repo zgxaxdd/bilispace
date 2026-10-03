@@ -736,6 +736,16 @@ internal fun PortraitSwipePager(
     //   逐帧 RenderEffect，评论列表滚动期间持续吃 GPU，卡顿的主因之一；
     //   之前的"磨砂板上浮白卡"双层观感也随之消失：实底面板上条目自然融合；
     // - 顶部圆角（sheetTop）贴底 + 投影，形状 remember 一次，不随重组重建。
+    //
+    // v6（SX-10 / 决策 **D-2**，用户 2026-10-03 拍板「评论区不要模糊，用透明就可以，
+    // 保证流畅度」）：实底 → **alpha 半透明**，卡片透出背后的视频，"悬浮"感成立。
+    // - **只用 alpha，不引入任何模糊**：`hazeBlur(` / `drawBackdrop(` 一个都不加
+    //   （离屏模糊是每帧成本，正是本仓 AP/FL 批次重点治理项）；
+    // - **不新增图层**：只把既有的一次填充改成半透明（遮罩本来就是半透明），
+    //   图元数量不变 ⇒ 过度绘制不上升；若真机帧率劣化，按 D-2 减层而不是加模糊；
+    // - 对比度红线：alpha 取 0.72（与 `HomeLivePage` 的半透明 surface 同档），
+    //   卡片下还有 `COMMENT_SCRIM_ALPHA` 的 42% 黑遮罩压着视频，正文仍是
+    //   `onSurface` on `surface`，真机需复核浅色/深色可读性（L4-121）。
     if (showComments) {
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
@@ -751,7 +761,8 @@ internal fun PortraitSwipePager(
                 )
             }
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                // SX-10 / D-2：半透明悬浮卡片——只用 alpha 透出背后画面，**不加任何模糊**。
+                color = MaterialTheme.colorScheme.surface.copy(alpha = COMMENT_CARD_ALPHA),
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 shape = commentCardShape,
                 shadowElevation = COMMENT_CARD_ELEVATION,
@@ -932,6 +943,15 @@ private const val COMMENT_CARD_HEIGHT_FRACTION = 0.68f
 
 /** 卡片外遮罩：够暗以突出卡片，又不至于让视频"消失"。 */
 private const val COMMENT_SCRIM_ALPHA = 0.42f
+
+/**
+ * 评论悬浮卡片的底色 alpha（SX-10 / 决策 D-2：**只用透明、不要模糊**）。
+ *
+ * 取 0.72 与 `HomeLivePage` 的半透明 surface 同档：卡片能透出背后视频，
+ * 而卡片下还压着 [COMMENT_SCRIM_ALPHA] 的遮罩 ⇒ 正文对比度仍可接受。
+ * 真机复核浅色/深色可读性见 L4-121。
+ */
+private const val COMMENT_CARD_ALPHA = 0.72f
 
 /** 卡片阴影高度（4dp 档：浮起但不"飘"）。 */
 private val COMMENT_CARD_ELEVATION = 8.dp
