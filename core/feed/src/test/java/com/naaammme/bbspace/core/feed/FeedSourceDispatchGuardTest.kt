@@ -200,6 +200,32 @@ class FeedSourceDispatchGuardTest {
 
     // ── MERGED 并行 + 交错合并 ───────────────────────────────────────────────
 
+    /**
+     * SX-12：MERGED 的运行时证据必须 **release 可见**。
+     *
+     * 「MERGED 有没有真的把两路合起来」只能靠计数日志回答；而 `Logger.d` 是
+     * debug 门控的（`Logger.isDebug`），稳定版根本打不出来 —— 上一会话之所以
+     * 只能"在 debug 包上看"，就是因为这条日志被门控了，于是这条命题在真机上
+     * **永远缺证据**。断言锚在「直写 Log.i」这个**调用形态**上（W18/W20/W21）。
+     */
+    @Test
+    fun mergedCountLogIsVisibleInRelease() {
+        val merged = blockBody(codeOf("feed${FS}FeedRepository.kt"), "private suspend fun fetchMergedFeed(")
+        assertTrue(
+            "MERGED 的计数日志必须直写 android.util.Log.i（release 可见），不得退回 Logger.d。",
+            merged.any { it.contains("android.util.Log.i(") } &&
+                merged.none { it.contains("Logger.d(TAG)") }
+        )
+        assertTrue(
+            "日志必须给出两路条目数（web=… mobile=…）——这是「两路都在有效取流」的直接证据。",
+            merged.any { it.contains("\"MERGED 档：web=") }
+        )
+        assertTrue(
+            "还必须给出单边失败时的异常类名（L4-123「单边失败仍出内容」的取证口径）。",
+            merged.any { it.contains("webErr=") } && merged.any { it.contains("mobileErr=") }
+        )
+    }
+
     @Test
     fun mergedRunsBothSourcesInParallelAndInterleaves() {
         val merged = blockBody(codeOf("feed${FS}FeedRepository.kt"), "private suspend fun fetchMergedFeed(")

@@ -117,6 +117,8 @@
 
 | AF-01 | 全屏播放器**视频截图**（保存相册 + 保存后"分享 / 保留"） | `feature/video/player/VideoPlayerPane.kt`（TextureView 的 `playerView` 已在手）、播放设置侧栏 ⋮ 的动作文案 | bbspace 完全没有截图功能（全仓 `截图` 只出现在注释里）；上游 `34d189620` 做的就是这件事：`captureAndSaveVideoScreenshotUri` 返回 Uri，保存成功后弹"是否分享这张截图"，并且**协程取消时把已插入的 MediaStore 行删掉**（否则相册里留一张写坏的图）。位置：`feature/video/util/VideoScreenshotUtils.kt`、`ui/components/VideoScreenshotSharePrompt.kt:24-56` | **需真机** | 可离线判定的部分只有纯逻辑（文件名/MediaStore 值映射/重入守卫 `!capturing && pendingUri == null`）；但**取帧是否正确、相册是否可见、分享权限是否授予**三条都必须设备上验，无设备不许做 | 待办（**需真机**） |
 
+| MG-01 | MERGED 档 app 半边对齐上游 `android_hd` 身份链路 | `core/feed/FeedRepository.kt` 的 `fetchMergedFeed` / `fetchMobile`；需要一条新的签名链路（`android_hd` 身份头 + percent-encode 原样发送 + cookie 剥离 + buvid3 引导） | 上游 `BP:app/src/main/java/com/android/purebilibili/data/repository/VideoRepository.kt:787-833` `fetchMergedMobileFeed`：`mobi_app="android_hd"`、`force_host=2`、`fnval=976`、`pull = idx==0`、已登录补 `access_key`、`signForAndroidHdLogin` + `percentEncode`；bbspace 直接复用 `fetchMobile`（appkey+sign）。**SX-12 结论：不并入本批、单独立项** —— ①需要新增签名能力（铁律 11）；②收益是"app 半边推荐桶"（内容构成），不是正确性修复，现有 MERGED 语义上确实合并了两路；③无真机无法判断收益正负；④与 SX-04 同批会放大数据层变更面、出问题无法归因（W37） | B | **需真机 AB**：三档各滑 ≥5 页 + 看 `MERGED 档：web=N mobile=M webErr=… mobileErr=…`（release 可见，SX-12 已加）+ 内容构成目视对照。纯逻辑侧先单测（参数集/签名/去重键）；设备侧只做只读走查 | 待办（**单独立项 + 需真机**） |
+
 ---
 
 ## 已关闭 / 不需再做（防重复劳动）

@@ -172,6 +172,14 @@ class FeedRepository @Inject constructor(
     /**
      * MERGED 档：双源并行取流后按 [FeedMergePolicy] 交错合并去重。
      * 单边失败返回存活边；两边都失败才抛错（方案 §4.5）。
+     *
+     * ## 为什么这里直写 `android.util.Log.i`（SX-12）
+     * 「MERGED 到底有没有真的把两路合起来」是 SX-12 的核心命题，而唯一能直接回答它的
+     * 运行时证据就是这条计数日志。**`Logger.d` 是 debug 门控的**（`Logger.isDebug`），
+     * 稳定版（release）根本打不出来 —— 上一会话之所以只能"在 debug 包上看"，
+     * 就是因为这条日志被门控了。故与 `PortraitSwipe` 同款：直写 `Log.i`，release 也可见
+     * （每档每次请求一行，含单边失败时的**异常类名**，供 L4-123「单边失败仍出内容」取证）。
+     * 同一提交加结构守卫：这条日志不许退回 `Logger.d`。
      */
     private suspend fun fetchMergedFeed(cursor: FeedCursor, pull: Boolean, flush: Int): FeedResult =
         coroutineScope {
@@ -186,7 +194,13 @@ class FeedRepository @Inject constructor(
                 Logger.w(TAG) { "MERGED 档两侧都为空/都失败：${error?.message}" }
                 throw (error as? Exception) ?: IllegalStateException("合并推荐流两侧都没有可用内容")
             }
-            Logger.d(TAG) { "MERGED 档：web=${webItems.size} mobile=${mobileItems.size}" }
+            // SX-12：release 可见的计数证据（不只有条目数，还带单边失败时的异常类名）。
+            android.util.Log.i(
+                TAG,
+                "MERGED 档：web=${webItems.size} mobile=${mobileItems.size} " +
+                    "webErr=${webResult.exceptionOrNull()?.javaClass?.simpleName ?: "none"} " +
+                    "mobileErr=${mobileResult.exceptionOrNull()?.javaClass?.simpleName ?: "none"}"
+            )
             FeedResult(
                 items = withContext(Dispatchers.Default) {
                     FeedMergePolicy.mergeFeeds(web = webItems, app = mobileItems)
