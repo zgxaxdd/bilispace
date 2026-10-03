@@ -1829,6 +1829,56 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SX-07（用户需求⑦「点评论要有"展开"的缓动曲线动画」）：评论卡片的展开/收起必须有缓动，
+     * 且动效**全部来自 token**。
+     *
+     * 落点确认（W4）：用户说的"展开"是**评论面板的出现**，因为 `feature/comment` 里
+     * 根本没有评论正文的展开/收起功能（`CommentReplyCard` 的 `expanded` 是 `DropdownMenu` 的
+     * 参数，不是正文折叠）。改动前面板是 `if (showComments)` 的**瞬时出现**。
+     *
+     * 断言锚在**调用/表达式形态**上（W18/W20/W21）：
+     * ① 面板必须走 AnimatedVisibility 且绑定 showComments（不再是 if 瞬时切换）；
+     * ② 时长与曲线必须取自 LocalAnimations（long/medium + emphasized/standard），
+     *    不许手写字面量时长；
+     * ③ 卡片走 slideInVertically/slideOutVertically（高度本来就固定占比 ⇒ 无高度动画、不抖邻居）；
+     * ④ 不得为此新增 animate*AsState / rememberInfiniteTransition（FrameBudgetLintTest 棘轮口径）。
+     */
+    @Test
+    fun commentCardExpandHasEasedAnimationFromTokens() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "SX-07：面板不能再是 `if (showComments)` 的瞬时出现/消失，必须走 AnimatedVisibility " +
+                "（遮罩 + 卡片两处，都绑 showComments）。",
+            countMatching(pager, """AnimatedVisibility\(""") >= 2 &&
+                countMatching(pager, """visible = showComments,""") == 2 &&
+                countMatching(pager, """if \(showComments\) \{""") == 0
+        )
+        assertTrue(
+            "SX-07 要点②：时长与曲线必须来自 LocalAnimations 的 token ——" +
+                "进入用 long + 强调曲线，退出与遮罩用 medium + 标准曲线；不许手写 tween 字面量时长。",
+            countMatching(
+                pager,
+                """tween\(commentAnimations\.long, easing = commentAnimations\.emphasized\)"""
+            ) == 2 &&
+                countMatching(
+                    pager,
+                    """tween\(commentAnimations\.medium, easing = commentAnimations\.standard\)"""
+                ) == 4
+        )
+        assertTrue(
+            "SX-07 要点③⑤：卡片从下方滑入/滑出（高度本来就固定占比 ⇒ 全程无高度变化，" +
+                "不会先塌后长、不抖相邻内容）。",
+            countMatching(pager, """slideInVertically\(""") == 1 &&
+                countMatching(pager, """slideOutVertically\(""") == 1
+        )
+        assertTrue(
+            "SX-07 要点①：不许为这条动画新增 animate*AsState / rememberInfiniteTransition。",
+            countMatching(pager, """animate[A-Za-z]*AsState\(""") == 0 &&
+                countMatching(pager, """rememberInfiniteTransition\(""") == 0
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }

@@ -6,6 +6,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.geometry.Offset
@@ -746,14 +748,51 @@ internal fun PortraitSwipePager(
     // - 对比度红线：alpha 取 0.72（与 `HomeLivePage` 的半透明 surface 同档），
     //   卡片下还有 `COMMENT_SCRIM_ALPHA` 的 42% 黑遮罩压着视频，正文仍是
     //   `onSurface` on `surface`，真机需复核浅色/深色可读性（L4-121）。
-    if (showComments) {
-        Box(modifier = Modifier.fillMaxSize()) {
+    // v7（SX-07 / 用户需求⑦「点评论要有"展开"的缓动曲线动画」）：面板原来是 `if (showComments)`
+    // **瞬时出现/消失**。改为 AnimatedVisibility：
+    // - 时长与曲线**全走 LocalAnimations 的 token**（进出用 long/medium，曲线用主题的
+    //   强调 / 标准曲线），不手写 `tween(300)` 之类的字面量时长（要点②）；
+    // - **不新增 `animate*AsState` / `rememberInfiniteTransition`**（FrameBudgetLintTest 棘轮）；
+    // - 遮罩**只淡入淡出**：它铺满全屏，跟着滑动会在动画期间露出没遮住的边缘；
+    // - 卡片**从下方 1/3 屏滑入 + 淡入**；卡片高度本来就是固定占比
+    //   （`COMMENT_CARD_HEIGHT_FRACTION`），全程没有高度变化 ⇒ 不会"先塌后长"、不抖邻居（要点③⑤）；
+    // - `reduceMotion`（动效速度=关）：`createAnimations` 已把各档时长压到 ~1ms，
+    //   所以直接读 token 就自然退化成"瞬时到位且不闪"（要点④），不需要另写分支。
+    val commentAnimations = LocalAnimations.current
+    Box(modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = showComments,
+            enter = fadeIn(
+                tween(commentAnimations.medium, easing = commentAnimations.standard)
+            ),
+            exit = fadeOut(
+                tween(commentAnimations.medium, easing = commentAnimations.standard)
+            )
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = COMMENT_SCRIM_ALPHA))
                     .clickable(onClick = { showComments = false })
             )
+        }
+        AnimatedVisibility(
+            visible = showComments,
+            enter = slideInVertically(
+                animationSpec = tween(commentAnimations.long, easing = commentAnimations.emphasized),
+                // 从下方 1/3 高度滑入：读作"卡片升起来"，而不是整屏跳一下
+                initialOffsetY = { it / 3 }
+            ) + fadeIn(
+                tween(commentAnimations.long, easing = commentAnimations.emphasized)
+            ),
+            exit = slideOutVertically(
+                animationSpec = tween(commentAnimations.medium, easing = commentAnimations.standard),
+                targetOffsetY = { it / 3 }
+            ) + fadeOut(
+                tween(commentAnimations.medium, easing = commentAnimations.standard)
+            ),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             val commentCardShape = remember {
                 RoundedCornerShape(
                     topStart = BiliRadius.sheetTop,
@@ -767,7 +806,6 @@ internal fun PortraitSwipePager(
                 shape = commentCardShape,
                 shadowElevation = COMMENT_CARD_ELEVATION,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(COMMENT_CARD_HEIGHT_FRACTION)
             ) {
