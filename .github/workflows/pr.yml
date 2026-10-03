@@ -29,13 +29,61 @@ jobs:
         run: chmod +x gradlew && ./gradlew :app:assembleDebug --stacktrace
 
       - name: Unit tests
-        # --rerun：本仓十几个"结构守卫"是运行时自己读源码文件的（File().readLines()），
-        # 而被扫文件**不是** Test 任务的声明输入（只有 testClassesDirs/classpath 是）。
-        # setup-gradle 默认开着构建缓存，于是这些任务可能 FROM-CACHE / UP-TO-DATE 被跳过，
-        # 表现为"PR 门全绿但守卫根本没跑"（只有改动不进字节码时才会命中：改注释、
-        # 把文件挪到拼错的同包名目录等 —— 正是守卫最该拦的那类）。
-        # 测试门禁本来就该每次真跑，这里不为省几十秒留这个洞。
-        run: ./gradlew :infra:player:testDebugUnitTest :core:rank:testDebugUnitTest :feature:video:testDebugUnitTest :app:testDebugUnitTest --rerun --stacktrace
+        # ── 为什么不能写成「一条命令 + --rerun」（2026-10-03 实测，NX-11）────────────
+        # `--rerun` 是**任务选项**，多任务命令行下它只作用于**命令行的最后一个任务**，
+        # 其余任务照常判 UP-TO-DATE / FROM-CACHE 并静默跳过（FINDINGS W22 复核：仍成立，
+        # 且比原结论更精确 —— 不是"被丢掉"，是"只给最后一个"）。
+        # 实测：`A B --rerun` → A 跳过、B 执行；`B A --rerun` → B 跳过、A 执行。
+        # 旧写法 `A B C D --rerun` 里真正复跑的只有 D=:app，A/B/C 的守卫形同虚设。
+        # ── 为什么需要 --rerun ─────────────────────────────────────────────────
+        # 本仓的"结构守卫"在运行时自己读源码文件（File().readLines()），而被扫文件
+        # **不是** Test 任务的声明输入（只有 testClassesDirs/classpath 是）。
+        # setup-gradle 默认开构建缓存，于是这些任务可能被跳过，表现为"PR 门全绿但守卫
+        # 根本没跑"（只有改动不进字节码时才命中：改注释、把文件挪到拼错的同包名目录等
+        # —— 正是守卫最该拦的那类）。
+        # ── 本步骤做两件事 ────────────────────────────────────────────────────
+        # 1. 逐模块**单任务**调用（--rerun 才会生效）；
+        # 2. **自己校验任务真的执行了**：日志里必须是裸 `> Task :x:testDebugUnitTest`，
+        #    出现 UP-TO-DATE / FROM-CACHE / SKIPPED 就判失败。只靠注释约束不住未来，
+        #    这一条让 W22 那类行为变化**当场暴露**，而不是等守卫漏过一次真实回归。
+        # 代价：每模块一次 Gradle 调用（多花几次配置时间）；不改为 --rerun-tasks
+        # （那会连编译一起重跑，PR 时长暴涨）。
+        #
+        # 模块清单的取舍口径 = **含"扫源码型守卫"的模块**（判据：
+        # `grep -rl -E "settings\.gradle\.kts|walkTopDown\(\)" <module>/src/test`）。
+        # 旧清单漏了 `:core:designsystem` —— 而它正是 PT 批次红了 5 条的模块。
+        # 纯行为型测试的模块（core:comment / feature:rank / infra:network-http 等，
+        # 实测 0 个扫源码文件）不进清单，避免白付 PR 时长。
+        run: |
+          set -euo pipefail
+          MODULES=(
+            ":app"
+            ":core:designsystem"
+            ":core:feed"
+            ":core:playback"
+            ":core:settings"
+            ":core:common"
+            ":feature:settings"
+            ":feature:video"
+            ":infra:coldstart"
+            ":infra:player"
+            ":core:rank"
+          )
+          for m in "${MODULES[@]}"; do
+            log="/tmp/test${m//:/_}.log"
+            echo "::group::Unit tests $m"
+            ./gradlew "$m:testDebugUnitTest" --rerun --console=plain --stacktrace 2>&1 | tee "$log"
+            echo "::endgroup::"
+            # 反向守卫：本任务这一轮必须**真的执行**，否则这次门禁等于没跑。
+            if grep -qE "^> Task ${m}:testDebugUnitTest( UP-TO-DATE| FROM-CACHE| SKIPPED| NO-SOURCE)" "$log"; then
+              echo "::error::$m:testDebugUnitTest 本轮被跳过（UP-TO-DATE/FROM-CACHE/SKIPPED）—— --rerun 没有生效，守卫等于没跑。"
+              exit 1
+            fi
+            if ! grep -qE "^> Task ${m}:testDebugUnitTest$" "$log"; then
+              echo "::error::日志里找不到 $m:testDebugUnitTest 的执行行，无法确认它跑过。"
+              exit 1
+            fi
+          done
 
       - name: Upload test reports
         if: failure()
