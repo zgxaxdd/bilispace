@@ -1929,6 +1929,44 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * SX-08（用户需求⑧「下滑切下一个视频要有缓动曲线动画」）：换页的**吸附动画**
+     * 必须显式配置、曲线走 token，且不破坏既有的预组合与越界阻尼约束。
+     *
+     * 改动前的实际状态（读源码核实）：`PortraitSwipePager` 的 `VerticalPager`
+     * **没有** `flingBehavior`（全文件 0 命中）⇒ 用的是 Compose 框架默认 spring：
+     * ① 曲线不可控、也不在本仓的动效语言里；② **不理会**「动效速度 = 关」
+     * （`reduceMotion`）—— 关掉动效的用户翻页照样看得到一整段动画。
+     * 本轮把**吸附那一段**显式化（时长 `animations.long`、曲线 `animations.emphasized`），
+     * 只换吸附、不碰"翻到哪一页"的判据。
+     */
+    @Test
+    fun pagerSnapAnimationIsExplicitTokenDriven() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "SX-08：换页吸附必须显式给 `flingBehavior = PagerDefaults.flingBehavior(...)`。",
+            countMatching(pager, """flingBehavior = PagerDefaults\.flingBehavior\(""") == 1 &&
+                countMatching(pager, """state = pagerState,""") >= 1
+        )
+        assertTrue(
+            "SX-08 要点②：吸附时长与曲线必须走 token（`animations.long` + 主题强调曲线），" +
+                "不许手写字面量时长。",
+            countMatching(pager, """snapAnimationSpec = tween\(""") == 1 &&
+                countMatching(pager, """durationMillis = animations\.long,""") == 1 &&
+                countMatching(pager, """easing = animations\.emphasized""") == 1
+        )
+        assertTrue(
+            "SX-08 要点③④：**只换吸附** —— 预组合与越界阻尼必须原样保留" +
+                "（`beyondViewportPageCount = 1`；reduceMotion 时不接阻尼连接）。",
+            countMatching(pager, """beyondViewportPageCount = 1""") == 1 &&
+                countMatching(
+                    pager,
+                    """if \(reduceMotion\) Modifier else Modifier\.nestedScroll\(overScrollConnection\)"""
+                ) == 1 &&
+                countMatching(pager, """SwipePageTransformPolicy\.overScrollTranslation\(""") == 1
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }

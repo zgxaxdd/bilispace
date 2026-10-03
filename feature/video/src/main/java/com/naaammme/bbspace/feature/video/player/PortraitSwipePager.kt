@@ -29,6 +29,7 @@ import com.naaammme.bbspace.feature.comment.CommentPanel
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
@@ -492,7 +493,8 @@ internal fun PortraitSwipePager(
     // 1:1 跟手由 VerticalPager 自带；这里补的是"带走感"（出页轻微缩放 + 淡出）
     // 与"越界阻尼"（滑到末端还继续拖，画面按系数折减跟随、松手回弹）。
     // 读值一律在 graphicsLayer 的 lambda 里（绘制阶段读取 → 不触发重组）。
-    val reduceMotion = LocalAnimations.current.reduceMotion
+    val animations = LocalAnimations.current
+    val reduceMotion = animations.reduceMotion
     var rawOverScroll by remember { mutableStateOf(0f) }
     val overScrollConnection = remember(reduceMotion) {
         object : NestedScrollConnection {
@@ -533,6 +535,23 @@ internal fun PortraitSwipePager(
         VerticalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
+            // ── SX-08（用户需求⑧"下滑切下一个视频要有缓动曲线动画"）──────────────
+            // 改动前这里用 Compose 默认 `flingBehavior`：吸附曲线是**框架默认 spring**、
+            // 而且**不理会**本仓的「动效速度 = 关」（`reduceMotion`）—— 关掉动效的用户
+            // 翻页照样会看到一整段动画。这里把**吸附那一段**显式化：
+            // · 时长取 `animations.long`、曲线取主题的**强调曲线**（与 SX-07 同一套语言，
+            //   不手写字面量时长）；
+            // · `reduceMotion` 时 `createAnimations` 已把各档压到 ~1ms ⇒ 瞬时吸附（无障碍降级）；
+            // · 只换吸附动画，`pagerSnapDistance` / `decayAnimationSpec` 仍用框架默认，
+            //   即**不碰"翻到哪一页"的判据** —— 要点③④要求的 veil 先等首帧、
+            //   `beyondViewportPageCount` 预组合、快速连滑不打架都不受影响。
+            flingBehavior = PagerDefaults.flingBehavior(
+                state = pagerState,
+                snapAnimationSpec = tween(
+                    durationMillis = animations.long,
+                    easing = animations.emphasized
+                )
+            ),
             modifier = Modifier
                 .fillMaxSize()
                 // SW-10：越界阻尼（观察未消费位移 + 松手回弹；reduceMotion 时不接）
