@@ -2253,7 +2253,9 @@ private fun PlayerCtrlBarHost(
         },
         onSeekDone = {
             val next = dragMs() ?: return@PlayerCtrlBar
-            viewModel.seekTo(next)
+            // PB-02：**用户主动** seek 的唯一入口 → 走关键帧吸附（经 seekUserInitiated）；
+            // 内部跳转（SponsorBlock/自动片尾）走精确的 seekTo，两者刻意分开。
+            viewModel.seekUserInitiated(next)
             onDragMsChange(null)
         },
         modifier = modifier

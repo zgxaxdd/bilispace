@@ -222,6 +222,9 @@ class Media3PlayerEngine @Inject constructor(
             val mediaSource = buildMediaSource(source, itemMetadata)
             player.setMediaSource(mediaSource)
             if (startPositionMs != null && startPositionMs > 0) {
+                // PB-02：续播/恢复**必须精确**（吸附后的粗值会被写回历史记录）。
+                // 这里显式断言 DEFAULT，而不是"假设上一步没设过 CLOSEST_SYNC"。
+                runCatching { player.setSeekParameters(SeekParametersPolicy.forPreciseSeek()) }
                 player.seekTo(startPositionMs.coerceAtLeast(0L))
             }
             player.playWhenReady = playWhenReady
@@ -280,7 +283,27 @@ class Media3PlayerEngine @Inject constructor(
 
     override fun seekTo(positionMs: Long) {
         val player = exoPlayer ?: return
+        // PB-02：**每次精确 seek 前重新断言** DEFAULT。媒体3 的 setSeekParameters 是保持状态
+        // （不是单次参数）：上一次用户拖拽设下的 CLOSEST_SYNC 会残留，不重新断言，
+        // 下一次 SponsorBlock 跳段/续播就会被吸附到关键帧。
+        runCatching { player.setSeekParameters(SeekParametersPolicy.forPreciseSeek()) }
         player.seekTo(positionMs.coerceAtLeast(0L))
+        updatePlaybackProgress()
+    }
+
+    /**
+     * PB-02：用户主动 seek（进度条拖拽松手）走关键帧吸附，换取更快的落点。
+     *
+     * 成对设置：`CLOSEST_SYNC` → `seekTo` → 恢复 `DEFAULT`。恢复放在同一次调用里，
+     * 是为了不让"用户拖拽"这个意图泄漏给后续的内部 seek；而 [seekTo] 侧还会在每次
+     * 精确 seek 前再断言一次 DEFAULT —— 两道保险：无论吸附是在 seek 消息内生效，
+     * 还是被推迟到后续的 doSomeWork 才生效，精确路径都不会被污染。
+     */
+    override fun seekUserInitiated(positionMs: Long) {
+        val player = exoPlayer ?: return
+        runCatching { player.setSeekParameters(SeekParametersPolicy.forUserSeek()) }
+        player.seekTo(positionMs.coerceAtLeast(0L))
+        runCatching { player.setSeekParameters(SeekParametersPolicy.forPreciseSeek()) }
         updatePlaybackProgress()
     }
 

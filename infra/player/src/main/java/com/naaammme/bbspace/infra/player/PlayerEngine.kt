@@ -44,7 +44,23 @@ interface PlayerEngine {
      */
     fun setRepeatMode(repeatOne: Boolean)
 
+    /**
+     * 精确 seek（媒体3 默认 `SeekParameters.DEFAULT`）。
+     *
+     * 用途：**需要落到确切位置**的 seek —— 续播/恢复、SponsorBlock 跳段、
+     * 自动片尾跳转、进度复位。这些都不能被吸附到关键帧（见 [SeekParametersPolicy]）。
+     */
     fun seekTo(positionMs: Long)
+
+    /**
+     * **用户主动** seek（PB-02）：只由"进度条拖拽松手"这类入口调用，实现走关键帧吸附
+     * （`SeekParameters.CLOSEST_SYNC`）以获得更快的落点。
+     *
+     * ⚠️ **不要**把它接到内部跳转上（SponsorBlock 跳段 / 自动片尾 / 续播）：
+     * 那些需要精确边界，且续播位置会被写回历史记录。判据与理由见 [SeekParametersPolicy]。
+     */
+    fun seekUserInitiated(positionMs: Long)
+
     fun setMediaMetadata(metadata: MediaMetadata)
     fun stopForReuse(resetPosition: Boolean = true)
     fun release()

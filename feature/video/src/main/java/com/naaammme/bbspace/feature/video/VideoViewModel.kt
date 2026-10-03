@@ -1132,8 +1132,26 @@ class VideoViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 精确 seek —— **内部跳转专用**：SponsorBlock 跳恰饭/片头片尾、自动片尾跳转
+     * 都走这里（它们需要精确落到片段边界；被吸附到关键帧会重新落进片段内，
+     * 触发一次重入）。用户拖进度条请用 [seekUserInitiated]。
+     */
     fun seekTo(positionMs: Long) {
         playbackController.seekTo(positionMs)
+    }
+
+    /**
+     * **用户主动** seek（进度条拖拽松手，PB-02）→ 走关键帧吸附，落点更快。
+     *
+     * 语义移植自上游 BiliPai（`VideoPlayerState.kt:1026,1072-1075` 的
+     * `if (seekFastEnabled) CLOSEST_SYNC else DEFAULT`），但**只作用于用户主动 seek**：
+     * 上游是"设置项开关 → 所有 seek 都吸附"，而 bbspace 的 SponsorBlock 跳段与续播
+     * 共用同一个入口，全局吸附会让跳段失效并污染续播位置（见
+     * `infra/player/SeekParametersPolicy` 的分档表）。
+     */
+    fun seekUserInitiated(positionMs: Long) {
+        playbackController.seekUserInitiated(positionMs)
     }
 
     fun setSpeed(speed: Float) {

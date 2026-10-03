@@ -280,6 +280,17 @@ class StreamPlaybackSessionImpl @Inject constructor(
         danmakuSession.seekTo(positionMs)
     }
 
+    /**
+     * PB-02：用户主动 seek（进度条拖拽松手）→ 引擎走关键帧吸附。
+     * 弹幕会话仍按**精确位置**同步（弹幕按 6 分钟窗口取，与画面吸附到哪一帧无关，
+     * 且吸附后的位置本来就在用户目标附近）。续播/跳段**不走这里**。
+     */
+    override fun seekUserInitiated(positionMs: Long) {
+        if (_currentTarget.value !is StreamPlaybackTarget.Video) return
+        playerEngine.seekUserInitiated(positionMs)
+        danmakuSession.seekTo(positionMs)
+    }
+
     override fun setSpeed(speed: Float) {
         if (_currentTarget.value !is StreamPlaybackTarget.Video) return
         playerEngine.setSpeed(speed)
