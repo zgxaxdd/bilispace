@@ -714,8 +714,13 @@ media3 1.11 的 `CacheKeyFactory` 返回非空 String，"返回 null 即绕过"�
 | `2817b5d0` | **SX-05** | 先核实"大部分本来就成立"（系统栏 immersive `VideoScreen.kt:402-414`、`fullOn` 下详情不组合、顶栏/控制条由 `showCtrl` 门控、进全屏 `showCtrl` 初值 false）；真正缺的两条：①超时去裸字面量 → 新增 `PlayerChromePolicy`（`AUTO_HIDE_MS` 与改动前**同值** 2s + 纯判据 `shouldAutoHide`）；②补「**拖动**唤出」控件。新增 `PlayerChromePolicyTest`（5 例纯 JVM） |
 | `3705d18a` | **SX-08** | 现状核实：`VerticalPager` 的 `flingBehavior` **0 命中** ⇒ 框架默认 spring，且**不理会** `reduceMotion`（本仓其它动效全都降级了，唯独 pager 没有）。改为显式 `PagerDefaults.flingBehavior(snapAnimationSpec = tween(animations.long, animations.emphasized))` —— 时长/曲线走 token、reduceMotion 瞬时吸附；**只换吸附**，`beyondViewportPageCount`/越界阻尼/veil 判据未动 |
 
-**本批未做（1 项，理由见执行报告 §2.2）**：**SX-06 阻塞**（"先测量"类任务，无真机拿不到基线，
-先改再补测会永久丢失归因能力 —— W41）。
+**本批未完成（1 项）**：**SX-06** —— 拆成两半处理：
+· **静态核查已完成**（第 4 轮，`docs/2026-10-04-评论区性能静态核查-SX06.md`）：
+  任务书要点②列的 6 类嫌疑**逐条核查、全部为"已处理"**（列表 key/contentType 齐全、
+  组合期无重活/正则文件级预编译/JSON 只在 VM、头像 URL 层夹取、加载更多走 derivedStateOf、
+  富文本解析与 inlineContent 都 remember）⇒ **没有"独立于测量就能正当化"的改动点**。
+· **帧率改动仍阻塞**：任务书第一条就是「先量再改」，无真机 ⇒ 基线不存在；
+  先改再补测会让前后对照永久失效（W41）。测量协议（含刷新率上下文、≥3 轮取中位）已写进上文文档 §4。
 
 > 更正上一轮的判断：SX-05 / SX-08 上一轮被判为"观感/手感类、CI 咬不住"而搁置；本轮重读源码后
 > 发现**各自的实质约束里都有一部分是 CI 能咬住的**（SX-05 的"判据去字面量 + 拖动唤出"、
