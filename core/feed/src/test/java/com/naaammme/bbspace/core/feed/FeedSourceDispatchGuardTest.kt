@@ -56,23 +56,52 @@ class FeedSourceDispatchGuardTest {
         )
     }
 
+    /**
+     * SX-04 / 决策 D-1：**接力按来源取游标**，任何路径都不得让 web 侧的 `idx` 参与翻页。
+     *
+     * ## 为什么把旧断言反转（旧名 `legacyThreeArgEntryAlwaysUsesAppProtocol`）
+     * 旧断言钉的是"旧入口 `fetchFeed(idx, …)` 恒走 app 协议"，其存在理由是：
+     * **接力依赖 app 协议回传的 idx 翻页**，而 web 协议不下发 idx（恒 0），
+     * 一旦接力也按设置切 WEB 就会拿 `idx=0` 反复拉同一页 —— 静默死循环。
+     *
+     * 决策 D-1（用户 2026-10-03 拍板：刷视频的推荐流必须与设置里的推荐来源保持同步）
+     * 把这个前提**推翻**了：死循环风险改由**来源自持游标**正面解决
+     * （app 侧 `FeedCursor.appIdx` / web 侧 `FeedCursor.webPage`，推进规则收在
+     * `SwipeFeedCursorPolicy`），而不是靠"掐掉来源切换"。旧入口因此在同一提交里
+     * 收敛删除（`grep` 确认删除前只剩接力一个调用点：首页早已在游标重载上）。
+     */
     @Test
-    fun legacyThreeArgEntryAlwaysUsesAppProtocol() {
-        val legacy = blockBody(codeOf("feed${FS}FeedRepository.kt"), "suspend fun fetchFeed(idx: Long")
+    fun swipeRelayFollowsFeedSourceWithSourceOwnedCursor() {
+        val repo = codeOf("feed${FS}FeedRepository.kt")
         assertTrue(
-            "既有签名 `fetchFeed(idx, pull, flush)` 必须保留（方案 §4.2：签名不变）。",
-            legacy.any { it.contains("suspend fun fetchFeed(idx: Long, pull: Boolean, flush: Int)") }
+            "旧入口 `fetchFeed(idx, pull, flush)` 必须已删除：它是「恒 app 协议」的唯一载体，" +
+                "留着就等于给 WEB 档的静默死循环留后门（决策 D-1 后其存在理由不再成立）。",
+            repo.none { it.contains("suspend fun fetchFeed(idx: Long") } &&
+                repo.none { it.contains("return fetchMobile(idx, pull, flush)") }
         )
         assertTrue(
-            "旧入口必须恒走 app 协议（fetchMobile），**不**按设置分派：刷视频接力靠 app 协议的 " +
-                "idx 翻页，切到 WEB（无 idx）会让接力拿 idx=0 反复拉同一页。",
-            legacy.any { it.contains("return fetchMobile(idx, pull, flush)") } &&
-                legacy.none { it.contains("feedApiType") } &&
-                legacy.none { it.contains("FeedCursor") }
+            "唯一的取流入口必须是**感知来源**的游标重载。",
+            repo.any { it.contains("suspend fun fetchFeed(cursor: FeedCursor, pull: Boolean, flush: Int)") } &&
+                repo.any { it.contains("appSettings.feedApiType.first()") }
+        )
+
+        val sources = codeOf("swipesource${FS}SwipeSources.kt")
+        assertTrue(
+            "接力必须改走游标重载（`fetchFeed(cursor = feedCursor, …)`），且不得再出现任何 `fetchFeed(idx =`。",
+            sources.any { it.contains("feedRepository.fetchFeed(cursor = feedCursor, pull = false, flush = 0)") } &&
+                sources.none { it.contains("fetchFeed(idx =") }
         )
         assertTrue(
-            "跟随设置切换来源的只有首页 —— 除首页外的调用点（SwipeSources 接力）必须仍打旧入口。",
-            codeOf("swipesource${FS}SwipeSources.kt").any { it.contains("fetchFeed(idx = idx, pull = false, flush = 0)") }
+            "**web 侧 idx 不得参与翻页**：接力游标必须两套分页空间各自推进 —— " +
+                "web 页序号走 `SwipeFeedCursorPolicy`（webPage），app 侧才是 idx。" +
+                "断言锚在「换算 / 推进调用」这个**调用形态**上（W18/W20/W21），不锚注释、不锚字面量。",
+            sources.any { it.contains("SwipeFeedCursorPolicy.toFeedCursor(cursor)") } &&
+                sources.any { it.contains("SwipeFeedCursorPolicy.advance(feedCursor)") }
+        )
+        assertTrue(
+            "接力游标回填必须走同一个策略（不许在 VM 里手写 `+1`，也不许退回 idx 单游标）。",
+            codeOf("feature${FS}video${FS}VideoViewModel.kt")
+                .any { it.contains("SwipeFeedCursorPolicy.toFeedCursorOrInitial(batch.nextCursor)") }
         )
     }
 

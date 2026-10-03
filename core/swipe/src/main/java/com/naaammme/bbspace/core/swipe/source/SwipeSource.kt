@@ -5,10 +5,17 @@ import com.naaammme.bbspace.core.swipe.SwipeEntry
 /**
  * 多源编排在**会话阶段**的游标：`idx` 是推荐流分页游标（fetchFeed 的 idx），
  * `sourceId` 记录游标属于哪个源——不同源的分页空间互不相通。
+ *
+ * [webPage]（SX-04）是**第二套分页空间**：web 协议（`/x/web-interface/wbi/…/rcmd`）
+ * 不向客户端下发任何游标，只能靠本地页序号翻页。推荐来源可切 WEB/MERGED（决策 D-1，
+ * 刷视频接力跟随"推荐来源"设置）之后，同一个源必须**同时**持有两套游标，
+ * 换算与推进规则见 `HomeFeedSwipeSource` 的 `SwipeFeedCursorPolicy`。
+ * 只走 app 协议的调用点可以忽略本字段（默认 0）。
  */
 data class SwipeCursor(
     val sourceId: String? = null,
     val idx: Long = 0L,
+    val webPage: Int = 0,
 )
 
 /** 流量成本档位：决定蜂窝（计费网络）下该源是否可用。 */

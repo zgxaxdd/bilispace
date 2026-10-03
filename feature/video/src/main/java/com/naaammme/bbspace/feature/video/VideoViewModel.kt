@@ -12,10 +12,12 @@ import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.common.relation.UpBlocker
 import com.naaammme.bbspace.core.settings.blocked.BlockedUpStore
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
+import com.naaammme.bbspace.core.feed.FeedCursor
 import com.naaammme.bbspace.core.feed.FeedDislikeRepository
 import com.naaammme.bbspace.core.feed.FeedRepository
 import com.naaammme.bbspace.core.feed.StoryFeedRepository
 import com.naaammme.bbspace.core.settings.AppSettings
+import com.naaammme.bbspace.core.settings.FeedApiType
 import com.naaammme.bbspace.core.playback.VideoPlaybackController
 import com.naaammme.bbspace.core.playback.VideoPlayerRepository
 import com.naaammme.bbspace.core.playback.repository.PlayUrlCacheMetrics
@@ -64,11 +66,11 @@ import com.naaammme.bbspace.core.swipe.session.swipeSessionSnapshotJson
 import com.naaammme.bbspace.core.swipe.selectSwipeRefillFallbackTarget
 import com.naaammme.bbspace.core.swipe.shouldFetchNextRefillPage
 import com.naaammme.bbspace.core.swipe.shouldRunSwipeRefillFallback
-import com.naaammme.bbspace.core.swipe.source.SwipeCursor
 import com.naaammme.bbspace.core.swipe.source.SwipeSourceRegistry
 import com.naaammme.bbspace.core.swipe.swipeEntriesFromRelates
 import com.naaammme.bbspace.feature.video.swipesource.HomeFeedSwipeSource
 import com.naaammme.bbspace.feature.video.swipesource.StoryFeedSwipeSource
+import com.naaammme.bbspace.feature.video.swipesource.SwipeFeedCursorPolicy
 import com.naaammme.bbspace.feature.video.swipesource.SwipeSeenStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -544,8 +546,19 @@ class VideoViewModel @Inject constructor(
 
     private var storyBootstrapStarted = false
 
-    /** 首页推荐流的分页游标（SW-05 起由 SwipeSourceBatch.nextCursor 回填）。 */
-    private var storyFeedCursor = 0L
+    /**
+     * 刷视频接力的**来源自持游标**（SX-04 / 决策 D-1）。
+     *
+     * 与首页同一套 [FeedCursor]：app 协议推进 [FeedCursor.appIdx]、web 协议推进
+     * [FeedCursor.webPage]；到底走哪一路由 [FeedRepository.fetchFeed] 按设置里的
+     * **推荐来源**分派，推进规则收在 `SwipeFeedCursorPolicy`（纯函数、可纯 JVM 单测）。
+     * 换来源时**必须整体重置**——两套分页空间不能混用（否则重复 / 跳页）。
+     */
+    private var swipeFeedCursor = FeedCursor.Initial
+
+    /** 推荐来源的最近一次观察值（SX-04）：只用于"换来源 → 重置接力游标"的变化检测。 */
+    private var swipeFeedSource = FeedApiType.MOBILE
+
     private var loadingMoreSwipe = false
 
     init {
@@ -566,6 +579,23 @@ class VideoViewModel @Inject constructor(
                     "restore: page=${snap.page} queue=${snap.queue.size} via=${snap.via}"
                 )
             }
+        // SX-04（决策 D-1）：刷视频接力跟随"推荐来源"设置。换来源时必须**整体重置**接力游标
+        // —— app 与 web 的翻页语义不同（见 FeedCursor 的 KDoc），旧游标在新档位下会重复/跳页。
+        // 写法与 HomeViewModel 对齐：首次发射 = 当前落盘值，不触发多余的重置与刷新。
+        viewModelScope.launch {
+            var firstEmission = true
+            playerSettings.feedApiType.collect { source ->
+                if (firstEmission) {
+                    firstEmission = false
+                    swipeFeedSource = source
+                    return@collect
+                }
+                if (source == swipeFeedSource) return@collect
+                swipeFeedSource = source
+                swipeFeedCursor = FeedCursor.Initial
+                android.util.Log.i("PortraitSwipe", "feedSource: switch=$source cursor=reset")
+            }
+        }
     }
 
     /**
@@ -613,13 +643,15 @@ class VideoViewModel @Inject constructor(
                     )
                 )
             )
+            // 起步 = 新会话 = 游标整体重置（app / web 两套分页空间都从头开始，SX-04）。
+            swipeFeedCursor = FeedCursor.Initial
             val batch = registry.nextBatch(
-                cursor = SwipeCursor(sourceId = HomeFeedSwipeSource.ID, idx = 0),
+                cursor = SwipeFeedCursorPolicy.initial(HomeFeedSwipeSource.ID),
                 limit = SwipeSourceRegistry.REFILL_LIMIT,
                 isUnmetered = true
             )
             if (batch?.sourceId == HomeFeedSwipeSource.ID) {
-                storyFeedCursor = batch.nextCursor?.idx ?: 0L
+                swipeFeedCursor = SwipeFeedCursorPolicy.toFeedCursorOrInitial(batch.nextCursor)
             }
             // 跨会话已推去重（D7，默认开）：给过的不再推；remember 在入队时记
             val dedupEnabled = playerSettings.state.first().playback.crossSessionDedup
@@ -671,13 +703,14 @@ class VideoViewModel @Inject constructor(
             // story（Heavy）不进补货源集——它是起步兜底，不是接力源。
             val registry = SwipeSourceRegistry(listOf(HomeFeedSwipeSource(feedRepository)))
             while (shouldFetchNextRefillPage(attempts = attempts, appended = appended)) {
-                val page = storyFeedCursor
+                val page = swipeFeedCursor
                 val batch = registry.nextBatch(
-                    cursor = SwipeCursor(sourceId = HomeFeedSwipeSource.ID, idx = page),
+                    cursor = SwipeFeedCursorPolicy.toSwipeCursor(page, HomeFeedSwipeSource.ID),
                     limit = SwipeSourceRegistry.REFILL_LIMIT,
                     isUnmetered = isUnmetered
                 ) ?: break
-                storyFeedCursor = batch.nextCursor?.idx ?: break
+                val next = batch.nextCursor ?: break
+                swipeFeedCursor = SwipeFeedCursorPolicy.toFeedCursor(next)
                 attempts += 1
                 val fresh = if (dedupEnabled) {
                     seenStore.filterFresh(batch.entries)
@@ -693,7 +726,9 @@ class VideoViewModel @Inject constructor(
                 appended += added
                 android.util.Log.i(
                     "PortraitSwipe",
-                    "more: page=$page items=${batch.entries.size} fresh=${fresh.size} " +
+                    // SX-04：把两套游标都打出来，真机核对"游标单调递增、不反复拉同一页"
+                    // （L4-122 的取证口径：app/idx 与 web/page 各自递增）。
+                    "more: page=${page.appIdx}/${page.webPage} items=${batch.entries.size} fresh=${fresh.size} " +
                         "added=$added attempts=$attempts queue=${swipeSession.queue.value.size}"
                 )
             }

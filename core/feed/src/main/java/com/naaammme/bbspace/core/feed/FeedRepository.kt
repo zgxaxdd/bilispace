@@ -77,24 +77,20 @@ class FeedRepository @Inject constructor(
     val toastFlow: SharedFlow<FeedToast> = _toastFlow
 
     /**
-     * 既有入口，**签名保持逐字不变**（方案 §4.2），且**恒走 app 协议**。
-     *
-     * ⚠️ 这里偏离了任务书 §4.2 的字面要求（"只在内部按来源分派"）：本入口不只首页在用——
-     * 刷视频的无限接力（`feature/video/.../swipe/SwipeSources.kt`）也调它，并且**依赖
-     * app 协议的 `idx` 回传**翻页。web 协议不下发 `idx`（恒 0），一旦把这条路径也按设置
-     * 切到 WEB，接力会拿着 `idx=0` 反复拉同一页 —— 静默的死循环。
-     * 所以：**跟随设置切换来源的只有首页**（[HomeViewModel] 走下面的游标重载），
-     * 其余调用点维持历史行为（app 协议）。切换来源不影响它们。
-     */
-    suspend fun fetchFeed(idx: Long, pull: Boolean, flush: Int): FeedResult {
-        return fetchMobile(idx, pull, flush)
-    }
-
-    /**
-     * 按 **首页推荐来源** 分派（PT-10 §4.2）：
+     * 按**推荐来源**分派的唯一取流入口（PT-10 §4.2；SX-04/D-1 之后刷视频接力也走这里）：
      * - [FeedApiType.MOBILE] → [fetchMobile]（= 改动前的主体，逐字照搬）；
      * - [FeedApiType.WEB] → [fetchWebFeed]（WBI 签名；密钥取不到时回退 MOBILE 并记日志）；
      * - [FeedApiType.MERGED] → [fetchMergedFeed]（双源并行交错合并，单边失败返回存活边）。
+     *
+     * ## 旧入口 `fetchFeed(idx, pull, flush)` 已在 SX-04 删除（决策 D-1）
+     *
+     * 那个重载**恒走 app 协议**，是上一会话为"刷视频接力靠 `idx` 翻页"留的后门：
+     * web 协议不下发 `idx`，切入 WEB 档后接力会拿着 `idx=0` 反复拉同一页（静默死循环）。
+     * 决策 D-1 定了「刷视频的推荐流必须与设置里的推荐来源保持同步」之后，这条偏离的
+     * 存在理由不再成立，而它恰恰是上述风险的唯一载体。`grep` 确认删除前只剩
+     * `HomeFeedSwipeSource` 一个调用点（首页早已在游标重载上），故整条收敛删除；
+     * 接力改为来源自持游标（`SwipeFeedCursorPolicy`）。守卫同步反转并写明理由：
+     * `FeedSourceDispatchGuardTest.swipeRelayFollowsFeedSourceWithSourceOwnedCursor`。
      */
     suspend fun fetchFeed(cursor: FeedCursor, pull: Boolean, flush: Int): FeedResult {
         return when (appSettings.feedApiType.first()) {

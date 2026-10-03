@@ -19,9 +19,14 @@ class HomeFeedSwipeSource(
     override val diversity: Float = 1f
 
     override suspend fun next(cursor: SwipeCursor, limit: Int): SwipeSourceBatch {
-        val idx = cursor.idx.coerceAtLeast(0L)
+        // SX-04（决策 D-1）：接力不再直连"恒 app 协议"的旧入口 `fetchFeed(idx, …)`，
+        // 改走**感知推荐来源**的游标重载 —— 用户在设置里选 WEB/MERGED 时，刷视频的内容
+        // 构成随之变化（web 只有普通视频、没有"不感兴趣"），这是**有意的默认行为变化**；
+        // 默认 MOBILE 档的取流参数与推进值与改动前逐字一致（零回归红线）。
+        // 游标由接力自己持有：app 侧 = FeedCursor.appIdx，web 侧 = FeedCursor.webPage。
+        val feedCursor = SwipeFeedCursorPolicy.toFeedCursor(cursor)
         val result = runCatchingCancellable {
-            feedRepository.fetchFeed(idx = idx, pull = false, flush = 0)
+            feedRepository.fetchFeed(cursor = feedCursor, pull = false, flush = 0)
         }.getOrNull() ?: return emptyBatch()
         if (result.items.isEmpty()) return emptyBatch()
         // SW-04 的三源映射结论在源实现处落地（守卫盯着这里不许退回 VM）
@@ -29,7 +34,10 @@ class HomeFeedSwipeSource(
         return SwipeSourceBatch(
             sourceId = id,
             entries = entries,
-            nextCursor = SwipeCursor(sourceId = id, idx = idx + 1)
+            nextCursor = SwipeFeedCursorPolicy.toSwipeCursor(
+                SwipeFeedCursorPolicy.advance(feedCursor),
+                id
+            )
         )
     }
 

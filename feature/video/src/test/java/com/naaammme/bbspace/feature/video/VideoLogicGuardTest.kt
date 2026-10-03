@@ -1630,7 +1630,10 @@ class VideoLogicGuardTest {
             countMatching(vm, """HomeFeedSwipeSource\(feedRepository\)""") >= 2 &&
                 countMatching(vm, """StoryFeedSwipeSource\(""") == 1 &&
                 countMatching(vm, """bootstrap: source=""") == 1 &&
-                countMatching(sources, """feedRepository\.fetchFeed\(idx = idx, pull = false, flush = 0\)""") == 1 &&
+                // SX-04/D-1：接力改走**感知推荐来源**的游标重载（旧入口 fetchFeed(idx,…) 已删除），
+                // 形态守卫随形态同步更新 —— 取流调用点必须只剩游标重载这一种。
+                countMatching(sources, """feedRepository\.fetchFeed\(cursor = feedCursor, pull = false, flush = 0\)""") == 1 &&
+                countMatching(sources, """feedRepository\.fetchFeed\(idx =""") == 0 &&
                 countMatching(sources, """storyFeedRepository\.fetchStoryFeed\(""") == 1
         )
     }
