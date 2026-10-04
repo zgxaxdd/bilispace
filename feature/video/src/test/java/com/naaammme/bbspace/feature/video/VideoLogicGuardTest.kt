@@ -1100,8 +1100,13 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "面板在场时互动栏必须让位；收起落位必须在 NonCancellable 里" +
-                "（hide() 是挂起点，宿主被取消时后面的赋值不会跑）。",
-            countMatching(pager, """&&\s*!showFavSheet""") == 1 &&
+                "（hide() 是挂起点，宿主被取消时后面的赋值不会跑）。" +
+                "（**形态更新 · N-1**：会话内新增的悬浮「横屏」按钮也用同一条显隐判据，" +
+                "整文件 `&& !showFavSheet` 因此不再唯一；改为锚**互动栏那一行**，意图不变。）",
+            countMatching(
+                pager,
+                """visible = !playbackSheetVisible && !showComments && !showFavSheet,"""
+            ) == 1 &&
                 countMatching(pager, """withContext\(NonCancellable\) \{ showFavSheet = false \}""") == 1
         )
     }
@@ -1175,12 +1180,18 @@ class VideoLogicGuardTest {
         val pager = codeOf("player/PortraitSwipePager.kt")
         assertTrue(
             "入口只在当前视频是横屏时给（onToggleLandscape.takeIf{!isPortraitVideo}），" +
-                "且与 VideoScreen 的 isPortraitVideo 同源（currentStream）。",
+                "且与 VideoScreen 的 isPortraitVideo 同源（currentStream）。" +
+                "（**形态更新 · N-1**：为算悬浮按钮的「画面下沿」又加了一处 " +
+                "`remember(playbackState.currentStream)`（宽高比），" +
+                "所以改为锚**isPortraitVideo 那一行**，意图不变。）",
             countMatching(
                 pager,
                 """onToggleLandscape = onToggleLandscape\.takeIf \{ !isPortraitVideo \}"""
             ) == 1 &&
-                countMatching(pager, """remember\(playbackState\.currentStream\)""") == 1
+                countMatching(
+                    pager,
+                    """val isPortraitVideo = remember\(playbackState\.currentStream\)"""
+                ) == 1
         )
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
@@ -1623,9 +1634,14 @@ class VideoLogicGuardTest {
         assertTrue(
             "评论卡片必须是**半透明主题面板**：color = colorScheme.surface.copy(alpha = …)、" +
                 "contentColor = onSurface（不强制深色：darkColorScheme 计数为 0）；" +
-                "只用 sheetTop 顶部圆角，且形状必须 remember（不许每次重组重建）。",
+                "只用 sheetTop 顶部圆角，且形状必须 remember（不许每次重组重建）。" +
+                "（**形态更新 · N-1**：会话内新增的悬浮「横屏」胶囊同样用 " +
+                "`contentColor = onSurface`，整文件不再唯一 ⇒ 改为**跨行邻接**锚点，" +
+                "钉住「卡片的 color 与 contentColor 紧挨着」这一形态，意图不变。）",
             countMatching(pager, """color = MaterialTheme\.colorScheme\.surface\.copy\(alpha = COMMENT_CARD_ALPHA\),""") == 1 &&
-                countMatching(pager, """contentColor = MaterialTheme\.colorScheme\.onSurface""") == 1 &&
+                Regex(
+                    """color = MaterialTheme\.colorScheme\.surface\.copy\(alpha = COMMENT_CARD_ALPHA\),\s*contentColor = MaterialTheme\.colorScheme\.onSurface,"""
+                ).containsMatchIn(pager.joinToString("\n")) &&
                 countMatching(pager, """darkColorScheme\(""") == 0 &&
                 countMatching(pager, """BiliRadius\.sheetTop""") >= 2 &&
                 countMatching(pager, """val commentCardShape = remember""") == 1 &&
@@ -2053,6 +2069,49 @@ class VideoLogicGuardTest {
                 "`detailBaseH + BiliRadius.playerCompact` 这种写法会让" +
                 "「比 16:9 更宽的视频」在底部漏出根层黑底。",
             countMatching(screen, """\.height\(detailBaseH \+ BiliRadius\.playerCompact\)""") == 0
+        )
+    }
+
+    /**
+     * N-1（用户真机反馈）：「刷视频模式中，横屏视频下方没有悬浮的横屏按钮，
+     * 必须在顶栏点击横屏」⇒ 会话里遇到**横屏视频**时，画面下方要有一个悬浮「横屏」入口。
+     *
+     * 三条硬要求：①只在「横屏视频 && 未手动横屏」时出现；
+     * ②点击复用**既有**的 `onToggleLandscape`（顶栏胶囊的同一个回调），不许新造转屏状态；
+     * ③位置必须**贴着画面下沿**（由宽高比算 letterbox 下沿 + 居中）——用固定 dp 或固定
+     *   alignment 顶替都会在不同画幅下压到画面或飘到半边。
+     */
+    @Test
+    fun swipeSessionOffersFloatingLandscapeEntryForLandscapeVideos() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "N-1：悬浮入口必须存在，且判据是「横屏视频 && 未手动横屏 && 宽高比已知」。",
+            countMatching(
+                pager,
+                """if \(!isPortraitVideo && !landscapeForced && currentVideoAspect != null &&"""
+            ) == 1
+        )
+        assertTrue(
+            "N-1：点击必须复用既有通路的 `onToggleLandscape`（顶栏那颗胶囊的同一个回调），" +
+                "不许在这里另写转屏状态。",
+            countMatching(pager, """onClick = onToggleLandscape,""") == 1
+        )
+        assertTrue(
+            "N-1：位置必须贴着**画面下沿** —— 由宽高比算出 letterbox 画面高、" +
+                "再取 (屏高 + 画面高) / 2（真机实测视频在会话里垂直居中）。" +
+                "不许换成固定 dp 或固定 alignment。",
+            countMatching(pager, """minOf\(screenHPx, screenWPx / currentVideoAspect\)""") == 1 &&
+                countMatching(pager, """\(screenHPx \+ imageHPx\) / 2f""") == 1
+        )
+        assertTrue(
+            "N-1：必须与互动栏同一显隐判据（弹层/面板在场时一起收），不许浮在评论面板之上。",
+            countMatching(pager, """!playbackSheetVisible && !showComments && !showFavSheet""") >= 2
+        )
+        assertTrue(
+            "N-1：文案是「横屏」，不是「全屏」—— 两个入口语义不同" +
+                "（这里进手动横屏；SX-03 那颗进全屏形变）。",
+            countMatching(pager, """text = "横屏",""") == 1 &&
+                countMatching(pager, """contentDescription = "进入横屏"""") == 1
         )
     }
 

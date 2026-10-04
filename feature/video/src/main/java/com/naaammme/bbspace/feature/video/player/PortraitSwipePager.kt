@@ -10,6 +10,18 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material3.Icon
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -431,6 +443,16 @@ internal fun PortraitSwipePager(
     // 也是 `videoState.ids.aid` ⇒ 二者**同源同步**，`_interaction` 永远对应当前页，
     // 不存在"读到上一页互动状态"的窗口。快照为空时仍回落到 `playbackState`。
     val interaction by viewModel.interaction.collectAsStateWithLifecycle()
+
+    // N-1：当前页视频的宽高比（w/h）—— 只为算"画面下沿"用。
+    // 口径与 `VideoScreen.videoAspect` 一致（同源：`videoState.currentStream`）；
+    // "是不是横屏视频"本文件已有 `isPortraitVideo`（下面），不重复定义。
+    val currentVideoAspect = remember(playbackState.currentStream) {
+        val stream = playbackState.currentStream ?: return@remember null
+        val w = stream.width?.takeIf { it > 0 } ?: return@remember null
+        val h = stream.height?.takeIf { it > 0 } ?: return@remember null
+        w.toFloat() / h.toFloat()
+    }
     val favBottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun closeFavSheet() {
@@ -715,6 +737,38 @@ internal fun PortraitSwipePager(
         //   优先于"加载层期间让位"；计数的短暂缺失由 rail 内部的粘滞值兜住。
         // 互动栏头像/信息层 @名 的出口（SW-20）：mid 为 0（relate 源无 mid）时不接
         // （声明在底部三件套之前——信息层的 @名 与互动栏头像共用这一份）
+        // ── N-1：横屏视频的悬浮「横屏」按钮（用户反馈）─────────────────────────
+        // 原话：「刷视频模式中，横屏视频下方没有悬浮的横屏按钮，必须在顶栏点击横屏」。
+        // 触发：**当前页是横屏视频**（aspect ≥ 1）且**还没被手动横屏**。
+        // 显隐与互动栏同一判据（弹层/面板在场时一起收），避免浮在评论面板之上。
+        // 点击复用顶栏那颗胶囊**同一条通路**（landscapeForced 取反），不新造转屏逻辑。
+        if (!isPortraitVideo && !landscapeForced && currentVideoAspect != null &&
+            !playbackSheetVisible && !showComments && !showFavSheet
+        ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val density = LocalDensity.current
+                val screenHPx = with(density) { maxHeight.toPx() }
+                val screenWPx = with(density) { maxWidth.toPx() }
+                // 会话里视频是 letterbox **垂直居中**的（真机实测：1920×886 的流，
+                // 画面带 1110→1690，中心 1400 = 屏高一半）⇒ 画面下沿 = (屏高 + 画面高) / 2。
+                // 画面高 = 屏宽 / 宽高比（比屏更宽时按宽贴合，不会被拉高）。
+                val imageHPx = minOf(screenHPx, screenWPx / currentVideoAspect)
+                val imageBottomPx = (screenHPx + imageHPx) / 2f
+                SwipeLandscapeFab(
+                    onClick = onToggleLandscape,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = BiliSpacing.md)
+                        .offset {
+                            IntOffset(
+                                0,
+                                (imageBottomPx + with(density) { BiliSpacing.sm.toPx() })
+                                    .roundToInt()
+                            )
+                        }
+                )
+            }
+        }
         AnimatedVisibility(
             visible = !playbackSheetVisible && !showComments && !showFavSheet,
             enter = fadeIn(),
@@ -1134,6 +1188,47 @@ private fun SwipeCoverPage(
                     // 大尺寸：占屏宽 26% 的正方形（不写 dp 字面量，跟着屏幕走）
                     .fillMaxWidth(COVER_LOADER_WIDTH_FRACTION)
                     .aspectRatio(1f)
+            )
+        }
+    }
+}
+
+/**
+ * N-1：会话内**横屏视频**的悬浮「横屏」按钮（用户反馈：
+ * 「刷视频模式中，横屏视频下方没有悬浮的横屏按钮，必须在顶栏点击横屏」）。
+ *
+ * 为什么另起一个而不是复用 `VideoScreen.LandscapeFullscreenFab`（SX-03 的「全屏」钮）：
+ * 那个合成函数的守卫**钉住了它的调用点数量与无障碍文案**（`LandscapeFullscreenFab(` 恰 2 处、
+ * `contentDescription = "进入全屏"` 恰 1 处），参数化会迫使放宽那条守卫；
+ * 而两处语义本来就不同 —— 这里进的是**手动横屏**（会话内锁竖屏 + 点名这一支看满屏），
+ * 那里进的是**全屏形变**。视觉语言（半透明主题面 + 轻投影 + 零模糊 + 圆角胶囊）保持一致。
+ *
+ * 位置由调用点算好（贴在**画面下沿** + 一个小间距），本函数只管长相与点击。
+ */
+@Composable
+private fun SwipeLandscapeFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = CircleShape,
+        shadowElevation = BiliSpacing.xs,
+        modifier = modifier
+            .defaultMinSize(minHeight = BiliSpacing.xxxl * 1.5f)
+            .clickable(onClickLabel = "进入横屏", onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = BiliSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.ScreenRotation,
+                contentDescription = "进入横屏",
+                modifier = Modifier.size(BiliSpacing.xl)
+            )
+            Text(
+                text = "横屏",
+                style = MaterialTheme.typography.labelLarge
             )
         }
     }
