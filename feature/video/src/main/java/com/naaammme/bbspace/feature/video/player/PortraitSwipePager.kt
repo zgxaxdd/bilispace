@@ -74,6 +74,7 @@ import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
+import com.naaammme.bbspace.feature.video.detail.actionCount
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -414,6 +415,22 @@ internal fun PortraitSwipePager(
     val moreSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val swipeDislikeUndoable by viewModel.swipeDislikeUndoable.collectAsStateWithLifecycle()
     val favSheetState by viewModel.favSheet.collectAsStateWithLifecycle()
+
+    // ── VK-01 / SX-09 验收补齐 ────────────────────────────────────────────────
+    // 互动**写**路径（`toggleLike` / 收藏）只更新 VM 的 `_interaction`
+    //（两者都走 `updateInteractionIfCurrent`），而 `playbackState`（= VM 的 `videoState`，
+    // 见上）里的 `detail.userState` / `detail.stat` 是**服务器快照**、写路径从不碰它。
+    // 于是真机上出现"点赞请求成功了（`setLike OK`）但互动栏图标与计数一动不动"——
+    // 用户的原话就是"亮了也不知道、取消赞了也看不出区别"。
+    //
+    // 这里改成按**详情页同一口径**读互动状态：`liked = userState.liked`、
+    // 计数 = `stat.likeValue + likeDelta`（`VideoDetailSummary.kt:352-375` 就是这么算的）。
+    //
+    // 为什么可以放心用、不需要再比一遍 aid：VM 里 `_interaction` 是对 **`videoState`**
+    // 做 map → `distinctUntilChanged()` → 重置得来的，而本文件传出去的 `currentAid`
+    // 也是 `videoState.ids.aid` ⇒ 二者**同源同步**，`_interaction` 永远对应当前页，
+    // 不存在"读到上一页互动状态"的窗口。快照为空时仍回落到 `playbackState`。
+    val interaction by viewModel.interaction.collectAsStateWithLifecycle()
     val favBottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun closeFavSheet() {
@@ -705,8 +722,12 @@ internal fun PortraitSwipePager(
             modifier = Modifier.align(Alignment.BottomEnd)
         ) {
             SwipeSessionActionRail(
-                liked = playbackState.detail?.userState?.liked == true,
-                likeText = playbackState.detail?.stat?.like,
+                // VK-01：优先读**互动状态**（写路径真正更新的那一份），快照为空时回落。
+                liked = interaction.userState?.liked
+                    ?: (playbackState.detail?.userState?.liked == true),
+                likeText = interaction.stat?.likeValue
+                    ?.let { actionCount(it, interaction.likeDelta) }
+                    ?: playbackState.detail?.stat?.like,
                 onToggleLike = viewModel::toggleLike,
                 replyText = playbackState.detail?.stat?.reply,
                 onOpenComments = {
@@ -725,8 +746,11 @@ internal fun PortraitSwipePager(
                     showMoreSheet = true
                     lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
                 },
-                faved = playbackState.detail?.userState?.faved == true,
-                favText = playbackState.detail?.stat?.fav,
+                faved = interaction.userState?.faved
+                    ?: (playbackState.detail?.userState?.faved == true),
+                favText = interaction.stat?.favValue
+                    ?.let { actionCount(it, interaction.favDelta) }
+                    ?: playbackState.detail?.stat?.fav,
                 onOpenFavorite = {
                     // 弹不弹由 `openFavSheet()` 的返回值决定：未登录时它只弹 toast 并返回
                     // false，无条件弹就会把一层空白的"暂无收藏夹"面板盖在"请先登录"上面

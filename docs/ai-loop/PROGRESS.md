@@ -723,10 +723,14 @@ media3 1.11 的 `CacheKeyFactory` 返回非空 String，"返回 null 即绕过"�
   L4-121（浅色+深色都半透明且可读）、L4-122（`feedSource: switch=MERGED cursor=reset`；队列 12→53 游标推进）、
   L4-123（`MERGED 档：web=18 mobile=9 webErr=none mobileErr=none`，release 可见）。
 - ✅ **部分通过 1 条**：L4-118（连拍中途帧证明**有滑入缓动**；「动效速度=关」的降级未测）。
-- ⚠️ **疑似缺陷 1 条**：**L4-120** —— 竖屏互动栏**点赞点击后无任何可见反馈**（图标/计数不变），
-  而同栏评论/收藏/分享正常、**详情页同一 `toggleLike()` 正常（20→21）**、未赞态确实渲染为描边；
-  存在一组**自相矛盾**的观察 ⇒ **根因未定位，按铁律不猜**。登记 BACKLOG **VK-01**，下一步打点定位。
-  写操作只在调试包做、账号**无净变化**（结束时仍为未赞/20）。
+- ⚠️ **疑似缺陷 1 条** → **已定位并修复**：**L4-120 / VK-01** —— 竖屏互动栏点赞"请求成功但界面不动"。
+  打点确认根因：互动栏读 `playbackState.detail`（= VM `videoState` 的**服务器快照**），
+  而互动**写**路径只更新 `_interaction` ⇒ **写一个、读另一个**。
+  已按详情页同口径改读 `interaction`（`liked = userState.liked`、计数 = `stat.xxxValue + xxxDelta`），
+  收藏一并修；新增守卫 `swipeRailReadsInteractionStateNotOnlyTheServerSnapshot`，
+  并**形态更新**两条钉旧字面量的守卫（写明理由）；破坏性验证 = 改回旧形态**三条守卫同时红**。
+  **实测**：未赞=描边/988 → 点一下=**填充+主题色**/989 → 再点=描边/988（账号**无净变化**）；
+  用户亦目视确认「点赞后变绿了」。
 - ✅ **任务书 §6.4 稳定版原地安装通过**：`install -r` → `Success`，`firstInstallTime` **未变**
   （⇒ 数据未丢），只读走查确认登录态/头像保留。
 - 逐项证据与两个调试坑见 **`docs/2026-10-04-真机验证记录-SX.md`**；教训记入 **FINDINGS W46**。

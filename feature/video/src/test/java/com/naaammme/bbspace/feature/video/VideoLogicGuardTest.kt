@@ -1459,14 +1459,19 @@ class VideoLogicGuardTest {
                 "点赞走 viewModel.toggleLike，分享走 ShareUtils.videoUrl + shareText" +
                 "（与详情页同一套链接构造）—— 不许自己造本地状态或另写一套分享。" +
                 "组件定义在 pane 文件（与控制件玻璃同语言），调用点在 pager；" +
-                "BiliPai 手法：数据用本层已收集的 playbackState 传入，调用点不得重复 collect。",
+                "BiliPai 手法：数据用本层已收集的状态传入，调用点不得自己造状态或另存本地副本。" +
+                "（**形态更新 · VK-01（2026-10-04 真机）**：点赞/收藏的选中态与计数从" +
+                "`playbackState.detail…` 改为读本层收集的 `interaction` —— `playbackState` 就是 VM 的 " +
+                "`videoState`，其 `detail.userState/stat` 是**服务器快照**，而互动写路径只更新 " +
+                "`_interaction`；用快照会退化成真机上的「点了没反应」。守卫意图不变：仍是" +
+                "「由调用点传入、组件不自持状态」。）",
             countMatching(pane, """internal fun SwipeSessionActionRail\(""") == 1 &&
                 countMatching(pane, """ShareUtils\.videoUrl\(shareBvid, shareAid, page = 0\)""") == 1 &&
                 countMatching(pane, """ShareUtils\.shareText\(context, shareTitle, url\)""") == 1 &&
                 countMatching(pane, """contentDescription = "分享"""") == 1 &&
                 countMatching(pager, """SwipeSessionActionRail\(""") == 1 &&
-                countMatching(pager, """liked = playbackState\.detail\?\.userState\?\.liked == true""") == 1 &&
-                countMatching(pager, """likeText = playbackState\.detail\?\.stat\?\.like""") == 1 &&
+                countMatching(pager, """liked = interaction\.userState\?\.liked""") == 1 &&
+                countMatching(pager, """actionCount\(it, interaction\.likeDelta\)""") == 1 &&
                 countMatching(pager, """onToggleLike = viewModel::toggleLike""") == 1 &&
                 countMatching(
                     pager,
@@ -1817,9 +1822,12 @@ class VideoLogicGuardTest {
             ) >= 1
         )
         assertTrue(
-            "SX-09 要点④：liked 必须是**单一真值源** —— 由调用点从 playbackState.detail.userState " +
-                "传入，组件内不得另存一份本地 liked。",
-            countMatching(pager, """liked = playbackState\.detail\?\.userState\?\.liked == true""") == 1 &&
+            "SX-09 要点④：liked 必须是**单一真值源** —— 由调用点传入，组件内不得另存一份本地 liked。" +
+                "（**形态更新 · VK-01（2026-10-04 真机）**：真值源由 `playbackState.detail.userState` " +
+                "改为 `interaction.userState`。二者不等价：前者是服务器快照、互动写路径从不更新它，" +
+                "用它就会退化成「点赞成功但图标/数字不动」；`_interaction` 与 `videoState.ids` 同源同步，" +
+                "永远对应当前页。守卫意图不变：仍是「单一真值源 + 组件不自持状态」。）",
+            countMatching(pager, """liked = interaction\.userState\?\.liked""") == 1 &&
                 countMatching(pane, """liked: Boolean,""") == 1
         )
         assertTrue(
@@ -1964,6 +1972,48 @@ class VideoLogicGuardTest {
                     """if \(reduceMotion\) Modifier else Modifier\.nestedScroll\(overScrollConnection\)"""
                 ) == 1 &&
                 countMatching(pager, """SwipePageTransformPolicy\.overScrollTranslation\(""") == 1
+        )
+    }
+
+    /**
+     * VK-01（SX-09 的验收补齐）：互动栏的点赞/收藏**显示**必须读**互动状态**。
+     *
+     * 真机根因（2026-10-04，打点确认）：互动**写**路径只更新 VM 的 `_interaction`
+     * （`toggleLike`/收藏都走 `updateInteractionIfCurrent`），而 `PortraitSwipePager` 里
+     * `playbackState` 就是 VM 的 `videoState`，其 `detail.userState` / `detail.stat`
+     * 是**服务器快照**、写路径从不碰它 ⇒ `setLike OK` 之后图标与计数一动不动，
+     * 用户看到的就是「点了没反应」（原话：亮了也不知道、取消赞了也看不出区别）。
+     *
+     * 修法：按**详情页同一口径**读互动状态 —— `liked = userState.liked`、
+     * 计数 = `actionCount(stat.xxxValue, xxxDelta)`（`VideoDetailSummary.kt:352-375` 同式）。
+     * 本题同时**钉住旧形态不许回来**。
+     */
+    @Test
+    fun swipeRailReadsInteractionStateNotOnlyTheServerSnapshot() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "VK-01：必须订阅互动状态，否则下面的读取没有真值来源。",
+            countMatching(
+                pager,
+                """val interaction by viewModel\.interaction\.collectAsStateWithLifecycle\(\)"""
+            ) == 1
+        )
+        assertTrue(
+            "VK-01：点赞/收藏的选中态必须优先取互动状态（写路径真正更新的那一份）。",
+            countMatching(pager, """liked = interaction\.userState\?\.liked""") == 1 &&
+                countMatching(pager, """faved = interaction\.userState\?\.faved""") == 1
+        )
+        assertTrue(
+            "VK-01：计数必须是「服务器值 + 本地增量」（与详情页 actionCount 同口径），" +
+                "否则点赞成功也不会变数字。",
+            countMatching(pager, """actionCount\(it, interaction\.likeDelta\)""") == 1 &&
+                countMatching(pager, """actionCount\(it, interaction\.favDelta\)""") == 1
+        )
+        assertTrue(
+            "VK-01 回归防护：旧的「只读 playbackState 快照」形态不得回来" +
+                "（点赞/收藏各一处，退化了就是「点了没反应」）。",
+            countMatching(pager, """liked = playbackState\.detail\?\.userState\?\.liked == true""") == 0 &&
+                countMatching(pager, """faved = playbackState\.detail\?\.userState\?\.faved == true""") == 0
         )
     }
 
