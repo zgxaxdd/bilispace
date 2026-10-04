@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -86,6 +87,8 @@ import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.feature.video.VideoViewModel
+import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
+import com.naaammme.bbspace.core.designsystem.component.topSolidProgressiveFade
 import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.feature.video.detail.actionCount
 import com.naaammme.bbspace.core.model.PlayerRepeatMode
@@ -454,6 +457,50 @@ internal fun PortraitSwipePager(
         val h = stream.height?.takeIf { it > 0 } ?: return@remember null
         w.toFloat() / h.toFloat()
     }
+
+    // ── 取色光（用户想法）：把详情页的"接缝光晕"复刻到会话里，而且**上下都洒** ──────
+    // 光色与详情页**同源同参**：同一个 `VideoCardCoverColorStore`、同一个采样尺寸
+    // （480×360 ⇒ 命中同一条缓存、同一个颜色）。
+    // 峰值**固定走详情页的深色档**（0.48）：会话上下的黑边永远是黑的，不存在浅底那一档。
+    // 位置见下面两层 Box 的注释；关键是它必须画在**视频之上** ——
+    // 会话的黑边是 ExoPlayer（`AndroidView`）自己画的、不透明，画在它下面会被整个盖住。
+    // ⚠️ 取色用的 URL 必须是**当前页 `SwipeEntry.cover`** —— 也就是页面那张可见封面
+    // （`VideoPlayerPane` 的 `swipeCoverUrl = entry.cover`、页面里 `BiliAsyncImage(url = entry.cover)`）
+    // 正在加载的**同一个字符串**，这样才命中同一条 Coil 内存缓存、不产生第二次下载。
+    // 早先误用 `detail?.cover`（详情响应的封面字段，URL 常与 entry.cover 不同）⇒
+    // 每次切页都是**未命中** ⇒ 重新下载 + 解码 480×360 ⇒ 真机表现就是
+    // 「光出来得慢、切页不跟手」。这条不是优化，是正确性。
+    val swipeGlowCover = pages.getOrNull(pagerState.currentPage)
+        ?.cover
+        ?.takeIf { it.isNotBlank() }
+    var swipeGlowTint by remember(swipeGlowCover) {
+        mutableStateOf(swipeGlowCover?.let { VideoCardCoverColorStore.getCachedColor(it) })
+    }
+    val activeSwipeGlowKey by rememberUpdatedState(swipeGlowCover)
+    LaunchedEffect(swipeGlowCover) {
+        val key = swipeGlowCover ?: return@LaunchedEffect
+        VideoCardCoverColorStore.requestExtraction(
+            appContext = context.applicationContext,
+            cacheKey = key,
+            url = key,
+            sizePx = SwipeGlowSamplePx,
+            scope = scope
+        ) { color ->
+            // 切页后晚到的取色要丢掉（与详情页同款防串色）
+            if (activeSwipeGlowKey == key) swipeGlowTint = color
+        }
+    }
+    // 取不到色时退纯白（屏幕本光），与详情页口径一致
+    val swipeGlowColor = remember(swipeGlowTint) {
+        swipeGlowTint?.takeIf { it.alpha > 0f } ?: Color.White
+    }
+    val swipeGlowModifier = remember(swipeGlowColor) {
+        Modifier.topSolidProgressiveFade(
+            surfaceColor = swipeGlowColor,
+            fadeHeight = SWIPE_GLOW_HEIGHT,
+            peakAlpha = SWIPE_GLOW_PEAK
+        )
+    }
     val favBottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun closeFavSheet() {
@@ -693,6 +740,58 @@ internal fun PortraitSwipePager(
                     }
                 }
             }
+        // ── 取色光：画面**上下各洒一层**（用户想法）──────────────────────────────
+        // 复刻详情页的接缝光晕（同色源 / 同行程 / 同峰值），但这里视频是 letterbox 居中的，
+        // 所以上下各来一层：向下的那层实心端贴**画面下沿**，向上的那层是同一支 brush
+        // **旋转 180°**（实心端贴画面上沿、向外淡出）—— 不新增任何设计系统 API。
+        //
+        // 两个 z 序要点（都是必须的，不是讲究）：
+        // ① 必须画在**视频之上**：会话的黑边是 ExoPlayer（`AndroidView`）自己画的、不透明，
+        //    画在它下面会被整个盖住；
+        // ② 必须画在**底部信息层之下**：详情页的图层序也是"背景 → 光 → 内容"，
+        //    否则这层光会糊在标题/标签上。
+        // 两层都只落在画面矩形**之外**，所以永远不会盖到画面内容上。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val glowDensity = LocalDensity.current
+            val glowScreenHPx = with(glowDensity) { maxHeight.toPx() }
+            val glowScreenWPx = with(glowDensity) { maxWidth.toPx() }
+            val glowAspect = currentVideoAspect
+            // **竖屏视频同样要有光**（用户反馈：「横屏视频有光，竖屏没有」）——
+            // 竖屏视频在竖屏会话里也不是满屏（例如 1080×1920 贴宽后高度约 2261 < 2800），
+            // 上下照样有黑边，光一样该洒。唯一条件是"宽高比已知"。
+            if (glowAspect != null) {
+                // 与 N-1 用同一套 letterbox 几何（真机实测：画面在会话里垂直居中）
+                val glowImageHPx = minOf(glowScreenHPx, glowScreenWPx / glowAspect)
+                val glowImageTopPx = (glowScreenHPx - glowImageHPx) / 2f
+                val glowImageBottomPx = (glowScreenHPx + glowImageHPx) / 2f
+                // ⚠️ 高度必须**夹进黑边里** —— 光只允许洒在画面上下之外。
+                // 行程 160dp 对 16:9（本机黑边 1106px）绰绰有余，但竖屏视频贴宽后
+                // 黑边只有 ~270px：不夹的话这两层会直接**糊在画面上**（比没有光更糟）。
+                // 夹短之后渐变照样淡出（brush 的 fadeHeight 不变，只是被裁短）。
+                val glowMaxPx = with(glowDensity) { SWIPE_GLOW_HEIGHT.toPx() }
+                val glowDownPx = minOf(glowMaxPx, glowScreenHPx - glowImageBottomPx)
+                val glowUpPx = minOf(glowMaxPx, glowImageTopPx)
+                if (glowDownPx > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(glowDensity) { glowDownPx.toDp() })
+                            .offset { IntOffset(0, glowImageBottomPx.roundToInt()) }
+                            .then(swipeGlowModifier)
+                    )
+                }
+                if (glowUpPx > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(glowDensity) { glowUpPx.toDp() })
+                            .offset { IntOffset(0, (glowImageTopPx - glowUpPx).roundToInt()) }
+                            .graphicsLayer { rotationZ = 180f }
+                            .then(swipeGlowModifier)
+                    )
+                }
+            }
+        }
         // 需求②：**横屏观影时清屏** —— 底部信息层（@名/标题/标签/底部暗角）整块让位，
         // 画面上不剩任何常驻 UI。退出路径见需求③（侧滑返回 = 切回竖屏）。
         if (!landscapeForced) Box(
@@ -1106,6 +1205,24 @@ private const val COMMENT_SCRIM_ALPHA = 0.42f
  * 真机复核浅色/深色可读性见 L4-121。
  */
 private const val COMMENT_CARD_ALPHA = 0.72f
+
+/** 取色光的行程：与详情页同一档（5 × xxxl = 160dp），组件内部会 coerce 到容器内。 */
+private val SWIPE_GLOW_HEIGHT = BiliSpacing.xxxl * 5f
+
+/**
+ * 取色光峰值：**固定用详情页的深色档 0.48**。
+ *
+ * 详情页按主题在 0.48/0.38 之间分档，因为它的光洒在"浅色主题的内容区"上；
+ * 而会话里的光只洒在**上下黑边**上 —— 那里永远是黑的，所以固定深色档，不做主题分支。
+ */
+private const val SWIPE_GLOW_PEAK = 0.48f
+
+/**
+ * 取色采样尺寸：**必须与 `VideoScreen.SeamTintSamplePx` 逐字一致**（`480 to 360`）。
+ * 同一个 `VideoCardCoverColorStore` 的缓存键含尺寸；尺寸不同会走两次提取、
+ * 还有可能算出不同的颜色 ⇒ 同一个视频在详情页与会话里光色会不一致。
+ */
+private val SwipeGlowSamplePx = 480 to 360
 
 /** 卡片阴影高度（4dp 档：浮起但不"飘"）。 */
 private val COMMENT_CARD_ELEVATION = 8.dp

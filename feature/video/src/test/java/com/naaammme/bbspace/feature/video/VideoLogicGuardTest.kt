@@ -2184,6 +2184,76 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * 取色光（用户想法）：把详情页的"接缝光晕"复刻到刷视频会话，**上下都洒**。
+     *
+     * 三条硬要求：①与详情页**同色源同参**（同一个取色 store + 同一个采样尺寸，
+     * 否则同一个视频在两处光色会不一致）；②上下各一层，向上的那层是同一支 brush
+     * **旋转 180°**（不新增设计系统 API）；③两层都落在**画面矩形之外**（贴画面上下沿向外洒）。
+     */
+    @Test
+    fun swipeSessionSpillsCoverGlowAboveAndBelowTheVideo() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        val screen = codeOf("VideoScreen.kt")
+        assertTrue(
+            "①：必须用详情页那支 brush（`topSolidProgressiveFade`）与同一个取色 store。",
+            countMatching(pager, """Modifier\.topSolidProgressiveFade\(""") == 1 &&
+                countMatching(pager, """VideoCardCoverColorStore\.requestExtraction\(""") == 1 &&
+                countMatching(pager, """VideoCardCoverColorStore\.getCachedColor\(""") == 1
+        )
+        assertTrue(
+            "①：采样尺寸必须与详情页**逐字一致**（缓存键含尺寸；不一致会走两次提取、" +
+                "还可能算出不同颜色）。",
+            countMatching(pager, """private val SwipeGlowSamplePx = 480 to 360""") == 1 &&
+                countMatching(screen, """private val SeamTintSamplePx = 480 to 360""") == 1
+        )
+        assertTrue(
+            "①：峰值固定**深色档** 0.48（会话的光只洒在永远为黑的黑边上，不做主题分支）。",
+            countMatching(pager, """private const val SWIPE_GLOW_PEAK = 0\.48f""") == 1
+        )
+        assertTrue(
+            "②：上下各一层 —— 向上的那层必须是**同一支 brush 旋转 180°**" +
+                "（`graphicsLayer { rotationZ = 180f }` 紧跟在 offset 之后、brush 之前）。",
+            countMatching(pager, """\.then\(swipeGlowModifier\)""") == 2 &&
+                countMatching(pager, """\.graphicsLayer \{ rotationZ = 180f \}""") == 1
+        )
+        assertTrue(
+            "③：两层必须分别贴在**画面下沿向外**与**画面上沿向外**（用同一套 letterbox 几何），" +
+                "不许盖到画面内容上；而且高度必须**夹进黑边里** —— 竖屏视频贴宽后黑边只有 ~270px，" +
+                "160dp 的行程不夹就会糊在画面上（比没有光更糟）。",
+            countMatching(
+                pager,
+                """\.offset \{ IntOffset\(0, glowImageBottomPx\.roundToInt\(\)\) \}"""
+            ) == 1 &&
+                countMatching(
+                    pager,
+                    """\.offset \{ IntOffset\(0, \(glowImageTopPx - glowUpPx\)\.roundToInt\(\)\) \}"""
+                ) == 1 &&
+                countMatching(
+                    pager,
+                    """val glowDownPx = minOf\(glowMaxPx, glowScreenHPx - glowImageBottomPx\)"""
+                ) == 1 &&
+                countMatching(pager, """val glowUpPx = minOf\(glowMaxPx, glowImageTopPx\)""") == 1
+        )
+        assertTrue(
+            "④：光**不分画幅** —— 用户真机反馈「横屏视频有光，竖屏没有」，" +
+                "而竖屏视频在竖屏会话里同样有黑边（1080×1920 贴宽后 ~2261 < 2800）。" +
+                "所以门只能是「宽高比已知」，**不得**再出现 `!isPortraitVideo`。",
+            countMatching(pager, """if \(glowAspect != null\) \{""") == 1 &&
+                countMatching(pager, """glowAspect != null && !isPortraitVideo""") == 0
+        )
+        assertTrue(
+            "⑤：取色的 URL 必须是**当前页 `SwipeEntry.cover`**（页面那张可见封面正在加载的同一个串）" +
+                "⇒ 命中同一条 Coil 缓存、不产生第二次下载。用 `detail?.cover` 会每次切页都未命中，" +
+                "真机就是「光出来得慢、切页不跟手」。",
+            countMatching(
+                pager,
+                """val swipeGlowCover = pages\.getOrNull\(pagerState\.currentPage\)"""
+            ) == 1 &&
+                countMatching(pager, """swipeGlowCover = playbackState\.detail\?\.cover""") == 0
+        )
+    }
+
     private fun countMatching(lines: List<String>, regex: String): Int {
         val re = Regex(regex)
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
