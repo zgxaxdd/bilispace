@@ -1,0 +1,276 @@
+Applications Graphics Acceleration Info:
+Uptime: 20292527 Realtime: 54440045
+
+** Graphics info for pid 30472 [com.naaammme.bbspace.debug] **
+
+Stats since: 20287731444131ns
+Total frames rendered: 416
+Janky frames: 1 (0.24%)
+Janky frames (legacy): 19 (4.57%)
+50th percentile: 7ms
+90th percentile: 9ms
+95th percentile: 10ms
+99th percentile: 12ms
+Number Missed Vsync: 0
+Number High input latency: 726
+Number Slow UI thread: 1
+Number Slow bitmap uploads: 0
+Number Slow issue draw commands: 0
+Number Frame deadline missed: 1
+Number Frame deadline missed (legacy): 1
+HISTOGRAM: 5ms=75 6ms=93 7ms=82 8ms=107 9ms=32 10ms=16 11ms=4 12ms=3 13ms=1 14ms=0 15ms=0 16ms=1 17ms=0 18ms=0 19ms=0 20ms=1 21ms=0 22ms=0 23ms=1 24ms=0 25ms=0 26ms=0 27ms=0 28ms=0 29ms=0 30ms=0 31ms=0 32ms=0 34ms=0 36ms=0 38ms=0 40ms=0 42ms=0 44ms=0 46ms=0 48ms=0 53ms=0 57ms=0 61ms=0 65ms=0 69ms=0 73ms=0 77ms=0 81ms=0 85ms=0 89ms=0 93ms=0 97ms=0 101ms=0 105ms=0 109ms=0 113ms=0 117ms=0 121ms=0 125ms=0 129ms=0 133ms=0 150ms=0 200ms=0 250ms=0 300ms=0 350ms=0 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0 700ms=0 750ms=0 800ms=0 850ms=0 900ms=0 950ms=0 1000ms=0 1050ms=0 1100ms=0 1150ms=0 1200ms=0 1250ms=0 1300ms=0 1350ms=0 1400ms=0 1450ms=0 1500ms=0 1550ms=0 1600ms=0 1650ms=0 1700ms=0 1750ms=0 1800ms=0 1850ms=0 1900ms=0 1950ms=0 2000ms=0 2050ms=0 2100ms=0 2150ms=0 2200ms=0 2250ms=0 2300ms=0 2350ms=0 2400ms=0 2450ms=0 2500ms=0 2550ms=0 2600ms=0 2650ms=0 2700ms=0 2750ms=0 2800ms=0 2850ms=0 2900ms=0 2950ms=0 3000ms=0 3050ms=0 3100ms=0 3150ms=0 3200ms=0 3250ms=0 3300ms=0 3350ms=0 3400ms=0 3450ms=0 3500ms=0 3550ms=0 3600ms=0 3650ms=0 3700ms=0 3750ms=0 3800ms=0 3850ms=0 3900ms=0 3950ms=0 4000ms=0 4050ms=0 4100ms=0 4150ms=0 4200ms=0 4250ms=0 4300ms=0 4350ms=0 4400ms=0 4450ms=0 4500ms=0 4550ms=0 4600ms=0 4650ms=0 4700ms=0 4750ms=0 4800ms=0 4850ms=0 4900ms=0 4950ms=0
+50th gpu percentile: 3ms
+90th gpu percentile: 4ms
+95th gpu percentile: 4ms
+99th gpu percentile: 4ms
+GPU HISTOGRAM: 1ms=0 2ms=38 3ms=312 4ms=64 5ms=2 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 4950ms=0
+
+Pipeline=Skia (Vulkan)
+Memory policy:
+  Max surface area: 3561600
+  Max resource usage: 512.87MB (x144)
+  Background retention: 50% (altUiHidden = true)
+  GPU Context timeout: 10
+Contexts: 2 (stopped = 1)
+CPU Caches:
+  Glyph Cache: 940.68 KB (1 entry)
+  Shadows: 4.12 KB (1 entry)
+  Glyph Count: 67 
+Total CPU memory usage:
+  967480 bytes, 944.80 KB (0.00 bytes is purgeable)
+GPU Caches:
+  Other:
+    Other: 84.59 KB (1 entry)
+    Buffer Object: 2.05 KB (2 entries)
+  Image:
+    Surface: 20.23 MB (32 entries)
+  Scratch:
+    Buffer Object: 401.00 KB (20 entries)
+    Surface: 102.37 MB (108 entries)
+Layer Info:
+    VkLayer size 1272x715
+  Layers Total         3552.66 KB (numLayers = 1)
+Total GPU memory usage:
+  129052792 bytes, 123.07 MB (11.82 MB is purgeable)
+
+Skia GPU memory Oplus dumper:
+GPU Caches:
+ 36618492 bytes, 34.92 MB (11.82 MB is purgeable)
+  Buffer Object: 403.05 KB (22 entries)
+    skia/gpu_resources/resource_12886: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_14590: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_11986: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_105  : size[1.88   KB   ] category[Other] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_14093: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_13547: size[32.00  KB   ] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_85   : size[30.00  KB   ] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_11839: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_14589: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_14094: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_7087 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_2177 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_1113 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_2182 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_12885: size[32.00  KB   ] type[Buffer Object] label[MakeVkBuffer] category[Scratch] purgeable_size[32.00 KB]
+    skia/gpu_resources/resource_1114 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_13548: size[32.00  KB   ] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_1117 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_90   : size[48.00  KB   ] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_1148 : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_972  : size[384.00 bytes] category[Scratch] type[Buffer Object] label[MakeVkBuffer]
+    skia/gpu_resources/resource_104  : size[180.00 bytes] category[Other] type[Buffer Object] label[MakeVkBuffer]
+  Surface: 34.53 MB (16 entries)
+    skia/gpu_resources/resource_13754: size[11.25  MB   ] Dimensions[1536:1920] type[Surface] label[MakeDevice/ResourceAllocatorRegister] category[Scratch] purgeable_size[11.25 MB]
+    skia/gpu_resources/resource_13546: size[256.00 KB   ] Dimensions[256:256] type[Surface] label[MakeDevice/ResourceAllocatorRegister] category[Scratch] purgeable_size[256.00 KB]
+    skia/gpu_resources/resource_54   : size[64.00  bytes] Dimensions[8:8] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] category[Image] purgeable_size[64.00 bytes]
+    skia/gpu_resources/resource_7279 : size[14.77  KB   ] Dimensions[123:123] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] category[Image] purgeable_size[14.77 KB]
+    skia/gpu_resources/resource_7263 : size[14.77  KB   ] Dimensions[123:123] category[Image] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] purgeable_size[14.77 KB]
+    skia/gpu_resources/resource_10448: size[6.89   KB   ] category[Image] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] Dimensions[84:84]
+    skia/gpu_resources/resource_7271 : size[14.77  KB   ] Dimensions[123:123] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] category[Image] purgeable_size[14.77 KB]
+    skia/gpu_resources/resource_10445: size[2.74   KB   ] category[Image] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] Dimensions[53:53]
+    skia/gpu_resources/resource_10390: size[6.89   KB   ] category[Image] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] Dimensions[84:84]
+    skia/gpu_resources/resource_10442: size[2.74   KB   ] category[Image] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] Dimensions[53:53]
+    skia/gpu_resources/resource_11838: size[5.31   MB   ] category[Scratch] type[Surface] label[MakeDevice] Dimensions[1280:1088]
+    skia/gpu_resources/resource_11836: size[1.88   MB   ] category[Scratch] type[Surface] label[MakeDevice] Dimensions[1280:384]
+    skia/gpu_resources/resource_10384: size[2.00   MB   ] category[Scratch] type[Surface] label[TextAtlas] Dimensions[2048:1024]
+    skia/gpu_resources/resource_7286 : size[13.75  MB   ] category[Scratch] type[Surface] label[MakeDevice] Dimensions[1280:2816]
+    skia/gpu_resources/resource_7267 : size[14.77  KB   ] Dimensions[123:123] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] category[Image] purgeable_size[14.77 KB]
+    skia/gpu_resources/resource_7275 : size[14.77  KB   ] Dimensions[123:123] type[Surface] label[ProxyProvider_CreateNonMippedProxyFromBitmap] category[Image] purgeable_size[14.77 KB]
+Skia's Wrapped Objects:
+  Surface: 88.07 MB (27 entries)
+    skia/gpu_resources/resource_7325 : size[2.50   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[1080:608]
+    skia/gpu_resources/resource_1858 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_3264 : size[13.59  MB   ] category[Scratch] type[Surface] label[Vk_MakeWrappedTextureRenderTarget] Dimensions[1272:2800]
+    skia/gpu_resources/resource_3862 : size[419.93 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[437:246]
+    skia/gpu_resources/resource_345  : size[56.25  KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[120:120]
+    skia/gpu_resources/resource_3245 : size[13.59  MB   ] category[Scratch] type[Surface] label[Vk_MakeWrappedTextureRenderTarget] Dimensions[1272:2800]
+    skia/gpu_resources/resource_1330 : size[995.20 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[583:437]
+    skia/gpu_resources/resource_3173 : size[13.59  MB   ] category[Scratch] type[Surface] label[Vk_MakeWrappedTextureRenderTarget] Dimensions[1272:2800]
+    skia/gpu_resources/resource_1854 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_1024 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_1456 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_1502 : size[999.19 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[584:438]
+    skia/gpu_resources/resource_1412 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_1655 : size[995.20 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[583:437]
+    skia/gpu_resources/resource_1324 : size[999.19 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[584:438]
+    skia/gpu_resources/resource_1014 : size[995.20 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[583:437]
+    skia/gpu_resources/resource_3893 : size[149.87 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[261:147]
+    skia/gpu_resources/resource_1606 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_3950 : size[576.00 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[512:288]
+    skia/gpu_resources/resource_1781 : size[999.19 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[584:438]
+    skia/gpu_resources/resource_1268 : size[1.17   MB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[640:480]
+    skia/gpu_resources/resource_1773 : size[995.20 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[583:437]
+    skia/gpu_resources/resource_3870 : size[419.93 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[437:246]
+    skia/gpu_resources/resource_3289 : size[13.59  MB   ] category[Scratch] type[Surface] label[Vk_MakeWrappedTextureRenderTarget] Dimensions[1272:2800]
+    skia/gpu_resources/resource_1236 : size[999.19 KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[584:438]
+    skia/gpu_resources/resource_7313 : size[56.25  KB   ] category[Image] type[Surface] label[Vk_MakeWrappedTexture] Dimensions[120:120]
+    skia/gpu_resources/resource_3287 : size[13.59  MB   ] category[Scratch] type[Surface] label[Vk_MakeWrappedTextureRenderTarget] Dimensions[1272:2800]
+Total GPU memory usage:
+122.99 MB (11.82 MB is purgeable)
+
+TextureView: 1272x715
+
+GraphicBufferAllocator buffers:
+            Handle |         Size |     W (Stride) x H | Layers |   Format |      Usage | Requestor
+0xb400007cae7bb640 |  1010.56 KiB |  583 ( 592) x  437 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cae7bbc80 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cae7bc900 |  1012.88 KiB |  584 ( 592) x  438 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cae7bf600 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cb31e3200 |   430.50 KiB |  437 ( 448) x  246 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cb37e7680 |   430.50 KiB |  437 ( 448) x  246 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cb37e7b80 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cb37e7f40 |  1012.88 KiB |  584 ( 592) x  438 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cbc1e8680 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cbc1e8a40 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cc4f4a7c0 |    60.00 KiB |  120 ( 128) x  120 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cc4f4c340 |  1010.56 KiB |  583 ( 592) x  437 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca03ec40 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca1c9f00 |  1012.88 KiB |  584 ( 592) x  438 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca1cba80 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca1cbbc0 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca1cc200 |  1010.56 KiB |  583 ( 592) x  437 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca1cd4c0 |   430.50 KiB |  437 ( 448) x  246 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007cca354c40 |   156.19 KiB |  261 ( 272) x  147 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d817a2000 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d817a2500 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d817a2640 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d81c29f40 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d81c2b5c0 |    60.00 KiB |  120 ( 128) x  120 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d81c2c4c0 |   576.00 KiB |  512 ( 512) x  288 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007d81f51640 | 14000.00 KiB | 1272 (1280) x 2800 |      1 |        1 | 0x     b00 | VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug
+0xb400007d81f51780 | 14000.00 KiB | 1272 (1280) x 2800 |      1 |        1 | 0x     b00 | VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug
+0xb400007d81f518c0 | 14000.00 KiB | 1272 (1280) x 2800 |      1 |        1 | 0x     b00 | VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug
+0xb400007d81f51a00 | 14000.00 KiB | 1272 (1280) x 2800 |      1 |        1 | 0x     b00 | VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug
+0xb400007d81f51b40 | 14000.00 KiB | 1272 (1280) x 2800 |      1 |        1 | 0x     b00 | VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug
+0xb400007d81f52180 | 14000.00 KiB | 1272 (1280) x 2800 |      1 |        1 | 0x     b00 | [BBQ] seamless_view_mask#7158#2(BLAST Consumer)2:com.naaammme.bbspace.debug
+0xb400007d81f55b00 |  1012.88 KiB |  584 ( 592) x  438 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007decc896c0 |  1010.56 KiB |  583 ( 592) x  437 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007decca40c0 |    57.50 KiB |  115 ( 128) x  115 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007e1ec26ec0 |  2584.00 KiB | 1080 (1088) x  608 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007e4349d9c0 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007e4349dc40 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+0xb400007e4349dec0 |  1200.00 KiB |  640 ( 640) x  480 |      1 |        1 | 0x     100 | AHardwareBuffer pid [30472]
+Total allocated by GraphicBufferAllocator (estimate): 114878.94 KB
+Imported gralloc buffers:
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007995, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007990, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007987, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007984, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007985, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007981, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007993, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008010, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007991, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008008, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008010, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007989, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007972, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008009, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007988, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007991, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007996, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007994, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007997, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007980, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007990, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896008013, size:2584.00KiB, w/h:1080x608, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007974, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007978, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007975, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007992, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007984, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007998, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896008003, size:576.00KiB, w/h:512x288, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007985, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896008012, size:60.00KiB, w/h:120x120, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007993, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007981, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007941, size:1012.88KiB, w/h:584x438, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007979, size:430.50KiB, w/h:437x246, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896008000, size:156.19KiB, w/h:261x147, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007943, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007974, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008011, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007969, size:430.50KiB, w/h:437x246, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008008, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007958, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007968, size:430.50KiB, w/h:437x246, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug, id:5123896007965, size:14219.00KiB, w/h:1272x2800, usage: 0xb00, req fmt:1, fourcc/mod:875708993/576460752303423602, dataspace: 0x8810000, compressed: true
++ name:AHardwareBuffer pid [30472], id:5123896007948, size:1010.56KiB, w/h:583x437, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug, id:5123896007964, size:14219.00KiB, w/h:1272x2800, usage: 0xb00, req fmt:1, fourcc/mod:875708993/576460752303423602, dataspace: 0x8810000, compressed: true
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007973, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug, id:5123896007963, size:14219.00KiB, w/h:1272x2800, usage: 0xb00, req fmt:1, fourcc/mod:875708993/576460752303423602, dataspace: 0x8810000, compressed: true
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007987, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug, id:5123896007962, size:14219.00KiB, w/h:1272x2800, usage: 0xb00, req fmt:1, fourcc/mod:875708993/576460752303423602, dataspace: 0x8810000, compressed: true
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007977, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:VRI[VideoDetailActivity]#1(BLAST Consumer)1:com.naaammme.bbspace.debug, id:5123896007961, size:14219.00KiB, w/h:1272x2800, usage: 0xb00, req fmt:1, fourcc/mod:875708993/576460752303423602, dataspace: 0x8810000, compressed: true
++ name:AHardwareBuffer pid [30472], id:5123896007959, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007957, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007994, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007996, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007938, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007956, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896008015, size:57.50KiB, w/h:115x115, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:[BBQ] seamless_view_mask#7158#2(BLAST Consumer)2:com.naaammme.bbspace.debug, id:5123896007967, size:14219.00KiB, w/h:1272x2800, usage: 0xb00, req fmt:1, fourcc/mod:875708993/576460752303423602, dataspace: 0x8810000, compressed: true
++ name:AHardwareBuffer pid [30472], id:5123896007955, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007954, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007953, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007949, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007960, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007944, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:MediaCodec.release:com.naaammme.bbspace.debug, id:5123896008009, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007951, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007940, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007936, size:60.00KiB, w/h:120x120, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007950, size:1012.88KiB, w/h:584x438, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007983, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007945, size:1012.88KiB, w/h:584x438, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007942, size:1010.56KiB, w/h:583x437, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007947, size:1010.56KiB, w/h:583x437, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007977, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007937, size:1010.56KiB, w/h:583x437, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007973, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007989, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007952, size:1200.00KiB, w/h:640x480, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
++ name:SurfaceTexture-0-30472-0:com.naaammme.bbspace.debug, id:5123896007995, size:1464.00KiB, w/h:1280x720, usage: 0x400100, req fmt:2130706448, fourcc/mod:842094158/648518346341355520, dataspace: 0x104, compressed: false
++ name:AHardwareBuffer pid [30472], id:5123896007939, size:1012.88KiB, w/h:584x438, usage: 0x100, req fmt:1, fourcc/mod:875708993/0, dataspace: 0x0, compressed: false
+Total imported by gralloc: 180608.94KiB
+
+Profile data in ms:
+
+	com.naaammme.bbspace.debug/com.naaammme.bbspace.MainActivity/android.view.ViewRootImpl@87a8d7 (visibility=8)
+	com.naaammme.bbspace.debug/com.naaammme.bbspace.video.VideoDetailActivity/android.view.ViewRootImpl@9476904 (visibility=0)
+View hierarchy:
+
+  com.naaammme.bbspace.debug/com.naaammme.bbspace.MainActivity/android.view.ViewRootImpl@87a8d7
+  29 views, 43.84 kB of render nodes
+
+  com.naaammme.bbspace.debug/com.naaammme.bbspace.video.VideoDetailActivity/android.view.ViewRootImpl@9476904
+  53 views, 83.45 kB of render nodes
+
+
+Total ViewRootImpl   : 2
+Total attached Views : 82
+Total RenderNode     : 127.28 kB (used) / 175.59 kB (capacity)
+
+

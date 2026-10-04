@@ -531,3 +531,30 @@ SX-06（评论区滚动帧率）在无真机时被整项搁置了三轮。第 4 
 ③ 剩下的改动点如果**必须由测量指向**，才标阻塞，并把**测量协议**（命令、轮次、刷新率上下文、
    口径）预先写进同一份文档 —— 这样真机一到就是"照跑"，不用重新设计。
 ④ **不要**因为"总得做点什么"就在无基线时改性能代码：那会同时失去归因能力与"没动过"的干净基线。
+
+## W46 · 真机调试三个坑 + 一条"静默返回路径"教训（2026-10-04）
+
+真机第一次上线，前两次手势验证**全部无效**，白花了一轮。三个坑都值得记：
+
+1. **`monkey -c LAUNCHER` 会启动 LeakCanary，不是本 App。** 调试包内置 LeakCanary，它同样注册了
+   LAUNCHER category，`adb shell monkey -p <debug> -c android.intent.category.LAUNCHER 1` 可能拉起
+   `leakcanary.internal.activity.LeakLauncherActivity`。表现极具误导性：**任何手势都"没反应"，
+   连给 App 埋的诊断日志都不打**，非常像"功能坏了"。自检方法：`dumpsys window | grep mCurrentFocus`
+   看前台是不是本 App 的 `MainActivity`。**一律用显式 Activity 启动**。
+2. **手势"进不去"要先怀疑位移阈值，不要先怀疑代码。** 本仓 `pullDownToFullscreen` 的提交阈值是
+   **释放时 progress ≥ 0.5**，progress = 手指位移/(windowBottom − zoneTop)。本机 zoneTop≈856px、
+   span≈1944px ⇒ 要拖 >972px；从 y=2000 起拖 790px（0.41）**不会**提交。所以"同样的手势昨天行、
+   今天不行"往往只是起点选错了（视频带高度随宽高比变化）。
+3. **动效取证：把连拍放进同一条 `adb shell`。** 每次 `adb shell` 往返约 200ms，用 PowerShell 连续调用
+   `screencap` 根本拍不到 300ms 的动画；改成
+   `adb shell "input …; screencap -p f1.png; screencap -p f2.png; …"` 一次下发，
+   就能拍到**中途帧**。判据：中途帧里"面板内容整体偏移""两页同屏、页面边界可见" ⇒ 是连续缓动，
+   不是瞬变。这条比录屏更省事（不需要 ffmpeg），也是本轮把两个"动效项"从"未能验证"变成"通过"的原因。
+
+**教训（最重要）：排查"点了没反应"时，先找有没有 `?: return` 这类静默返回路径。**
+`VideoViewModel.toggleLike` 经 `withInteraction`，而后者有两条不产生任何可视反馈的返回路径：
+`interactionTargetOf() ?: return`（无提示）与 `if (_interaction.value.busy)`（提示语可能不在当前面板显示）。
+于是"按钮没反应"既能由"点击没送达"引起，也能由"送达了但被静默拦下"引起 —— 而**两者的现场表现完全一样**。
+⇒ 遇到此类症状，**先穷举静默返回路径并在每条上埋点**，再谈功能是否有 bug；否则会像我本轮一样，
+在"自相矛盾的两组观察"之间来回，最后只能诚实地写"根因未定位"（**这是正确的取舍，不是失败**
+—— 按铁律不许猜）。同时：**矛盾信号本身就是重要线索**，它排除了"简单地点击没送达"这一类解释。
