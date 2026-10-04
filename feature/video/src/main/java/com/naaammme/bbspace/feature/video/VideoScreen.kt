@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -859,11 +860,22 @@ fun VideoScreen(
                     // 背景层解决——`playerSeamStroke` 里那条会盖住光的垫底色因此删除。
                     val seamGlowRadiusPx = with(density) { BiliRadius.playerCompact.toPx() }
                     // 1. 详情区背景层（主题背景色，z 最低；上移 r 覆盖月牙区）
+                    // N-3（用户真机反馈：「部分视频尺寸较小 ⇒ 屏幕下方出现黑色部分」）：
+                    // 这里**必须铺满整屏高度**，不能再用「预留高度」推出来的 height。
+                    // 旧写法 `.height(detailBaseH + r)` 的下沿是
+                    //   band + maxHeight − compactPlayerSpaceH
+                    // 而 `detailBaseH = maxHeight − compactPlayerSpaceH`、播放带预留是
+                    // `compactPlayerSpaceH = statusTop + 16:9 高度` —— 只要**视频比 16:9 更宽**
+                    // （自然高度更矮 ⇒ `targetVideoPx < baseVideoPx` ⇒ 播放带比预留矮），
+                    // 下沿就比屏幕矮一截 `compactPlayerSpaceH − band`，根层的黑底 (`background(Color.Black)`)
+                    // 从底部透出来。视频越扁漏得越多 —— 与用户"尺寸较小的视频才出现"完全吻合。
+                    // 改成 fillMaxHeight + 下移：起点仍是 `band − r`（月牙区照旧被盖住），
+                    // 但下沿永远越过屏幕底、由父层裁掉 ⇒ 与播放带当前高度**无关**地盖到底。
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .height(detailBaseH + BiliRadius.playerCompact)
+                            .fillMaxHeight()
                             .offset {
                                 IntOffset(
                                     0,

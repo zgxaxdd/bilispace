@@ -329,9 +329,15 @@ class VideoLogicGuardTest {
         assertTrue(
             "接缝层必须是**独立背景层与光晕层、都上移一个圆角半径**：圆角月牙区" +
                 "（播放带 clip 透明处）透出它们——光沿圆角轮廓显示、与弧线相切；" +
-                "被否掉的 AGSL 邻域采样方案（seamProgressiveBlur）不得回退。",
+                "被否掉的 AGSL 邻域采样方案（seamProgressiveBlur）不得回退。" +
+                "（**形态更新 · N-3（2026-10-04）**：背景层高度由 " +
+                "`detailBaseH + BiliRadius.playerCompact` 改为 `fillMaxHeight()` —— " +
+                "旧写法在「比 16:9 更宽的视频」上会让底部漏出根层黑底（用户真机反馈）。" +
+                "本条守卫的**意图不变**：仍是「两个独立层、都靠 .offset 上移一个半径」。" +
+                "）",
             countMatching(lines, """seamGlowRadiusPx""") >= 3 &&
-                countMatching(lines, """height\(detailBaseH \+ BiliRadius\.playerCompact\)""") == 1 &&
+                countMatching(lines, """fillMaxHeight\(\)""") == 1 &&
+                countMatching(lines, """height\(detailBaseH \+ BiliRadius\.playerCompact\)""") == 0 &&
                 countMatching(lines, """height\(seamGlowHeight \+ BiliRadius\.playerCompact\)""") == 1 &&
                 countMatching(lines, """bandMorphHeightPx\(\) - seamGlowRadiusPx""") == 2 &&
                 countMatching(lines, """seamProgressiveBlur""") == 0
@@ -2014,6 +2020,39 @@ class VideoLogicGuardTest {
                 "（点赞/收藏各一处，退化了就是「点了没反应」）。",
             countMatching(pager, """liked = playbackState\.detail\?\.userState\?\.liked == true""") == 0 &&
                 countMatching(pager, """faved = playbackState\.detail\?\.userState\?\.faved == true""") == 0
+        )
+    }
+
+    /**
+     * N-3（用户真机反馈）：「部分视频尺寸较小 ⇒ 屏幕下方出现黑色部分」。
+     *
+     * 根因是**算术**，不是观感：详情区背景层（主题背景色）旧写法用「预留播放带高度」推高度
+     * `.height(detailBaseH + BiliRadius.playerCompact)`，下沿 =
+     * `band + maxHeight − compactPlayerSpaceH`；而
+     * `compactPlayerSpaceH = statusTop + 16:9 高度`、`band = statusTop + 视频当前高度`。
+     * ⇒ 只要视频**比 16:9 更宽**（`targetVideoPx < baseVideoPx`），`band < compactPlayerSpaceH`，
+     * 下沿就比屏幕矮 `compactPlayerSpaceH − band`，根层的 `background(Color.Black)` 从底部透出来；
+     * **视频越扁漏得越多** —— 与用户"尺寸较小的视频才出现"完全吻合。
+     *
+     * 修法：该层改 `fillMaxHeight()`（起点仍由 `.offset` 下移到 `band − r`，月牙区照旧被盖住），
+     * 下沿永远越过屏幕底、由父层裁掉 ⇒ **与播放带当前高度无关**地盖到底。
+     */
+    @Test
+    fun detailBackdropCoversToTheScreenBottomRegardlessOfBandHeight() {
+        val screen = codeOf("VideoScreen.kt")
+        val screenText = screen.joinToString("\n")
+        assertTrue(
+            "N-3：详情区背景层必须 `fillMaxWidth() + fillMaxHeight() + offset{…}` 这一条链，" +
+                "（fillMaxHeight 与 background 必须在同一段 modifier 链上）。",
+            Regex(
+                """\.fillMaxWidth\(\)\s*\.fillMaxHeight\(\)\s*\.offset \{"""
+            ).containsMatchIn(screenText)
+        )
+        assertTrue(
+            "N-3 回归防护：背景层高度**不得**再由「预留播放带高度」推出 —— " +
+                "`detailBaseH + BiliRadius.playerCompact` 这种写法会让" +
+                "「比 16:9 更宽的视频」在底部漏出根层黑底。",
+            countMatching(screen, """\.height\(detailBaseH \+ BiliRadius\.playerCompact\)""") == 0
         )
     }
 
