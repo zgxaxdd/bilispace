@@ -491,8 +491,15 @@ class VideoLogicGuardTest {
         assertTrue(
             "会话必须自己接管 back（含系统侧滑返回）：BackHandler 的 enabled 由纯判据决定，" +
                 "面板开着时只关面板、宽限窗口内吞掉、其余放行给宿主（story 退出/全屏回缩）；" +
-                "判据在 core:swipe 的 SwipeBackPolicy（单测覆盖）。",
-            countMatching(pager, """BackHandler\(enabled = backAction != SwipeBackPolicy\.Action\.PassThrough\)""") == 1 &&
+                "判据在 core:swipe 的 SwipeBackPolicy（单测覆盖）。" +
+                "（**形态更新 · N-2 ③**：用户在横屏观影时**侧滑返回要切回竖屏播放**，" +
+                "所以 enabled 多了一个 `landscapeForced ||` 前置项，handler 体内也多了一个" +
+                "「横屏优先分支」。原判据与意图**不变** —— 面板优先级逻辑仍在。）",
+            countMatching(
+                pager,
+                """BackHandler\(enabled = landscapeForced \|\| backAction != SwipeBackPolicy\.Action\.PassThrough\)"""
+            ) == 1 &&
+                countMatching(pager, """if \(landscapeForced\) \{""") == 1 &&
                 countMatching(pager, """SwipeBackPolicy\.resolve\(""") == 1 &&
                 countMatching(pager, """SwipeBackPolicy\.Action\.CloseSheet ->""") == 1 &&
                 countMatching(pager, """showMoreSheet -> closeMoreSheet\(\)""") == 1 &&
@@ -2093,8 +2100,11 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "N-1：点击必须复用既有通路的 `onToggleLandscape`（顶栏那颗胶囊的同一个回调），" +
-                "不许在这里另写转屏状态。",
-            countMatching(pager, """onClick = onToggleLandscape,""") == 1
+                "不许在这里另写转屏状态。" +
+                "（**形态更新 · N-2 ①**：点击从直接传 `onToggleLandscape` 改成 lambda —— " +
+                "要先把这次点击计入防烧屏交互再转屏；锚点随之改为「调用了 onToggleLandscape()」." +
+                "意图不变。）",
+            countMatching(pager, """onToggleLandscape\(\)""") >= 1
         )
         assertTrue(
             "N-1：位置必须贴着**画面下沿** —— 由宽高比算出 letterbox 画面高、" +
@@ -2129,6 +2139,48 @@ class VideoLogicGuardTest {
             countMatching(pager, """val container = Color\.Black\.copy\(alpha = """) == 1 &&
                 countMatching(pager, """border = BorderStroke\(BiliSpacing\.xs / 8,""") == 1 &&
                 countMatching(pager, """contentColor = Color\.White,""") == 1
+        )
+    }
+
+    /**
+     * N-2（用户三条明确要求，2026-10-04）：
+     * ① 横屏悬浮按钮要**与点赞同一套逻辑**并**加入防烧屏**；
+     * ② 点横屏后**清屏**（不显示任何东西，沉浸观影）；
+     * ③ 横屏观影时**侧滑返回 = 切回竖屏播放**（不是退出会话）。
+     */
+    @Test
+    fun landscapeInSessionClearsChromeAndBackReturnsToPortrait() {
+        val pager = codeOf("player/PortraitSwipePager.kt")
+        assertTrue(
+            "①「与点赞的逻辑相同」= 本按钮也是**会话交互**：点击要重置防烧屏计时" +
+                "（与打开评论/收藏同一口径）。",
+            countMatching(pager, """lastChromeInteractionMs = android\.os\.SystemClock\.elapsedRealtime\(\)""") >= 3
+        )
+        assertTrue(
+            "①「加入防烧屏设计」= 与互动栏/底部信息层用**同一个** `applyBurnIn`" +
+                "（静置变暗 + 缓慢像素漂移），不许是个不参与常驻策略的孤件。",
+            countMatching(pager, """\.applyBurnIn\(LocalSwipeChromeBurnIn\.current\)""") == 1 &&
+                countMatching(pager, """\.offset \{\s*$""") >= 1
+        )
+        assertTrue(
+            "②「清屏」= 底部信息层与互动栏在横屏整块让位（`if (!landscapeForced)` 两处），" +
+                "且竖屏态行为完全不变（不碰它们的 `visible` 表达式）。",
+            countMatching(pager, """if \(!landscapeForced\) Box\(""") == 1 &&
+                countMatching(pager, """if \(!landscapeForced\) AnimatedVisibility\(""") == 1 &&
+                countMatching(
+                    pager,
+                    """visible = !playbackSheetVisible && !showComments && !showFavSheet,"""
+                ) == 1
+        )
+        assertTrue(
+            "③「侧滑返回切回竖屏」= 横屏态下 back 必须**吃掉**这一次并收掉手动横屏" +
+                "（走既有 `onToggleLandscape`），而不是放行去退出会话。",
+            countMatching(
+                pager,
+                """BackHandler\(enabled = landscapeForced \|\| backAction != SwipeBackPolicy\.Action\.PassThrough\)"""
+            ) == 1 &&
+                countMatching(pager, """if \(landscapeForced\) \{\s*$""") == 1 &&
+                countMatching(pager, """onToggleLandscape\(\)""") >= 2
         )
     }
 

@@ -507,8 +507,14 @@ internal fun PortraitSwipePager(
         anySheetOpen = anySheetOpen,
         inSheetCloseGrace = inSheetCloseGrace
     )
-    BackHandler(enabled = backAction != SwipeBackPolicy.Action.PassThrough) {
-        when (backAction) {
+    BackHandler(enabled = landscapeForced || backAction != SwipeBackPolicy.Action.PassThrough) {
+        // 需求③（用户）：**横屏观影时侧滑返回 = 切回竖屏播放**，而不是退出会话。
+        // 优先级最高：横屏态下先吃掉这一次 back（含系统侧滑返回手势），
+        // 只把手动横屏收回去（`onToggleLandscape` 与顶栏那颗胶囊是同一条通路），
+        // 会话与当前视频都原地保留。竖屏态下一律走原来的面板/宽限逻辑。
+        if (landscapeForced) {
+            onToggleLandscape()
+        } else when (backAction) {
             SwipeBackPolicy.Action.CloseSheet -> {
                 when {
                     showMoreSheet -> closeMoreSheet()
@@ -687,7 +693,9 @@ internal fun PortraitSwipePager(
                     }
                 }
             }
-        Box(
+        // 需求②：**横屏观影时清屏** —— 底部信息层（@名/标题/标签/底部暗角）整块让位，
+        // 画面上不剩任何常驻 UI。退出路径见需求③（侧滑返回 = 切回竖屏）。
+        if (!landscapeForced) Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
@@ -756,11 +764,19 @@ internal fun PortraitSwipePager(
                 val imageHPx = minOf(screenHPx, screenWPx / currentVideoAspect)
                 val imageBottomPx = (screenHPx + imageHPx) / 2f
                 SwipeLandscapeFab(
-                    onClick = onToggleLandscape,
+                    onClick = {
+                        // 需求①「与点赞的逻辑相同」：点它也算**一次会话交互** ——
+                        // 常驻件立刻回满亮、并重置防烧屏的漂移相位基准（与打开评论/收藏同一口径）。
+                        lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
+                        onToggleLandscape()
+                    },
                     modifier = Modifier
                         // N-1 优化（用户给出抖音的参照）：**水平居中**贴在画面下沿
                         // —— 抖音那支「全屏观看」就是居中挂在画面下方，比左对齐更像"这画面的入口"。
                         .align(Alignment.TopCenter)
+                        // 需求①：本按钮也要**加入防烧屏**（静置变暗 + 缓慢像素漂移）——
+                        // 与互动栏/底部信息层用同一个 `chromeBurnIn`，不再是个"不参与常驻策略"的孤件。
+                        .applyBurnIn(LocalSwipeChromeBurnIn.current)
                         .offset {
                             IntOffset(
                                 0,
@@ -771,7 +787,8 @@ internal fun PortraitSwipePager(
                 )
             }
         }
-        AnimatedVisibility(
+        // 需求②：横屏观影时互动栏（含 UP 头像）也整块让位 —— 与"面板在场"同一类让位。
+        if (!landscapeForced) AnimatedVisibility(
             visible = !playbackSheetVisible && !showComments && !showFavSheet,
             enter = fadeIn(),
             exit = fadeOut(),
