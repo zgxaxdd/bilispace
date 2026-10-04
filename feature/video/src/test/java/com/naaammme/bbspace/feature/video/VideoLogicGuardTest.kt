@@ -2243,14 +2243,35 @@ class VideoLogicGuardTest {
                 countMatching(pager, """glowAspect != null && !isPortraitVideo""") == 0
         )
         assertTrue(
-            "⑤：取色的 URL 必须是**当前页 `SwipeEntry.cover`**（页面那张可见封面正在加载的同一个串）" +
-                "⇒ 命中同一条 Coil 缓存、不产生第二次下载。用 `detail?.cover` 会每次切页都未命中，" +
-                "真机就是「光出来得慢、切页不跟手」。",
+            "⑤：取色的 URL 必须是**变体解析之后**的串（`BiliAsyncImage.kt:98-100` 先 " +
+                "`biliImageUrlForVariant(url, variant)` 再 `.data(...)`，Coil 缓存键由它派生）。" +
+                "喂原始封面 URL ⇒ 每次切页都未命中 ⇒ 去下原图。",
             countMatching(
                 pager,
-                """val swipeGlowCover = pages\.getOrNull\(pagerState\.currentPage\)"""
+                """\.let \{ biliImageUrlForVariant\(it, BiliImageVariant\.PlayerPreview\) \}"""
             ) == 1 &&
                 countMatching(pager, """swipeGlowCover = playbackState\.detail\?\.cover""") == 0
+        )
+        assertTrue(
+            "⑥：几何不能被 `currentStream` 的瞬时 null 带走（播放会话每次开播先发 null）——" +
+                "宽高比必须**只记非空值**（sticky），否则翻页过半时光会整块灭掉再回来。" +
+                "同时颜色**不许随翻页清零**（`remember(swipeGlowCover)` 那版会先退纯白再变真色）。",
+            countMatching(
+                pager,
+                """if \(currentVideoAspect != null\) glowAspectState\.value = currentVideoAspect"""
+            ) == 1 &&
+                countMatching(pager, """val glowAspect = glowAspectState\.value""") == 1 &&
+                countMatching(pager, """var swipeGlowTint by remember \{""") == 1 &&
+                countMatching(pager, """mutableStateOf<Color\?>""") == 1 &&
+                countMatching(pager, """remember\(swipeGlowCover\) \{""") == 0
+        )
+        assertTrue(
+            "⑦：自愈 —— store 对「正在飞行中」的同一 key 会静默返回不回调" +
+                "（`VideoCardCoverColorStore.kt:93-94`），落定后必须再读一次缓存补色。",
+            countMatching(
+                pager,
+                """LaunchedEffect\(swipeGlowCover, pagerState\.settledPage\)"""
+            ) == 1
         )
     }
 

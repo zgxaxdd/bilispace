@@ -88,6 +88,7 @@ import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.feature.video.VideoViewModel
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
+import com.naaammme.bbspace.core.designsystem.component.biliImageUrlForVariant
 import com.naaammme.bbspace.core.designsystem.component.topSolidProgressiveFade
 import com.naaammme.bbspace.feature.video.detail.FavFolderSheetContent
 import com.naaammme.bbspace.feature.video.detail.actionCount
@@ -464,18 +465,20 @@ internal fun PortraitSwipePager(
     // 峰值**固定走详情页的深色档**（0.48）：会话上下的黑边永远是黑的，不存在浅底那一档。
     // 位置见下面两层 Box 的注释；关键是它必须画在**视频之上** ——
     // 会话的黑边是 ExoPlayer（`AndroidView`）自己画的、不透明，画在它下面会被整个盖住。
-    // ⚠️ 取色用的 URL 必须是**当前页 `SwipeEntry.cover`** —— 也就是页面那张可见封面
-    // （`VideoPlayerPane` 的 `swipeCoverUrl = entry.cover`、页面里 `BiliAsyncImage(url = entry.cover)`）
-    // 正在加载的**同一个字符串**，这样才命中同一条 Coil 内存缓存、不产生第二次下载。
-    // 早先误用 `detail?.cover`（详情响应的封面字段，URL 常与 entry.cover 不同）⇒
-    // 每次切页都是**未命中** ⇒ 重新下载 + 解码 480×360 ⇒ 真机表现就是
-    // 「光出来得慢、切页不跟手」。这条不是优化，是正确性。
+    // ⚠️ 取色的 URL 必须是**页面那张封面真正请求的那个串**，也就是**变体解析之后**的 URL：
+    // `BiliAsyncImage`（`BiliAsyncImage.kt:98-100`）与预置封面都会先
+    // `biliImageUrlForVariant(url, variant)` 再 `.data(resolved)`；而 Coil 的
+    // memory/disk 缓存键由 `data` 派生 ⇒ 我若喂**原始**封面 URL，键就与可见封面不同，
+    // 每次都未命中 ⇒ 去下**原图**再解码（原图不在任何生产路径上，等于凭空多下一条）。
+    // 这就是「切页不跟手」的根因之一（另一条见下面 geometry 的 sticky 处理）。
     val swipeGlowCover = pages.getOrNull(pagerState.currentPage)
         ?.cover
         ?.takeIf { it.isNotBlank() }
-    var swipeGlowTint by remember(swipeGlowCover) {
-        mutableStateOf(swipeGlowCover?.let { VideoCardCoverColorStore.getCachedColor(it) })
-    }
+        ?.let { biliImageUrlForVariant(it, BiliImageVariant.PlayerPreview) }
+    // 颜色**不随翻页清零**：留着上一个视频的颜色，直到新颜色算好。
+    // 之前用 `remember(swipeGlowCover)` 重置 ⇒ 每次翻页先退纯白（`Color.White`）再变真色，
+    // 观感就是"光闪一下"。`remember` 不带 key ⇒ 跨页保留；首帧无值时才是白（屏幕本光）。
+    var swipeGlowTint by remember { mutableStateOf<Color?>(null) }
     val activeSwipeGlowKey by rememberUpdatedState(swipeGlowCover)
     LaunchedEffect(swipeGlowCover) {
         val key = swipeGlowCover ?: return@LaunchedEffect
@@ -490,10 +493,27 @@ internal fun PortraitSwipePager(
             if (activeSwipeGlowKey == key) swipeGlowTint = color
         }
     }
+    // 自愈：store 对"同一 key 正在飞行中"的第二次请求会**静默返回、不回调**
+    //（`VideoCardCoverColorStore.kt:93-94`），而 `remember` 不带 key 时也不重算 ——
+    // 万一回调被吞（快速来回翻到同一页），落定后再读一次缓存补上，避免一直用着旧色/白。
+    LaunchedEffect(swipeGlowCover, pagerState.settledPage) {
+        swipeGlowCover?.let { key ->
+            VideoCardCoverColorStore.getCachedColor(key)?.let { swipeGlowTint = it }
+        }
+    }
     // 取不到色时退纯白（屏幕本光），与详情页口径一致
     val swipeGlowColor = remember(swipeGlowTint) {
         swipeGlowTint?.takeIf { it.alpha > 0f } ?: Color.White
     }
+    // 几何**不能被 `currentStream` 的瞬时 null 带走**：播放会话在每次开播时先发
+    // `currentStream = null`（`StreamPlaybackSessionImpl.kt:375-395`），新流要等 playurl 才到。
+    // 之前门直接挂 `currentVideoAspect` ⇒ 翻页过半那一刻光**整块灭掉**、新流到了才回来，
+    // 这就是「切页不流畅」最直观的一条。这里只记**非空**值（不写组合期状态，走 effect）。
+    val glowAspectState = remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(currentVideoAspect) {
+        if (currentVideoAspect != null) glowAspectState.value = currentVideoAspect
+    }
+    val glowAspect = glowAspectState.value
     val swipeGlowModifier = remember(swipeGlowColor) {
         Modifier.topSolidProgressiveFade(
             surfaceColor = swipeGlowColor,
@@ -755,7 +775,7 @@ internal fun PortraitSwipePager(
             val glowDensity = LocalDensity.current
             val glowScreenHPx = with(glowDensity) { maxHeight.toPx() }
             val glowScreenWPx = with(glowDensity) { maxWidth.toPx() }
-            val glowAspect = currentVideoAspect
+            // 用外层 sticky 的 `glowAspect`（不在此处重读 `currentVideoAspect`）
             // **竖屏视频同样要有光**（用户反馈：「横屏视频有光，竖屏没有」）——
             // 竖屏视频在竖屏会话里也不是满屏（例如 1080×1920 贴宽后高度约 2261 < 2800），
             // 上下照样有黑边，光一样该洒。唯一条件是"宽高比已知"。
