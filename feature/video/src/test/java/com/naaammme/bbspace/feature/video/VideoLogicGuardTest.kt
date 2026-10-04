@@ -2113,6 +2113,23 @@ class VideoLogicGuardTest {
             countMatching(pager, """text = "横屏",""") == 1 &&
                 countMatching(pager, """contentDescription = "进入横屏"""") == 1
         )
+        // ── N-1 优化（用户给出抖音「全屏观看」的参照）─────────────────────────
+        assertTrue(
+            "N-1 优化：按钮必须**水平居中**贴在画面下沿（抖音那支「全屏观看」就在画面下方居中）——" +
+                "不许回到左对齐。",
+            Regex(
+                """SwipeLandscapeFab\([\s\S]{0,300}?\.align\(Alignment\.TopCenter\)"""
+            ).containsMatchIn(pager.joinToString("\n"))
+        )
+        assertTrue(
+            "N-1 优化：这颗挂在**黑边区**里，必须是**深色半透明容器 + 发丝描边 + 白图标/白字**" +
+                "（亮面 pill 在黑底上像一块白斑，是用户否掉的那版）。" +
+                "线宽必须由 token 推出（`BiliSpacing.xs / 8` = 0.5dp），不许写 dp 字面量" +
+                "（DesignTokenLintTest 的棘轮已无余额）。",
+            countMatching(pager, """val container = Color\.Black\.copy\(alpha = """) == 1 &&
+                countMatching(pager, """border = BorderStroke\(BiliSpacing\.xs / 8,""") == 1 &&
+                countMatching(pager, """contentColor = Color\.White,""") == 1
+        )
     }
 
     private fun countMatching(lines: List<String>, regex: String): Int {

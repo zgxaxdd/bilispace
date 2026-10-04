@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -757,8 +758,9 @@ internal fun PortraitSwipePager(
                 SwipeLandscapeFab(
                     onClick = onToggleLandscape,
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(start = BiliSpacing.md)
+                        // N-1 优化（用户给出抖音的参照）：**水平居中**贴在画面下沿
+                        // —— 抖音那支「全屏观看」就是居中挂在画面下方，比左对齐更像"这画面的入口"。
+                        .align(Alignment.TopCenter)
                         .offset {
                             IntOffset(
                                 0,
@@ -1207,11 +1209,20 @@ private fun SwipeCoverPage(
  */
 @Composable
 private fun SwipeLandscapeFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    // N-1 优化（用户给出抖音「全屏观看」的参照）：这一颗挂在**黑边区**里，
+    // 用亮面 pill 会像黑底上的一块白斑；改成**深色半透明 + 发丝白描边 + 白图标/白字**，
+    // 与抖音同款语言，也不与画面内容抢注意力。
+    //
+    // 线宽 `BiliSpacing.xs / 8`（= 0.5dp，与仓内发丝描边 `biliDarkHairlineBorder` 同值）。
+    // **不写 dp 字面量**：`DesignTokenLintTest` 的 dp 棘轮已无余额。
+    // 也不直接复用 `biliDarkHairlineBorder` —— 它只对「iOS 档 + 深色 + surfaceContainer*
+    // 容器」生效，本 pill 是半透明黑，走进去会返回 null（等于没描边）。
+    val container = Color.Black.copy(alpha = 0.38f)
     Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        color = container,
+        contentColor = Color.White,
         shape = CircleShape,
-        shadowElevation = BiliSpacing.xs,
+        border = BorderStroke(BiliSpacing.xs / 8, Color.White.copy(alpha = 0.45f)),
         modifier = modifier
             .defaultMinSize(minHeight = BiliSpacing.xxxl * 1.5f)
             .clickable(onClickLabel = "进入横屏", onClick = onClick)
