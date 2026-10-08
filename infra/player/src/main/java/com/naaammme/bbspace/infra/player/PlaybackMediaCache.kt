@@ -116,6 +116,28 @@ class PlaybackMediaCache @Inject constructor(
             .setUpstreamDataSourceFactory(upstream)
             .setCacheKeyFactory(PlaybackCacheKeyFactory())
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            .setEventListener(cacheReadEventListener)
+    }
+
+    /**
+     * N2：缓存读数的出口（进程级计数器见 [PlaybackByteCacheMetrics]）。
+     *
+     * 只挂在**读路径**（本方法与 [readPrefixThroughCache]）：预热与分段预取是"往缓存里写"，
+     * 把它们的字节算进命中率会得出"预取越猛命中率越高"的假结论。
+     *
+     * `onCachedBytesRead` 的第二参是**自上次回调以来**的量（Media3 通知后自己清零），
+     * 所以这里必须是累加而不是赋值 —— 写成赋值就永远只有最后一次。
+     */
+    private val cacheReadEventListener = object : CacheDataSource.EventListener {
+        override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+            PlaybackByteCacheMetrics.recordCachedBytesRead(cachedBytesRead)
+        }
+
+        override fun onCacheIgnored(reason: Int) {
+            // 原因值只用于计数，不进指标：本仓的读路径都带明确 length，
+            // `CACHE_IGNORED_REASON_UNSET_LENGTH` 只会来自没包缓存的那条链（直播/本地）。
+            PlaybackByteCacheMetrics.recordCacheIgnored()
+        }
     }
 
     /** 当前磁盘占用（设置页展示用）。 */
@@ -306,6 +328,7 @@ class PlaybackMediaCache @Inject constructor(
             .setUpstreamDataSourceFactory(upstreamFactory)
             .setCacheKeyFactory(PlaybackCacheKeyFactory())
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            .setEventListener(cacheReadEventListener)
             .createDataSource()
         try {
             val buffer = ByteArray(lengthBytes.toInt())

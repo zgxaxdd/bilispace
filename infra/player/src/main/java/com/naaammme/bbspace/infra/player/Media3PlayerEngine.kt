@@ -3,6 +3,7 @@ package com.naaammme.bbspace.infra.player
 import android.content.Context
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -11,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -246,6 +248,14 @@ class Media3PlayerEngine @Inject constructor(
     @Volatile
     private var dashIndexFromNetwork: Boolean? = null
 
+    /**
+     * R5/N2 的稳态观测窗口（丢帧、解码器重建次数、字节缓存命中率），2s 一行、没变化不打。
+     *
+     * 读数在 500ms 进度轮询里取（见 [reportPlaybackWatch]），与 CDN 反馈/预取复查同一处 ——
+     * 那已经是本仓唯一的周期性观测点，再造一个循环只是多一次唤醒。
+     */
+    private val playbackWatchdog = PlaybackWatchdog(android.os.SystemClock::elapsedRealtime)
+
     private fun newPlayerListener(boundGen: Long): Player.Listener = object : Player.Listener {
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
@@ -396,6 +406,28 @@ class Media3PlayerEngine @Inject constructor(
         ) {
             // N4：t3（代理指标 —— Media3 没有"surface 就绪"回调，尺寸确定是最接近的）。
             firstFrameTimeline.surfaceReady(width, height)
+        }
+
+        override fun onVideoInputFormatChanged(
+            eventTime: AnalyticsListener.EventTime,
+            format: Format,
+            decoderReuseEvaluation: DecoderReuseEvaluation?
+        ) {
+            // R5：Media3 自己给出的"这次格式变化能不能沿用已经启动的解码器"。
+            // 只在**格式变化**那一刻触发（稳态播放零成本），而它正是解码器复用/预热类改动
+            // （D1b、N1）唯一机器可读的验收信号 —— 光看首帧快慢是判不出"复用了还是重建了"。
+            val evaluation = decoderReuseEvaluation
+            DiagnosticLog.i(DECODER_REUSE_TAG) {
+                DecoderReuseReport.line(
+                    evaluationPresent = evaluation != null,
+                    result = evaluation?.result ?: DecoderReuseReport.RESULT_NO,
+                    discardReasons = evaluation?.discardReasons ?: 0,
+                    decoderName = evaluation?.decoderName,
+                    mimeType = format.sampleMimeType,
+                    width = format.width,
+                    height = format.height
+                )
+            }
         }
 
         override fun onAudioDecoderInitialized(
@@ -941,6 +973,7 @@ class Media3PlayerEngine @Inject constructor(
         }
         refreshCdnRoutesIfStale()
         sampleNetworkActivity()
+        reportPlaybackWatch(player)
         checkFirstFrameTimeout()
         // 预取的周期性复查：与上面的"喂缓冲/码率"同一处（同为 500ms 的进度轮询），
         // 也和源仓库 `startPluginCheck()` 同语义点 —— 缓冲够厚的那一刻只有这里能发现。
@@ -1046,6 +1079,39 @@ class Media3PlayerEngine @Inject constructor(
             lastNetworkBytes = bytes
             lastNetworkActivityAtMs = android.os.SystemClock.elapsedRealtime()
         }
+    }
+
+    /**
+     * R5/N2：采一次稳态观测（丢帧、解码器重建、缓存 vs 网络字节），该出行时打一行 [WATCH_TAG]。
+     *
+     * 三个来源都是一次快照读，成本可以忽略，所以不需要额外的开关位：
+     * - `player.videoDecoderCounters` —— Media3 的视频解码器计数（渲染/丢帧/跳过/初始化次数）；
+     * - [PlaybackByteCacheMetrics] —— `CacheDataSource` 报回来的"从缓存读到过的字节"；
+     * - `CdnTransferRuntime` —— 真的走网络拿到的字节（关掉时按 0 算，命中率会打 `-` 而不是假 0）。
+     *
+     * 读 counters 包在 runCatching 里：它只是诊断，任何一次取不到都不该打断进度轮询。
+     */
+    private fun reportPlaybackWatch(player: ExoPlayer?) {
+        if (player == null) return
+        val counters = runCatching { player.videoDecoderCounters }.getOrNull()
+        val line = playbackWatchdog.report(
+            PlaybackWatchSample(
+                renderedFrames = counters?.renderedOutputBufferCount?.toLong() ?: 0L,
+                droppedFrames = counters?.droppedBufferCount?.toLong() ?: 0L,
+                skippedFrames = counters?.skippedOutputBufferCount?.toLong() ?: 0L,
+                decoderInits = counters?.decoderInitCount?.toLong() ?: 0L,
+                maxConsecutiveDropped = counters?.maxConsecutiveDroppedBufferCount?.toLong() ?: 0L,
+                cachedBytes = PlaybackByteCacheMetrics.cachedBytes(),
+                networkBytes = if (CdnTransferRuntime.enabled) {
+                    CdnTransferRuntime.state.value.networkBytes
+                } else {
+                    0L
+                },
+                cacheIgnored = PlaybackByteCacheMetrics.ignoredCount(),
+                host = currentServingHost()
+            )
+        )
+        if (line != null) DiagnosticLog.i(WATCH_TAG) { line }
     }
 
     /** [PlayerEngine.currentServingHost]：拿不到（非 DASH / 还没 open 过）时返回 null。 */
@@ -1185,6 +1251,12 @@ class Media3PlayerEngine @Inject constructor(
          * 与 [TAG] 下那些人类可读的状态日志混在一起就没法直接喂给统计。
          */
         const val FIRST_FRAME_TAG = "FirstFrame"
+
+        /** 稳态观测行（R5 丢帧 + N2 命中率）的 tag，见 [PlaybackWatchdog]。 */
+        const val WATCH_TAG = "PlayWatch"
+
+        /** 解码器复用评估行（R5）的 tag，见 [DecoderReuseReport]。 */
+        const val DECODER_REUSE_TAG = "DecoderReuse"
 
         /** 与源（BiliPai `maxRetries = 3`）一致：网络类错误最多重试 3 次。 */
         const val MAX_NETWORK_RETRIES = 3
