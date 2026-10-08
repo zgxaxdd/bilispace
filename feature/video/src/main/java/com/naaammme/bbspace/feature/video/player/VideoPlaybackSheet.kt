@@ -294,6 +294,7 @@ private fun PlaybackSettingsSection(
 ) {
     val videoResizeModeState = LocalVideoResizeModeState.current
     var showCdnDialog by rememberSaveable { mutableStateOf(false) }
+    var showCdnDiagnostics by rememberSaveable { mutableStateOf(false) }
     SheetSectionTitle("播放设置")
 
     Card {
@@ -313,10 +314,31 @@ private fun PlaybackSettingsSection(
                     text = settingsState.playback.videoCdnMode.label,
                     style = MaterialTheme.typography.bodyLarge
                 )
-                TextButton(onClick = { showCdnDialog = true }) { Text("切换 CDN") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 线路诊断（移植自 BiliPai 的 CdnTransferPanel/诊断面板：节点速率、
+                    // 首字节、冷却、失败计数 + 手动钉线路/恢复自动）
+                    TextButton(onClick = { showCdnDiagnostics = true }) { Text("线路诊断") }
+                    TextButton(onClick = { showCdnDialog = true }) { Text("切换 CDN") }
+                }
             }
         }
     }
+
+    SheetSwitchCard(
+        title = "并行分片下载",
+        subtitle = "一次范围请求切成多片并发竞速，起播与弱网更快；关闭后回落到单连接顺序读" +
+            "（对齐 BiliPai 的「并发下载」开关）",
+        checked = settingsState.playback.cdnParallelDownload,
+        onCheckedChange = viewModel::updateCdnParallelDownload
+    )
+
+    SheetSwitchCard(
+        title = "分段预取",
+        subtitle = "缓冲够厚（≥15s）时预取后续分段，减少追播时的等待；仅 Wi‑Fi 下进行，缓冲变薄立即停止" +
+            "（对齐 BiliPai 的自适应预取）",
+        checked = settingsState.playback.cdnAdaptivePrefetch,
+        onCheckedChange = viewModel::updateCdnAdaptivePrefetch
+    )
     if (showCdnDialog) {
         VideoCdnModeDialog(
             currentMode = settingsState.playback.videoCdnMode,
@@ -326,6 +348,9 @@ private fun PlaybackSettingsSection(
                 viewModel.updateVideoCdnMode(it)
             }
         )
+    }
+    if (showCdnDiagnostics) {
+        VideoCdnDiagnosticsDialog(onDismiss = { showCdnDiagnostics = false })
     }
 
     SheetChoiceCard(
@@ -657,7 +682,7 @@ private fun SheetChoiceCard(
 }
 
 @Composable
-private fun VideoCdnModeDialog(
+internal fun VideoCdnModeDialog(
     currentMode: VideoCdnMode,
     onDismiss: () -> Unit,
     onSelect: (VideoCdnMode) -> Unit

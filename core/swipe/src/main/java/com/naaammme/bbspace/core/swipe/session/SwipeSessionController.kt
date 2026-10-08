@@ -2,6 +2,7 @@ package com.naaammme.bbspace.core.swipe.session
 
 import com.naaammme.bbspace.core.swipe.SwipeDislikeRemovalPolicy
 import com.naaammme.bbspace.core.swipe.SwipeEntry
+import com.naaammme.bbspace.core.swipe.SwipeQueueBoundPolicy
 import com.naaammme.bbspace.core.swipe.SwipeQueueTail
 import com.naaammme.bbspace.core.swipe.appendSwipeEntries
 import com.naaammme.bbspace.core.swipe.resolveSwipeQueueTail
@@ -113,10 +114,15 @@ class SwipeSessionController {
      */
     fun mergeRelates(entries: List<SwipeEntry>) {
         val anchor = _anchor.value ?: return
-        _queue.value = appendSwipeEntries(
-            existing = _queue.value,
-            incoming = entries,
-            anchorKey = anchor.legacyKey()
+        // P1-8③：追加后**从尾部**截到上限。绝不截当前页及其之前——
+        // pager 以页号为身份，头部截断会让用户正在看的那一页变成别的视频。
+        _queue.value = SwipeQueueBoundPolicy.bound(
+            entries = appendSwipeEntries(
+                existing = _queue.value,
+                incoming = entries,
+                anchorKey = anchor.legacyKey()
+            ),
+            currentPage = page
         )
         val current = _state.value
         if (current is SwipeSessionState.Ready) {

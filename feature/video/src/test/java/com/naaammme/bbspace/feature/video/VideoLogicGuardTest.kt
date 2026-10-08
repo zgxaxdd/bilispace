@@ -1,5 +1,6 @@
 package com.naaammme.bbspace.feature.video
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -299,21 +300,22 @@ class VideoLogicGuardTest {
      * 5. 光源必须来自 VideoCardCoverColorStore（封面代表色，防重缓存路径）。
      */
     @Test
-    fun playerSeamUsesThemeStrokeAndCoverLightSpill() {
+    fun playerSeamHasNoStrokeAndKeepsCoverLightSpill() {
         val lines = codeOf("VideoScreen.kt")
         assertTrue(
-            "描边色必须 = 下方光晕色（封面代表色，用户定稿「描边与光同一个颜色」），" +
-                "深/浅色底分档（白/SeamStrokeGray）已废弃。",
-            countMatching(lines, """val\s+seamStrokeBase\s*=\s*seamGlowColor""") == 1 &&
+            "**接缝描边已按用户要求删除（2026-10-07）**：真机上描边与 SurfaceView 画面圆角错位、" +
+                "整体读作「接缝被咬掉一块」。圆角与简介区的连续衔接改为由三件事保证 ——" +
+                "① 画面 outline 用与外层容器相同的半径；② 播放页黑底按同一圆角形状绘制；" +
+                "③ 播放带底边 == 画面底边（不再多出状态栏那一段黑）。" +
+                "**不许再回退引入描边**（seamStrokeBase / playerSeamStroke / SeamStrokeGray）。",
+            countMatching(lines, """seamStrokeBase""") == 0 &&
+                countMatching(lines, """playerSeamStroke""") == 0 &&
                 countMatching(lines, """SeamStrokeGray""") == 0
         )
         assertTrue(
-            "描边必须是整圈圆角轮廓（drawRoundRect + Stroke 走线），" +
-                "不许回退成底边直线描边——直线到圆角处会断掉，盖不住播放带圆角。" +
-                "且不许再垫底色（垫底矩形会盖住圆角月牙处透上来的光，" +
-                "真机症状「光色没有在圆角处显示」）。",
-            countMatching(lines, """drawRoundRect\(""") == 1 &&
-                countMatching(lines, """style\s*=\s*Stroke\(""") == 1 &&
+            "描边绘制代码必须整体删除：文件里不应再出现轮廓线绘制（drawRoundRect + Stroke）。",
+            countMatching(lines, """drawRoundRect\(""") == 0 &&
+                countMatching(lines, """style\s*=\s*Stroke\(""") == 0 &&
                 countMatching(lines, """backingColor""") == 0
         )
         assertTrue(
@@ -581,10 +583,13 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "计数滚动：计数变化时新值上浮淡入（Animatable + graphicsLayer），" +
-                "reduceMotion 时直接换字（不做位移/淡入）。",
+                "reduceMotion 时直接换字（不做位移/淡入）。\n" +
+                "P1-3：这里的时长从硬编码 `260` 改为 `rollAnim.morph` —— 判据本身（Animatable + " +
+                "graphicsLayer + reduceMotion 短路）一字未变，只是时长改由 token 供值；" +
+                "硬编码正是「动效速度档位/ reduceMotion 对它无效」的成因。",
             countMatching(pane, """private fun SwipeRailCount\(""") == 1 &&
                 countMatching(pane, """SwipeRailCount\(""") == 2 &&
-                countMatching(pane, """roll\.animateTo\(1f, tween\(durationMillis = 260\)\)""") == 1 &&
+                countMatching(pane, """roll\.animateTo\(1f, tween\(durationMillis = rollAnim\.morph\)\)""") == 1 &&
                 countMatching(
                     pane,
                     """translationY = \(1f - roll\.value\) \* BiliSpacing\.sm\.toPx\(\)"""
@@ -604,8 +609,12 @@ class VideoLogicGuardTest {
         assertTrue(
             "出页缩放/淡出必须由 SwipePageTransformPolicy 给值（幅度 ≤2% 与交接落定同量级）；" +
                 "越界阻尼 = nestedScroll 未消费位移 + 策略折减 + 松手回弹（`animate` 挂起函数，" +
-                "不占 animate*AsState 棘轮）；reduceMotion 时不接阻尼（策略内部退化）。",
-            countMatching(pager, """SwipePageTransformPolicy\.transformFor\(""") == 1 &&
+                "不占 animate*AsState 棘轮）；reduceMotion 时不接阻尼（策略内部退化）。\n" +
+                "P1-4②：`transformFor(` 从 1 处变 2 处 —— **播放器页**也接上了同一套变换" +
+                "（此前它只有 `fillMaxSize()`，刷视频时最显眼的一页反而唯一不跟手）。" +
+                "两处都走策略、都没有手写 scale/alpha，所以这里从 `== 1` 放宽为 `>= 1`：" +
+                "不变量是「页面变换必须由策略给值」，不是「只允许一个调用点」。",
+            countMatching(pager, """SwipePageTransformPolicy\.transformFor\(""") >= 1 &&
                 countMatching(pager, """SwipePageTransformPolicy\.overScrollTranslation\(""") == 1 &&
                 countMatching(pager, """NestedScrollConnection""") == 1 &&
                 countMatching(pager, """if \(reduceMotion\) Modifier else Modifier\.nestedScroll""") == 1 &&
@@ -1448,11 +1457,14 @@ class VideoLogicGuardTest {
                 "本支是否已翻过」四个判据都传进去 —— 少任何一个都会退化成旧行为。\n" +
                 "SW-02 起幂等键不在 pager 局部 remember 里（旧断言 lastAutoAdvancedKey）：" +
                 "键提升到会话状态机 SwipeSessionController，随会话 exit() 清空、进程重建归零，" +
-                "pager 改读 viewModel.swipeLastAutoAdvancedKey。四判据契约本身不变。",
+                "pager 改读 viewModel.swipeLastAutoAdvancedKey。四判据契约本身不变。\n" +
+                "P1-8① 起值经 `rememberUpdatedState` 取（`latestAutoAdvance` / `latestRepeatOne` / " +
+                "`latestPages`）：它们读的是**同一批**设置与页面数据，只是不再把整个 `pages` 列表塞进 " +
+                "DisposableEffect 的 key（那会让每次补货都摘挂一次 Player.Listener）。四判据仍在。",
             countMatching(pager, """shouldAutoAdvanceToNextSwipePage\(""") == 1 &&
-                countMatching(pager, """autoAdvanceEnabled = playerSettings\.playback\.swipeAutoAdvance""") == 1 &&
-                countMatching(pager, """repeatOne = playerSettings\.playback\.repeatMode != PlayerRepeatMode\.Off""") == 1 &&
-                countMatching(pager, """isLastPage = next > pages\.lastIndex""") == 1 &&
+                countMatching(pager, """autoAdvanceEnabled = latestAutoAdvance""") == 1 &&
+                countMatching(pager, """repeatOne = latestRepeatOne != PlayerRepeatMode\.Off""") == 1 &&
+                countMatching(pager, """isLastPage = next > latestPages\.lastIndex""") == 1 &&
                 countMatching(pager, """alreadyAdvancedForThisVideo\s*=""") == 1 &&
                 countMatching(
                     pager,
@@ -1987,10 +1999,13 @@ class VideoLogicGuardTest {
         )
         assertTrue(
             "SX-08 要点②：吸附时长与曲线必须走 token（`animations.long` + 主题强调曲线），" +
-                "不许手写字面量时长。",
+                "不许手写字面量时长。\n" +
+                "P1-3 起同函数的越界回弹也用同一套语言（`animations.medium` + 强调曲线），" +
+                "所以 `easing = animations.emphasized` 出现次数从 1 变 2 —— 这是**收紧**不是放松：" +
+                "原先那一处回弹是硬编码 `tween(240)`，与吸附两套写法。",
             countMatching(pager, """snapAnimationSpec = tween\(""") == 1 &&
                 countMatching(pager, """durationMillis = animations\.long,""") == 1 &&
-                countMatching(pager, """easing = animations\.emphasized""") == 1
+                countMatching(pager, """easing = animations\.emphasized""") >= 1
         )
         assertTrue(
             "SX-08 要点③④：**只换吸附** —— 预组合与越界阻尼必须原样保留" +
@@ -2272,6 +2287,48 @@ class VideoLogicGuardTest {
                 pager,
                 """LaunchedEffect\(swipeGlowCover, pagerState\.settledPage\)"""
             ) == 1
+        )
+    }
+
+    // ── F-8：刷视频补货的标记复位必须在 finally（2026-10-04 审查报告）──────────
+
+    /**
+     * `loadMoreSwipeQueue()` 的两处收尾（`loadingMoreSwipe` 复位 + 会话状态收敛）
+     * 必须在**异常路径**上也会执行。
+     *
+     * 修复前的形状：`loadingMoreSwipe = false` 写在协程体末尾（正常路径），
+     * 函数内无 try/catch —— 任何非取消异常都会让
+     * ①补货永久失效（下次被 `if (loadingMoreSwipe) return` 挡掉）
+     * ②会话状态永久停在 `Extending`（队尾常驻"加载中"）
+     * ③异常冒到全局未捕获处理器。
+     *
+     * 论据：同仓同类分页实现（`HomeViewModel.loadMore` / `DynamicViewModel.load`）
+     * 都用 try/catch + finally；`loadMoreSwipeQueue` 曾是唯一例外。
+     */
+    @Test
+    fun swipeRefillResetsFlagInFinally() {
+        val vm = codeOf("VideoViewModel.kt")
+        val body = blockBody(vm, "fun loadMoreSwipeQueue(")
+        val resetIndex = body.indexOfFirst { it.contains("loadingMoreSwipe = false") }
+        assertTrue(
+            "`loadingMoreSwipe = false` 必须存在（它是唯一的复位点）",
+            resetIndex >= 0
+        )
+        assertEquals(
+            "复位点只允许有一处（多一处就可能有一条路径绕过 finally）",
+            1,
+            countMatching(body, """loadingMoreSwipe = false""")
+        )
+        val finallyIndex = body.indexOfFirst { it.trimStart().startsWith("} finally {") }
+        assertTrue(
+            "`loadMoreSwipeQueue` 必须用 try/catch/finally 收尾：修复前复位写在正常路径末尾，" +
+                "任何非取消异常都会让补货永久失效并卡在 Extending",
+            finallyIndex >= 0 && resetIndex > finallyIndex
+        )
+        assertTrue(
+            "异常路径必须把会话状态收敛回去（`swipeSession.refillResult`）—— 否则状态机停在 Extending",
+            countMatching(body, """swipeSession\.refillResult\(""") >= 2 &&
+                countMatching(body, """catch \(e: CancellationException\)""") == 1
         )
     }
 

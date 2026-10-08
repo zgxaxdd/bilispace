@@ -8,6 +8,7 @@ import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.error.UserFacingError
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.common.relation.UpBlocker
 import com.naaammme.bbspace.core.settings.blocked.BlockedUpStore
@@ -208,6 +209,19 @@ class VideoViewModel @Inject constructor(
      */
     val playerControlsMaterial: StateFlow<GlassMaterial> = playerSettings.playerControlsMaterial
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GlassMaterial.FROSTED)
+
+    /**
+     * 「省电模式」：视频节点用 SurfaceView（见 [AppSettings.playerSurfaceView]）。
+     *
+     * ⚠️ 类型是 `Boolean?`，`null` = **设置还没从 DataStore 读出来**（首帧）。
+     * 为什么不能给个 false 兜底：那样播放页会先按 TextureView 建一个 PlayerView 并绑定播放器，
+     * 等设置到达再建第二个（SurfaceView）—— 真机实测**第二次创建的 surface 不会被创建**，
+     * 症状就是"首次进入黑屏、全屏往返重建后才正常"（2026-10-07，`PlayerSurface` 诊断日志：
+     * useSurfaceView 先 false 后 true，且 SurfaceHolder 从未 created）。
+     * ⇒ 播放页必须等这个值非空后再建视图（只创建一次）。
+     */
+    val playerSurfaceView: StateFlow<Boolean?> = playerSettings.playerSurfaceView
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // ===== 空降助手 =====
     private val _sbState = MutableStateFlow(SponsorBlockUiState())
@@ -515,7 +529,7 @@ class VideoViewModel @Inject constructor(
         )
         // QoE（SW-06）：只记类型与来源标签，不含标题/UP/账号（§4.8 隐私口径）
         SwipeQoeHub.record(SwipeQoeEventType.Enter, source = "detail")
-        android.util.Log.i(
+        DiagnosticLog.i(
             "PortraitSwipe",
             "session: anchor=$bvid relates=${detail.relates.size} queue=${seedQueue.size} " +
                 "bvidFilled=${seedQueue.count { it.bvid.isNotEmpty() }}"
@@ -574,7 +588,7 @@ class VideoViewModel @Inject constructor(
                 if (snap.via == SwipeEntryVia.StoryFeed) {
                     storyBootstrapStarted = true
                 }
-                android.util.Log.i(
+                DiagnosticLog.i(
                     "PortraitSwipe",
                     "restore: page=${snap.page} queue=${snap.queue.size} via=${snap.via}"
                 )
@@ -593,7 +607,7 @@ class VideoViewModel @Inject constructor(
                 if (source == swipeFeedSource) return@collect
                 swipeFeedSource = source
                 swipeFeedCursor = FeedCursor.Initial
-                android.util.Log.i("PortraitSwipe", "feedSource: switch=$source cursor=reset")
+                DiagnosticLog.i("PortraitSwipe", "feedSource: switch=$source cursor=reset")
             }
         }
     }
@@ -668,7 +682,7 @@ class VideoViewModel @Inject constructor(
             swipeSession.seedArrived(incoming)
             // QoE（SW-06）：来源标签 = 命中的数据源 id（home-feed / story）
             SwipeQoeHub.record(SwipeQoeEventType.Enter, source = batch?.sourceId ?: "none")
-            android.util.Log.i(
+            DiagnosticLog.i(
                 "PortraitSwipe",
                 "bootstrap: source=${batch?.sourceId} raw=${batch?.entries?.size} " +
                     "fresh=${incoming.size} seeded=${swipeSession.queue.value.size}"
@@ -697,63 +711,78 @@ class VideoViewModel @Inject constructor(
         viewModelScope.launch {
             var attempts = 0
             var appended = 0
-            val isUnmetered = networkTypeProvider.isUnmetered()
-            val dedupEnabled = playerSettings.state.first().playback.crossSessionDedup
-            // 补货只走首页推荐流（Light，蜂窝可用）：Registry 的蜂窝降级判据在这里生效；
-            // story（Heavy）不进补货源集——它是起步兜底，不是接力源。
-            val registry = SwipeSourceRegistry(listOf(HomeFeedSwipeSource(feedRepository)))
-            while (shouldFetchNextRefillPage(attempts = attempts, appended = appended)) {
-                val page = swipeFeedCursor
-                val batch = registry.nextBatch(
-                    cursor = SwipeFeedCursorPolicy.toSwipeCursor(page, HomeFeedSwipeSource.ID),
-                    limit = SwipeSourceRegistry.REFILL_LIMIT,
-                    isUnmetered = isUnmetered
-                ) ?: break
-                val next = batch.nextCursor ?: break
-                swipeFeedCursor = SwipeFeedCursorPolicy.toFeedCursor(next)
-                attempts += 1
-                val fresh = if (dedupEnabled) {
-                    seenStore.filterFresh(batch.entries)
-                } else {
-                    batch.entries
-                }
-                val before = swipeSession.queue.value.size
-                swipeSession.mergeRelates(fresh)
-                if (dedupEnabled) {
-                    seenStore.remember(fresh)
-                }
-                val added = swipeSession.queue.value.size - before
-                appended += added
-                android.util.Log.i(
-                    "PortraitSwipe",
-                    // SX-04：把两套游标都打出来，真机核对"游标单调递增、不反复拉同一页"
-                    // （L4-122 的取证口径：app/idx 与 web/page 各自递增）。
-                    "more: page=${page.appIdx}/${page.webPage} items=${batch.entries.size} fresh=${fresh.size} " +
-                        "added=$added attempts=$attempts queue=${swipeSession.queue.value.size}"
-                )
-            }
-            // 兜底（BiliPai 用 getRelatedVideos 补，这里零新接口）：
-            // 推荐流拉满 3 页仍凑不满时，取队尾那一支的详情 relates 再补一轮 ——
-            // 队尾正是用户下一个会滑到的位置，把它后面补厚才不会"滑到最后一条就没了"。
-            if (shouldRunSwipeRefillFallback(appended = appended)) {
-                val tail = selectSwipeRefillFallbackTarget(swipeSession.queue.value)
-                if (tail != null) {
-                    val added = appendSwipeRefillFallback(tail)
+            try {
+                val isUnmetered = networkTypeProvider.isUnmetered()
+                val dedupEnabled = playerSettings.state.first().playback.crossSessionDedup
+                // 补货只走首页推荐流（Light，蜂窝可用）：Registry 的蜂窝降级判据在这里生效；
+                // story（Heavy）不进补货源集——它是起步兜底，不是接力源。
+                val registry = SwipeSourceRegistry(listOf(HomeFeedSwipeSource(feedRepository)))
+                while (shouldFetchNextRefillPage(attempts = attempts, appended = appended)) {
+                    val page = swipeFeedCursor
+                    val batch = registry.nextBatch(
+                        cursor = SwipeFeedCursorPolicy.toSwipeCursor(page, HomeFeedSwipeSource.ID),
+                        limit = SwipeSourceRegistry.REFILL_LIMIT,
+                        isUnmetered = isUnmetered
+                    ) ?: break
+                    val next = batch.nextCursor ?: break
+                    swipeFeedCursor = SwipeFeedCursorPolicy.toFeedCursor(next)
+                    attempts += 1
+                    val fresh = if (dedupEnabled) {
+                        seenStore.filterFresh(batch.entries)
+                    } else {
+                        batch.entries
+                    }
+                    val before = swipeSession.queue.value.size
+                    swipeSession.mergeRelates(fresh)
+                    if (dedupEnabled) {
+                        seenStore.remember(fresh)
+                    }
+                    val added = swipeSession.queue.value.size - before
                     appended += added
-                    android.util.Log.i(
+                    DiagnosticLog.i(
                         "PortraitSwipe",
-                        "more fallback: tail=${tail.legacyKey()} added=$added queue=${swipeSession.queue.value.size}"
+                        // SX-04：把两套游标都打出来，真机核对"游标单调递增、不反复拉同一页"
+                        // （L4-122 的取证口径：app/idx 与 web/page 各自递增）。
+                        "more: page=${page.appIdx}/${page.webPage} items=${batch.entries.size} fresh=${fresh.size} " +
+                            "added=$added attempts=$attempts queue=${swipeSession.queue.value.size}"
                     )
                 }
+                // 兜底（BiliPai 用 getRelatedVideos 补，这里零新接口）：
+                // 推荐流拉满 3 页仍凑不满时，取队尾那一支的详情 relates 再补一轮 ——
+                // 队尾正是用户下一个会滑到的位置，把它后面补厚才不会"滑到最后一条就没了"。
+                if (shouldRunSwipeRefillFallback(appended = appended)) {
+                    val tail = selectSwipeRefillFallbackTarget(swipeSession.queue.value)
+                    if (tail != null) {
+                        val added = appendSwipeRefillFallback(tail)
+                        appended += added
+                        DiagnosticLog.i(
+                            "PortraitSwipe",
+                            "more fallback: tail=${tail.legacyKey()} added=$added queue=${swipeSession.queue.value.size}"
+                        )
+                    }
+                }
+                DiagnosticLog.i(
+                    "PortraitSwipe",
+                    "more done: attempts=$attempts appended=$appended queue=${swipeSession.queue.value.size}"
+                )
+                // 提示状态：补到东西就回到 Ready（不打扰），一条没补到就是"到尽头了"
+                swipeSession.refillResult(appended = appended)
+                SwipeQoeHub.record(SwipeQoeEventType.Refill, durationMs = appended.toLong())
+            } catch (e: CancellationException) {
+                // 取消不是失败：VM 作用域被取消时原样上抛（同仓口径）。
+                throw e
+            } catch (e: Exception) {
+                // F-8：原先这里没有 try/catch，复位写在正常路径末尾 —— 任何非取消异常都会让
+                // ①补货永久失效（下次进来被 `if (loadingMoreSwipe) return` 直接挡掉）
+                // ②会话状态永久停在 Extending（队尾常驻"加载中"）③异常直接冒到全局未捕获处理器。
+                // 能触发的不是网络失败（取流侧 runCatchingCancellable 兜住了），而是
+                // DataStore/binder 一类低概率异常。
+                Logger.e(TAG, e) { "刷视频补货失败 appended=$appended" }
+                swipeSession.refillResult(appended = 0)
+            } finally {
+                // 唯一复位点：必须在 finally
+                loadingMoreSwipe = false
             }
-            android.util.Log.i(
-                "PortraitSwipe",
-                "more done: attempts=$attempts appended=$appended queue=${swipeSession.queue.value.size}"
-            )
-            // 提示状态：补到东西就回到 Ready（不打扰），一条没补到就是"到尽头了"
-            swipeSession.refillResult(appended = appended)
-            SwipeQoeHub.record(SwipeQoeEventType.Refill, durationMs = appended.toLong())
-            loadingMoreSwipe = false
         }
     }
 
@@ -829,7 +858,7 @@ class VideoViewModel @Inject constructor(
             // 蜂窝下跳过"详情级别"的重预热（判据与理由见 SwipePrefetchPolicy）。
             // 与 count 同一次读网络，不在循环里反复问系统 —— 一次滑动里结论不会变。
             val warmDetail = SwipePrefetchPolicy.shouldWarmDetail(isUnmetered)
-            android.util.Log.i(
+            DiagnosticLog.i(
                 "PortraitSwipe",
                 "prefetch want=$count page=$page pages=${pages.size} prefetchEnabled=$prefetchEnabled " +
                     "unmetered=$isUnmetered detailWarm=$warmDetail stale=${stale}"
@@ -888,7 +917,7 @@ class VideoViewModel @Inject constructor(
                     )
                     SwipeQoeHub.record(SwipeQoeEventType.PlayError)
                     val delayMs = SwipeErrorPolicy.autoRetryDelayMs(swipeAutoRetryCount, kind)
-                    android.util.Log.i(
+                    DiagnosticLog.i(
                         "PortraitSwipe",
                         "playError: kind=$kind autoRetryIn=${delayMs ?: "no"} attempts=$swipeAutoRetryCount"
                     )
@@ -935,7 +964,7 @@ class VideoViewModel @Inject constructor(
                     detailRepository.fetchVideoDetail(ids = params.ids, src = params.src)
                 }
             }
-            android.util.Log.i("PortraitSwipe", "prefetched: key=$key")
+            DiagnosticLog.i("PortraitSwipe", "prefetched: key=$key")
         }
     }
 
@@ -956,7 +985,7 @@ class VideoViewModel @Inject constructor(
             val same = entry.id.matches(SwipeId.of(current.bvid, current.aid))
             if (same) return
         }
-        android.util.Log.i(
+        DiagnosticLog.i(
             "PortraitSwipe",
             "open: key=${entry.legacyKey()} aid=${entry.target.aid} cid=${entry.target.cid} " +
                 "bvid=${entry.bvid} from=${(current as? VideoTarget.Ugc)?.aid}"
@@ -988,7 +1017,7 @@ class VideoViewModel @Inject constructor(
     fun retryCurrentPlayback() {
         val now = android.os.SystemClock.elapsedRealtime()
         if (SwipeErrorPolicy.isManualRetryDebounced(now, lastManualRetryMs)) {
-            android.util.Log.i("PortraitSwipe", "retry ignored: debounced")
+            DiagnosticLog.i("PortraitSwipe", "retry ignored: debounced")
             return
         }
         lastManualRetryMs = now
@@ -997,7 +1026,7 @@ class VideoViewModel @Inject constructor(
 
     private fun retryCurrentPlaybackInternal(fromAuto: Boolean) {
         val target = _targetStack.value.lastOrNull() ?: return
-        android.util.Log.i("PortraitSwipe", "retry: target=$target auto=$fromAuto")
+        DiagnosticLog.i("PortraitSwipe", "retry: target=$target auto=$fromAuto")
         // PB-01：**必须先失效缓存再 openVideo**。顺序反了（放在 openVideo 之后）等于没做 ——
         // 取流已经发生、缓存里的失效 URL 也已经被重新写回，重试照旧拿旧地址。
         // 手动与自动重试共用本函数，故两条路径都被覆盖。
@@ -1090,7 +1119,11 @@ class VideoViewModel @Inject constructor(
     fun blockSwipeUp(mid: Long, name: String? = null) {
         if (mid <= 0L) return
         viewModelScope.launch {
-            blockedUpStore.add(mid, name)
+            // F-6：名单满 200 时最早的记录会被移除 —— 必须让用户看见，否则那条记录
+            // 既不在名单里（无法撤销）又会重新出现在推荐流里。
+            if (blockedUpStore.add(mid, name)) {
+                _msg.tryEmit("拉黑名单已满 ${BlockedUpStore.CAP} 条，最早的记录已移除")
+            }
             runCatchingCancellable { upBlocker.modifyBlacklist(mid, isBlack = true) }
                 .onSuccess {
                     blockedUpStore.markSynced(mid)
@@ -1154,6 +1187,15 @@ class VideoViewModel @Inject constructor(
     }
 
     fun switchQuality(quality: Int) {
+        // **面板列的不是"能切的"**（2026-10-07 审查）：清晰度面板来自 `qnPanel.qnItems`
+        // （含大会员/杜比等），而切换只在 `streamList` 解析出的 `streams` 里找；
+        // 找不到就会话层直接 `return`，用户点一下"毫无反应也没有提示"。
+        // 这里先判一次可切换性，给一次可见反馈（`msg` 由 VideoScreen 收成 snackbar）。
+        val source = videoState.value.playbackSource
+        if (source != null && source.streams.none { it.quality == quality }) {
+            _msg.tryEmit("该清晰度当前不可用")
+            return
+        }
         playbackController.switchVideoQuality(quality)
     }
 
@@ -1164,6 +1206,20 @@ class VideoViewModel @Inject constructor(
     fun updateVideoCdnMode(mode: VideoCdnMode) {
         viewModelScope.launch {
             playerSettings.setVideoCdnMode(mode)
+        }
+    }
+
+    /** CDN 并行分片下载开关（对齐 BiliPai `CdnRegionPlugin` 的「并发下载」）。 */
+    fun updateCdnParallelDownload(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setCdnParallelDownload(enabled)
+        }
+    }
+
+    /** DASH 分段自适应预取开关（对齐 BiliPai `CdnRegionPlugin` 的「自适应预取」）。 */
+    fun updateCdnAdaptivePrefetch(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setCdnAdaptivePrefetch(enabled)
         }
     }
 

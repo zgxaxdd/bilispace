@@ -19,13 +19,17 @@ import com.naaammme.bbspace.core.swipe.source.SwipeCursor
  * 见 `docs/2026-10-03-BiliPai移植-执行报告.md`）。决策 D-1 之后改由本策略正面解决。
  *
  * ## 为什么不直接复用 [com.naaammme.bbspace.core.feed.FeedCursorPolicy]
- * 首页的口径是"**档位**决定推哪个字段"（WEB 档把 `appIdx` 归零、MOBILE 档把 `webPage` 归零）。
+ * 首页的口径原本是"**档位**决定推哪个字段"（WEB 档把 `appIdx` 归零、MOBILE 档把 `webPage` 归零）。
  * 接力不能照搬这个归零：WEB 档下 `FeedRepository.fetchWebFeed` 在 WBI 密钥取不到时会
  * **回退** `fetchMobile(cursor.appIdx, …)`（该函数的 catch 分支），若 `appIdx` 被归零，
  * 回退就会恒拉第 0 页。因此接力对两个字段**同时 +1**，未参与当前档位的那个字段递增无副作用：
  * - MOBILE：只有 `appIdx` 参与取流，推进值与旧实现 `idx + 1` **逐字等价**（默认零回归红线）；
  * - WEB：只有 `webPage` 参与取流，`appIdx` 退化为回退页码；
  * - MERGED：两路各自推进（与 SX-12 联动）。
+ *
+ * > 2026-10-04（B-3/L-2）：首页那条**同一个病灶**也已修掉 ——
+ * > `FeedCursorPolicy.loadMoreCursor(WEB, …)` 不再把 `appIdx` 归零，改为跟随列表末项。
+ * > 两处口径现在一致：**取流只看当前档位对应的字段，但另一个字段必须可推进**。
  *
  * `FeedCursor` 类型本身仍然复用 core:feed 的那一个，不另造。
  */

@@ -92,6 +92,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.ContentScale
@@ -169,6 +170,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
+import androidx.compose.runtime.key
+
+
 
 
 internal enum class PlayerVideoResizeMode {
@@ -230,8 +235,6 @@ private val PlayerControlShape = RoundedCornerShape(BiliRadius.playerControl)
 /** 统计胶囊的圆端（与轨道同为 50%，但**角色不同**：以后轨道改半径时不该连带改它）。 */
 private val PlayerPillShape = RoundedCornerShape(percent = 50)
 
-/** 非全屏播放窗口的圆角（全屏时用 RectangleShape，见调用处）。 */
-private val PlayerWindowShape = RoundedCornerShape(16.dp)
 
 /** 气泡胶囊的 20dp 圆角：既不是卡片角色也不是控件角色，所以独立命名。 */
 private val PlayerToastShape = RoundedCornerShape(20.dp)
@@ -384,7 +387,13 @@ internal fun Modifier.playerControlGlass(
     if (budget.maxBlurLevel <= 0) {
         return this.background(scrim, shape)
     }
-    val refractionDp = (shapeHeightPx / 3.5f).coerceIn(2f, 10f)
+    // `shapeHeightPx` 是 **px**（见参数注释），这里要的是"短边 **dp** 的 1/3.5"：
+    // 原来除以字面量 3.5 = **把本机密度写死**（本机 density 恰好 3.5，所以一直没暴露）——
+    // 别的设备上折射量会整体乘上 density/3.5（density 2.75 时 6dp 的进度条轨道会被折射吞掉，
+    // density 4 时又几乎看不见）。按真实密度换算（2026-10-07 审查）。
+    val refractionDp = with(LocalDensity.current) {
+        (shapeHeightPx.toDp().value / 3.5f)
+    }.coerceIn(2f, 10f)
     // **必须 remember 住整条链**：miuix 的 `DrawBackdropElement.equals` 对 shape/effects/
     // highlight/onDraw* 做**引用比较**（已反编译 miuix-blur 0.9.4-rc01 核实），而
     // `update(node)` 末尾**无条件 `invalidateDrawCache()`** —— 每次重组新建 lambda 就会让
@@ -435,86 +444,81 @@ internal val LocalVideoResizeModeState = compositionLocalOf<MutableState<PlayerV
     error("Missing player video resize mode state")
 }
 
-@Suppress("UnsafeOptInUsageError")
-@UnstableApi
+/**
+ * 播放页（详情竖排 / 全屏 / 宽屏展开 / 刷视频 Pager 共用）。
+ *
+ * 参数表按四处调用点重建（2026-10-07 误删后恢复）。
+ * 可选参数都带默认值：各宿主只传自己关心的那几个。
+ */
+@Suppress("UnstableApiUsage")
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 internal fun VideoPlayerPane(
-    modifier: Modifier,
+    modifier: Modifier = Modifier,
     viewModel: VideoViewModel,
-    videoTitle: String?,
+    videoTitle: String? = null,
     isFull: Boolean,
     onToggleFull: () -> Unit,
     onBackClick: () -> Unit,
     onGoHome: () -> Unit,
-    /**
-     * 上下滑翻页会话（全屏 pager）激活：垂直拖动让位给 pager 翻页，
-     * 亮度/音量手势禁用（水平 seek、单击/双击/长按不受影响）。
-     */
+    /** 翻页会话激活：垂直拖动让位给 pager。 */
     swipePagingActive: Boolean = false,
-    /**
-     * 上下滑会话里"正在等这支视频出画面"（pager 判据：切到这个条目后首帧还没到）。
-     *
-     * 为什么需要：PlayerView 开了 `setKeepContentOnPlayerReset(true)`，换流期间画面会
-     * **停留在上一支视频的最后一帧**；而 pager 那边新页此刻刚从"封面页"切成播放器页
-     * ——用户看到的就是"上滑时预览图又闪一下、然后画面还是上一条的"。真机反馈第 2 条。
-     *
-     * 置 true 时整屏只剩一层**深色加载层 + 大尺寸粒子**（见 [SwipeWaitVeil]）：
-     * 不重复铺封面、也不让中央播放键/控制栏露出来，首帧到达后淡出。
-     */
+    /** 等首帧加载层（深色底 + 粒子），首帧到达后淡出。 */
     swipeWaitingFirstFrame: Boolean = false,
-    /**
-     * 等首帧期间**取流/解码失败**：加载层不撤，切成"错误 + 重试"。
-     *
-     * 为什么需要：以前失败会把加载层撤掉 → 露出"纯黑 + 中央播放键"，看起来像卡死；
-     * 而错误详情只写在播放器侧栏里，用户在连播页面上看不到任何解释。
-     */
+    /** 播放失败：加载层留着并切成「错误 + 重试」。 */
     swipeFailed: Boolean = false,
-    /**
-     * 失败文案（SW-13 分类后的"人话"；`null` = 用默认文案）。
-     * 网络类指向"检查网络"、解码类指向"换一支"——分类对用户可见。
-     */
+    /** 失败文案（按类型给「人话」）。 */
     swipeErrorText: String? = null,
-    /** 失败态的重试回调（`null` = 不给重试入口，只显示错误）。 */
-    onRetrySwipe: (() -> Unit)? = null,
-    /**
-     * 进 UP 空间（SW-20/21：会话信息层的头像与 @名 共用这一出口）。
-     * `null` = 宿主不接（此时头像/@名退化为不可点，不做假入口）。
-     */
-    onOpenSpace: ((SpaceRoute) -> Unit)? = null,
-    /**
-     * 这一页的封面 URL（等首帧时的加载层用它铺底）。
-     *
-     * 真机反馈「感觉就是盖了一层遮罩」：原来加载层是**不透明深色渐变**，
-     * 于是观感是"封面 → 一块黑布 → 视频"。现在用同款封面（`PlayerPreview` + `Fit`）
-     * 铺底 + 轻遮罩 + 小粒子，过渡变成"图 → 图+暗+粒子 → 视频"。
-     * 传 `null` 时退化回纯深色底（封面缺失的老行为）。
-     */
+    onRetrySwipe: () -> Unit = {},
+    /** 等首帧加载层的封面（与封面页同一个 URL）。 */
     swipeCoverUrl: String? = null,
-    /**
-     * 播放设置侧栏（⋮）显隐变化上报：会话宿主（pager）的**常驻互动栏**要据此
-     * 隐藏——侧栏是 pane 内的全屏右挂面板，盖不住 pane 之外的互动栏，
-     * 不让位的话点亮的爱心会浮在设置面板上（z 序跨层）。`null` = 宿主不接。
-     */
+    /** 侧栏显隐上报（互动栏让位）。 */
     onPlaybackSheetVisibilityChange: ((Boolean) -> Unit)? = null,
-    /**
-     * 手动横屏开关（`null` = 不显示该入口）。
-     *
-     * 为什么需要：上下滑会话期间 VideoScreen **锁死竖屏**（否则切视频时会因
-     * `isPortraitVideo` 瞬时翻转而转屏，见那边 effect 的注释）。锁的代价是
-     * "横屏视频只能看 letterbox"，所以必须给用户一个显式要横屏的入口——
-     * BiliPai 的竖屏 pager 也是同一个做法（`onRotateToLandscape`）。
-     * 只在**当前视频是横屏**时由 pager 传入（竖屏视频转横屏只会更小）。
-     */
+    /** 只在允许的宿主里出现的「手动横屏」出口。 */
     onToggleLandscape: (() -> Unit)? = null,
-    /** 当前是否已被用户手动锁成横屏（决定"横屏/竖屏"胶囊的文案与高亮）。 */
     landscapeForced: Boolean = false,
+    /** 是否**允许**省电模式（SurfaceView）在本宿主生效：页面级 graphicsLayer 变换的宿主传 false。 */
+    allowSurfaceView: Boolean = true,
 ) {
+
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val timeFmt = remember { android.text.format.DateFormat.getTimeFormat(context) }
     val state by viewModel.videoState.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle(initialValue = PlayerSettingsState())
+    // 「省电模式」：视频节点换 SurfaceView（设置项 + 外层布局是否允许）。
+    //
+    // **关键约束（2026-10-07 真机实测）**：SurfaceView 是独立图层，只要祖先里有
+    // `Modifier.clip(圆角)` 或非恒等的 `graphicsLayer{}`，surface 就会被挖空 ⇒ 画面全黑
+    // （第一版就栽在这里：只换 surface_type，结果内嵌黑、全屏正常 —— 差别正是圆角裁剪层）。
+    // 因此本模式生效时：
+    // ① 播放页**不再用 Compose clip**，圆角改由 PlayerView 的 outline 裁剪（系统侧裁 surface）；
+    // ② 黑底改用 `background(color, shape)`（只按形状绘制、不建裁剪层）；
+    // ③ 捏合缩放改写成 **View 级**变换（Compose graphicsLayer 会建图层）；
+    // ④ 控件模糊按关处理（画面不在应用图层里，玻璃采不到帧）。
+    val surfacePowersave by viewModel.playerSurfaceView.collectAsStateWithLifecycle()
+    // 设置迟迟读不出来（DataStore 异常等）时的兜底：最多等 800ms 按"关"处理 ——
+    // 绝不允许播放页因为一个设置读不到而永久黑屏。
+    var surfaceSettingTimedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(surfacePowersave) {
+        if (surfacePowersave == null) {
+            kotlinx.coroutines.delay(800)
+            surfaceSettingTimedOut = true
+        }
+    }
+    val surfaceSetting = surfacePowersave ?: if (surfaceSettingTimedOut) false else null
+    if (surfaceSetting == null) {
+        // 设置还没读出来（首帧）：**先不建 PlayerView**。
+        // 若此刻按 false 兜底建一个 TextureView 版并绑定播放器、等真值到达再建 SurfaceView 版，
+        // 真机上**第二个视图根本不会被挂上屏**（`AndroidView` 的 holder 只认第一次创建的视图），
+        // 而 `PlayerViewTargetBinder` 已把播放器改绑到这个没上屏的新视图 ⇒ **首次进入黑屏**
+        // （2026-10-07 实测；`PlayerSurface` 诊断日志：useSurfaceView 先 false 后 true，
+        // 且 SurfaceHolder 从未 created）。DataStore 首次读取只有几毫秒，这里等价于一帧黑底。
+        Box(modifier = modifier.background(Color.Black))
+        return
+    }
+    val useSurfaceView = surfaceSetting && allowSurfaceView
     var activeDialog by remember { mutableStateOf<PlayerDialog?>(null) }
     var showPlaybackSheet by remember { mutableStateOf(false) }
     var showCtrl by remember { mutableStateOf(false) }
@@ -558,9 +562,23 @@ internal fun VideoPlayerPane(
             }
         }
     }
-    val playerView = remember(context) {
-        // TextureView（而非默认 SurfaceView）：Compose 圆角裁剪才能作用到视频画面
-        (LayoutInflater.from(context).inflate(R.layout.view_bili_player, null, false) as PlayerView)
+    val playerView = remember(context, useSurfaceView) {
+        // 默认 TextureView：Compose 圆角裁剪才能作用到视频画面。
+        // 「省电模式」打开时换 SurfaceView：画面交给系统显示管线合成，省掉每帧一次应用侧合成
+        // （真机实测 RenderThread 19.7%→2.8%、整机 CPU 105.5%→75.2%）。
+        //
+        // ⚠️ SurfaceView 是**独立图层**，不能被放进带裁剪/变换的 Compose 图层：
+        // 第一版只换了 surface_type，结果**内嵌播放全黑、全屏正常**（证据截图
+        // `D:\111j\c\r23\a3-surface.png`）—— 差别就在内嵌套了 16dp 圆角裁剪（`clip`）而全屏是
+        // RectangleShape（无裁剪层）。所以本模式必须同时满足：①下面 `playerCornerShape` 走直角
+        // （不产生裁剪层）；②外层带 graphicsLayer/clip 的调用点传 `allowSurfaceView = false`
+        // （宽屏展开/形变布局/刷视频 Pager）；③控件模糊按关处理（画面不在应用图层，玻璃采不到帧）。
+        val layoutId = if (useSurfaceView) {
+            R.layout.view_bili_player_surface
+        } else {
+            R.layout.view_bili_player
+        }
+        (LayoutInflater.from(context).inflate(layoutId, null, false) as PlayerView)
             .apply {
                 useController = false
                 setEnableComposeSurfaceSyncWorkaround(true)
@@ -569,7 +587,10 @@ internal fun VideoPlayerPane(
     }
     var lastWarmAspect by remember(playerView) { mutableStateOf<Float?>(null) }
 
-    LaunchedEffect(state.playWhenReady) {
+    // **键必须带上 `playerView`**（2026-10-07 审查）：视图会因省电模式设置翻转
+    // （或 800ms 兜底后真值到达）换成另一份 PlayerView，而 `playWhenReady` 多数时候没变 ——
+    // 只以它为键时新视图拿不到 `keepScreenOn`，播放中会按系统超时息屏。
+    LaunchedEffect(playerView, state.playWhenReady) {
         playerView.keepScreenOn = state.playWhenReady
     }
 
@@ -601,12 +622,22 @@ internal fun VideoPlayerPane(
     }
 
     CompositionLocalProvider(LocalVideoResizeModeState provides videoResizeMode) {
-        // 非全屏时播放窗口 16dp 圆角；全屏保持全屏无边角
-        val playerCornerShape = if (isFull) {
-            RectangleShape
-        } else {
-            PlayerWindowShape
+        // **播放窗口 = 直角（用户定稿 2026-10-07，删繁就简）**：
+        // 上下沿都不做圆角 ⇒ 不再需要任何形状/裁剪/outline 机制：
+        //   · 非省电模式：不做 Compose clip（也省掉一个裁剪层）；
+        //   · 省电模式：surface 就是矩形视图本身，不需要 outline 裁剪；
+        //   · 黑底按矩形绘制，播放带用的也是 RectangleShape，两者同形。
+        // 留一条 surface 类型日志：真机黑屏类问题（独立图层被挖空）只有它能一眼看出来。
+        LaunchedEffect(playerView, useSurfaceView) {
+            DiagnosticLog.i("PlayerSurface") {
+                "pane surfaceType=" + (playerView.videoSurfaceView?.javaClass?.simpleName ?: "null")
+            }
         }
+        // 省电模式下缩放走 View 级变换 ⇒ 必须在组合期读（否则 AndroidView.update 不会重跑）。
+        // 非省电模式不读（`if/else` 短路），避免缩放时整块面板逐帧重组。
+        val zoomScale = if (useSurfaceView) zoomState.scale else 1f
+        val zoomOffsetX = if (useSurfaceView) zoomState.offsetX else 0f
+        val zoomOffsetY = if (useSurfaceView) zoomState.offsetY else 0f
         // 播放页专用背板：视频节点录进它，控制条玻璃采样它做真模糊。
         // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick 强制重录。
         val videoBackdrop = rememberLayerBackdrop()
@@ -627,9 +658,12 @@ internal fun VideoPlayerPane(
         // 播放页专用背板的 layerBackdrop 录制链本身保持常驻：节点只在被 tick 读
         // 失效时才重绘重录，不 tick 就没有录制成本，注册本身免费。
         val glassGuard = LocalGlassGuard.current
+        // 省电模式（SurfaceView）：画面不在应用图层里，玻璃采不到帧 ⇒ 直接按"模糊关闭"处理，
+        // 否则逐帧重录白跑（泛白/纯色兜底本来就支持，见 LocalVideoControlsBlur 消费者）。
+        val effectiveControlsBlur = controlsBlur && !useSurfaceView
         val videoGlassActive = showCtrl &&
             state.playWhenReady &&
-            controlsBlur &&
+            effectiveControlsBlur &&
             controlsMaterial != GlassMaterial.OFF &&
             // AP-25：守卫降级期间逐帧 tick 循环必须停 —— 消费端（playerControlGlass）
             // 已早退为纯底色，继续逐帧唤醒帧时钟是纯浪费（判据纪律：不进 jank 指标
@@ -647,47 +681,107 @@ internal fun VideoPlayerPane(
         LaunchedEffect(showPlaybackSheet) {
             onPlaybackSheetVisibilityChange?.invoke(showPlaybackSheet)
         }
+        // **离开组合时必须补报一次"关"**（2026-10-07 审查）：侧栏状态是本 pane 的局部
+        // `remember`，pane 被销毁（会话内翻页换页、换宿主）时上面那个 effect 直接取消，
+        // 永远不会上报 `false` ⇒ 父级 `playbackSheetVisible` 永久停在 true，
+        // 互动栏与横屏悬浮按钮整场不再出现（只上报"开"没有"关"是状态泄漏）。
+        val latestSheetReporter by rememberUpdatedState(onPlaybackSheetVisibilityChange)
+        DisposableEffect(Unit) {
+            onDispose { latestSheetReporter?.invoke(false) }
+        }
         CompositionLocalProvider(
             LocalVideoBackdrop provides videoBackdrop,
             LocalVideoGlassTick provides { videoGlassTick },
-            LocalVideoControlsBlur provides controlsBlur,
+            // 省电模式（SurfaceView）下按"模糊关"下发，见 effectiveControlsBlur
+            LocalVideoControlsBlur provides effectiveControlsBlur,
             LocalVideoControlsMaterial provides controlsMaterial
         ) {
         Box(
             modifier = modifier
-                .clip(playerCornerShape)
+                // 播放窗口 = 直角（用户定稿 2026-10-07，删繁就简）：
+                // 不需要任何 Compose clip / outline 机制，黑底就是矩形。
+                // 省电模式（SurfaceView）怕的正是"祖先有裁剪/变换图层"（会把独立 surface 挖空 ⇒ 全黑），
+                // 直角写法天然没有这一层，两个渲染路径同形。
                 .background(Color.Black)
         ) {
             // 捏合缩放只作用于视频画面本体：graphicsLayer 挂在 AndroidView 上，
             // 播放器控件（顶栏/控制条/中央按钮）与弹幕层不跟随缩放；
             // Box 的 clip 在外层保证放大内容裁剪在播放视口内
-            AndroidView(
-                factory = { playerView },
-                update = { view ->
-                    val content = view.findViewById<AspectRatioFrameLayout>(Media3UiR.id.exo_content_frame)
-                    if (content != null) {
-                        content.resizeMode = resizeMode
-                        if (lastWarmAspect != videoAspect) {
-                            content.setAspectRatio(videoAspect ?: 0f)
-                            lastWarmAspect = videoAspect
+            // **必须包 key(useSurfaceView)**：AndroidView 的 holder 只认第一次 factory 返回的视图，
+            // 若 setting 变化（例如 DataStore 迟到、或用户在设置页改完回来），holder 里还是旧视图，
+            // 而 PlayerViewTargetBinder 会把播放器改绑到"新造但没上屏"的视图 ⇒ 永久黑屏。
+            // 包 key() 后：setting 一变，节点与视图一起重建，绑定目标必然已上屏。
+            key(useSurfaceView) {
+                AndroidView(
+                    factory = { playerView },
+                    update = { view ->
+                        // **自愈补绑（2026-10-07 审查）**：绑定原本只在 `DisposableEffect` 里做一次，
+                        // 而 binder 的契约是"一个 player 同时刻只有一个渲染目标"——
+                        // 同屏出现过第二个 PlayerView 时（真机 dump 实测到两份），落败的那个视图会被
+                        // `detachView` 摘成 `view.player == null`，而组合态随后不再变化 ⇒ **永久黑屏**
+                        // （声音/进度正常）。binder 的 KDoc 本来就写明"AndroidView.update 每次重组都会调用"，
+                        // 这里按契约补绑。
+                        // 两个前置条件缺一不可：
+                        // · `view.player == null`：已绑好就不碰（bind 幂等，但少一次判断更稳）；
+                        // · 播放页处于 **RESUMED**：保证被压在后台的那个播放页不会把前台正在渲染的
+                        //   目标抢走，也不破坏 ON_STOP 主动解绑（省电）的既有行为。
+                        if (
+                            player != null &&
+                            view.player == null &&
+                            owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+                        ) {
+                            PlayerViewTargetBinder.bind(view, player)
                         }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = zoomState.scale
-                        scaleY = zoomState.scale
-                        translationX = zoomState.offsetX
-                        translationY = zoomState.offsetY
-                    }
-                    // 读 tick 强制逐帧重录 + 把视频节点录进播放页专用背板
-                    .drawWithContent {
-                        videoGlassTick
-                        drawContent()
-                    }
-                    .layerBackdrop(videoBackdrop)
-            )
+                        val content = view.findViewById<AspectRatioFrameLayout>(Media3UiR.id.exo_content_frame)
+                        if (content != null) {
+                            content.resizeMode = resizeMode
+                            if (lastWarmAspect != videoAspect) {
+                                content.setAspectRatio(videoAspect ?: 0f)
+                                lastWarmAspect = videoAspect
+                            }
+                        }
+                        if (useSurfaceView) {
+                            // 捏合缩放写成 View 级变换：Compose graphicsLayer 会建图层 ⇒ surface 会被挖空
+                            view.scaleX = zoomScale
+                            view.scaleY = zoomScale
+                            view.translationX = zoomOffsetX
+                            view.translationY = zoomOffsetY
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (useSurfaceView) {
+                                Modifier
+                            } else {
+                                Modifier.graphicsLayer {
+                                    scaleX = zoomState.scale
+                                    scaleY = zoomState.scale
+                                    translationX = zoomState.offsetX
+                                    translationY = zoomState.offsetY
+                                }
+                            }
+                        )
+                        .then(
+                            if (useSurfaceView) {
+                                // 省电模式：**背板录制链整条摘掉**。
+                                // ① 画面是独立 surface，录不进应用图层，玻彩也采样不到（模糊已按关下发）；
+                                // ② `layerBackdrop` 这条链会把节点录进 GPU 图层 —— 图层一旦盖到独立
+                                //    surface 上就会把它挖空/留在坏状态（真机现象：首次进入黑屏、
+                                //    全屏往返重建后才正常），所以省电模式下必须完全不挂它。
+                                Modifier
+                            } else {
+                                Modifier
+                                    // 读 tick 强制逐帧重录 + 把视频节点录进播放页专用背板
+                                    .drawWithContent {
+                                        videoGlassTick
+                                        drawContent()
+                                    }
+                                    .layerBackdrop(videoBackdrop)
+                            }
+                        )
+                )
+            }
 
             if (danmakuOverlayState != null) {
                 VideoDanmakuLayer(
@@ -739,7 +833,7 @@ internal fun VideoPlayerPane(
                 modifier = Modifier.align(Alignment.TopCenter),
                 enter = fadeIn(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) +
                     slideInVertically(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) { it / 16 },
-                exit = fadeOut(tween(durationMillis = 150))
+                exit = fadeOut(tween(durationMillis = ctrlAnim.short))
             ) {
                 Row(
                     modifier = Modifier
@@ -1376,14 +1470,14 @@ private fun SwipeRailAction(
     val pop = remember { Animatable(1f) }
     // CompositionLocal 只能在组合期读：effect 里读到的是"组合那一刻"的值（够用——
     // 用户改"动效速度"后重组的下一帧就会带上新值）
-    val popReduceMotion = LocalAnimations.current.reduceMotion
-    LaunchedEffect(popToken, popReduceMotion) {
+    val popAnim = LocalAnimations.current
+    LaunchedEffect(popToken, popAnim.reduceMotion) {
         if (popToken != lastPopToken) {
             lastPopToken = popToken
-            if (!popReduceMotion) {
+            if (!popAnim.reduceMotion) {
                 pop.snapTo(1f)
-                pop.animateTo(1.18f, tween(durationMillis = 120))
-                pop.animateTo(1f, tween(durationMillis = 160))
+                pop.animateTo(1.18f, tween(durationMillis = popAnim.short))
+                pop.animateTo(1f, tween(durationMillis = popAnim.short))
             }
         }
     }
@@ -1443,12 +1537,15 @@ private fun SwipeRailAction(
 private fun SwipeRailCount(label: String, reduceMotion: Boolean) {
     var shown by remember { mutableStateOf(label) }
     val roll = remember { Animatable(1f) }
+    // 时长走 token（此前硬编码 260ms）：`reduceMotion` 已由调用方传进来，
+    // 但"动效速度档位"此前对它无效——降级只做了一半。
+    val rollAnim = LocalAnimations.current
     LaunchedEffect(label) {
         if (label != shown) {
             shown = label
             if (!reduceMotion) {
                 roll.snapTo(0f)
-                roll.animateTo(1f, tween(durationMillis = 260))
+                roll.animateTo(1f, tween(durationMillis = rollAnim.morph))
             }
         }
     }
@@ -2207,7 +2304,7 @@ private fun VideoPlayerOverlay(
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) +
                 slideInVertically(tween(durationMillis = ctrlAnim.medium, easing = ctrlAnim.standard)) { it / 16 },
-            exit = fadeOut(tween(durationMillis = 150))
+            exit = fadeOut(tween(durationMillis = ctrlAnim.short))
         ) {
             PlayerCtrlBarHost(
                 viewModel = viewModel,

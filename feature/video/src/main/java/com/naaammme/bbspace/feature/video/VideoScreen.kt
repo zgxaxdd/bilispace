@@ -106,6 +106,7 @@ import com.naaammme.bbspace.core.model.PlaybackSource
 import com.naaammme.bbspace.core.model.PlaybackStream
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.core.model.SpaceRoute
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoDownloadKind
 import com.naaammme.bbspace.core.model.VideoDownloadOption
@@ -142,17 +143,10 @@ import kotlinx.coroutines.launch
 
 internal val speedOps = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
 
-/**
- * 详情遮罩在「打开动画播完」之后愿意等待视频首帧的时长。
- *
- * 真机实测（PLC110 / ColorOS 16.0）：首帧就绪相对 beginOpen 为 616~847ms，而打开动画本身
- * 约 610ms——也就是说动画结束时视频通常还没出画面，旧逻辑会把**已经组合好的**详情内容
- * 一直盖到首帧为止（实测遮罩驻留 639~892ms）。此处只保留一小段宽限用于吸收抖动，
- * 超时即放行详情内容；播放器区域的封面垫底仍按首帧淡出，视频画面本身不受影响。
- *
- * 取 120ms：足以覆盖首帧紧随动画结束的情形，又不会让用户对着空背景干等。
- */
-private const val MASK_FIRST_FRAME_GRACE_MS = 120L
+// K-7（2026-10-04 审查报告）：这里原有一个 `private const val MASK_FIRST_FRAME_GRACE_MS = 120L`
+// 与它的说明（"详情遮罩等首帧的宽限期"）。详情区遮罩已整体移除（见下面
+// `为什么这里没有详情区遮罩了` 那段），该常量**全仓零引用**，属于"逻辑删了、常量忘了删"，
+// 故删除；播放器区域的封面垫底仍在（`CoverSettleBackdrop`，按首帧淡出 + 2.5s 超时兜底）。
 
 /**
  * 播放器区域的两种形状常量（PF-06）。
@@ -161,11 +155,12 @@ private const val MASK_FIRST_FRAME_GRACE_MS = 120L
  * 写在 composable 体内就是**每次重组新建一份 Shape**，而它同时被 `clip` 与
  * 无缝 morph 的动画两端读取 —— 两端各自新一份还可能算出不同实例。
  */
-private val ExpandedPlayerShape = RoundedCornerShape(BiliRadius.player)
-private val CompactPlayerShape = RoundedCornerShape(
-    bottomStart = BiliRadius.playerCompact,
-    bottomEnd = BiliRadius.playerCompact
-)
+// **播放区域 = 直角（用户定稿 2026-10-07）**：上下沿都不做圆角。
+// 缘由：在"画面满宽满框"的几何下，圆角会在上沿被状态栏那一带黑底读成"缺角"、
+// 下沿又会与简介区的底色打架，试过对齐半径后用户判定不好看 ⇒ 直接方形。
+// 视频表面（SurfaceView）不再需要 outline 裁剪（直角）。
+private val ExpandedPlayerShape = RectangleShape
+private val CompactPlayerShape = RectangleShape
 
 @Suppress("UnsafeOptInUsageError")
 @UnstableApi
@@ -210,6 +205,10 @@ fun VideoScreen(
     }
     val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val isExpandedWidth = windowSizeClass.isWidthAtLeastBreakpoint(840)
+    // 「省电模式」（视频用 SurfaceView）：外层布局必须据此避开 Compose `clip`/`graphicsLayer`
+    // ——它们是图层，会把独立 surface 挖空（画面全黑）。圆角改由 PlayerView 的 outline 裁剪，
+    // 位移改用 layout 期 offset；代价是控件真模糊与进全屏的淡入缩放动效让位。
+    val surfacePowersave by viewModel.playerSurfaceView.collectAsStateWithLifecycle()
     // SX-03：横屏（**非全屏**）时，视频画面下方要给一个悬浮「全屏」按钮（用户需求③：
     // "不用去顶栏点"）。判据用 `Configuration.orientation` 而**不是**宽度分级：
     // 横屏手机宽度约 800dp，`isExpandedWidth`（840dp）仍为 false、走的是紧凑分支
@@ -372,7 +371,7 @@ fun VideoScreen(
             // 会话内仍锁竖屏 → letterbox 呈现，需要满屏时顶栏还有手动「横屏」胶囊；
             // 「全屏」按钮不携带请求 → 只进全屏（R3）。队列为空仍不启用，保持单视频全屏。
             swipeSessionActive = swipeModeRequested && viewModel.swipeQueue.value.isNotEmpty()
-            android.util.Log.i(
+            DiagnosticLog.i(
                 "PortraitSwipe",
                 "activate: requested=$swipeModeRequested portrait=$isPortraitVideo " +
                     "queue=${viewModel.swipeQueue.value.size} active=$swipeSessionActive"
@@ -513,6 +512,10 @@ fun VideoScreen(
 
         when {
             !hostExpanded || fullOn -> {
+                // 本分支里的播放器有两种载体：刷视频 Pager（页面级缩放/透明动画 ⇒ 必须 TextureView，
+                // 传 allowSurfaceView=false）与独立播放页（可 SurfaceView）。进全屏动效要让位的只有后者，
+                // 否则刷视频用户白丢一段动效却没有省电收益。
+                val pagerActive = swipeSessionActive && swipeAnchor != null
                 // SW-33：**详情 → 全屏**的进场过渡（200–280ms 淡入 + 极轻微缩放）。
                 // 首页卡片 → 刷视频走的是 OPPO 无缝 morph（既有路径）；这里补的是
                 // 详情页按下全屏时的"瞬时硬切"。reduceMotion 时瞬时到位（无动画）。
@@ -524,7 +527,9 @@ fun VideoScreen(
                         fullEntryAnim.snapTo(0f)
                         return@LaunchedEffect
                     }
-                    if (animations.reduceMotion) {
+                    if (animations.reduceMotion || (surfacePowersave == true && !pagerActive)) {
+                        // 省电模式（且本分支确实用 SurfaceView）：进全屏不做淡入/缩放
+                        // —— 那需要 graphicsLayer（图层）⇒ 会挖空 surface
                         fullEntryAnim.snapTo(1f)
                         return@LaunchedEffect
                     }
@@ -538,18 +543,30 @@ fun VideoScreen(
                         )
                     )
                 }
+                // 本分支里的播放器有两种载体：刷视频 Pager（页面级缩放/透明动画 ⇒ 必须 TextureView，
+                // 传 allowSurfaceView=false）与独立播放页（可 SurfaceView）。进全屏动效要让位的只有后者，
+                // 否则刷视频用户白丢一段动效却没有省电收益。
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            if (fullOn) {
-                                val p = fullEntryAnim.value
-                                alpha = 0.55f + 0.45f * p
-                                val s = 0.985f + 0.015f * p
-                                scaleX = s
-                                scaleY = s
+                        // 进全屏的淡入 + 轻微缩放：省电模式（SurfaceView）下**整段跳过** ——
+                        // alpha/scale 都要一层 graphicsLayer，而图层会把独立 surface 挖空（全黑）。
+                        // 与 reduceMotion 同处理：瞬时到位（下面 fullEntryAnim 也按同判据 snapTo(1f)）。
+                        .then(
+                            if (surfacePowersave == true && !pagerActive) {
+                                Modifier
+                            } else {
+                                Modifier.graphicsLayer {
+                                    if (fullOn) {
+                                        val p = fullEntryAnim.value
+                                        alpha = 0.55f + 0.45f * p
+                                        val s = 0.985f + 0.015f * p
+                                        scaleX = s
+                                        scaleY = s
+                                    }
+                                }
                             }
-                        }
+                        )
                         .onGloballyPositioned {
                             coverBackdropFrame = BackdropFrame(it.boundsInWindow(), RectangleShape)
                         }
@@ -641,7 +658,9 @@ fun VideoScreen(
                         modifier = Modifier
                             .width(expandedPlayerW)
                             .height(expandedPlayerH)
-                            .clip(expandedPlayerShape)
+                            // 省电模式（SurfaceView）下不能套 Compose clip（裁剪层会挖空 surface ⇒ 全黑）：
+                            // 圆角由 PlayerView 的 outline 裁剪保证，视觉一致。
+                            .then(if (surfacePowersave == true) Modifier else Modifier.clip(expandedPlayerShape))
                             .onGloballyPositioned {
                                 coverBackdropFrame = BackdropFrame(
                                     it.boundsInWindow(),
@@ -693,7 +712,7 @@ fun VideoScreen(
                 // 下滑进全屏会从内容边缘漏出一圈亮色。实测算一层纯色填充，可接受。
                 // ── 播放器 / 内容衔接（#2 定稿·BiliPai 纯色渐变 + 整圈描边）─────────
                 // 三层，全部静态、零逐帧成本：
-                // 1. 播放带**保留底部圆角**（CompactPlayerShape），不切直角；
+                // 1. 播放带用 CompactPlayerShape（四角同半径，上下统一）；
                 // 2. 贴缝一道**整圈圆角描边**（rim light）：亮度沿垂直渐变走线——
                 //    底边全亮、绕过两个圆角时起坡渐弱、圆角上方完全透明。描边与
                 //    播放带圆角同构。**描边色 = 下方的光晕色（封面代表色）**——
@@ -740,8 +759,6 @@ fun VideoScreen(
                         tint
                     }
                 }
-                // 描边与光晕**同色**（用户定稿）
-                val seamStrokeBase = seamGlowColor
                 // 光要"洒"开就得多给一段行程：160dp（五倍 xxxl）——上游是整卡 85% 高度，
                 // 播放页取"足够读完首屏标题区"的固定行程；组件内部会 coerce 到容器高度内。
                 val seamGlowHeight = BiliSpacing.xxxl * 5f
@@ -752,14 +769,6 @@ fun VideoScreen(
                         surfaceColor = seamGlowColor,
                         fadeHeight = seamGlowHeight,
                         peakAlpha = seamGlowPeak
-                    )
-                }
-                // 描边：整圈圆角轮廓线（不垫底色——圆角月牙区由接缝图层接管，
-                // 见 playerSeamStroke 的 KDoc：垫底会盖住圆角处透上来的光）
-                val seamStrokeModifier = remember(seamStrokeBase) {
-                    Modifier.playerSeamStroke(
-                        strokeBase = seamStrokeBase,
-                        cornerRadius = BiliRadius.playerCompact
                     )
                 }
                 val density = LocalDensity.current
@@ -810,19 +819,52 @@ fun VideoScreen(
                     )
                 }
                 val bandMorphHeightPx: () -> Float = {
+                    // 播放带 = 状态栏内缩 + 画面高度。**不能去掉 statusTop**：
+                    // 画面框已在上面按"videoMorphPx + statusTop"给足，
+                    // 带底与画面底因此天然重合（圆角与简介区连成一片），
+                    // 少算这一段反而会让带底比画面底高一截、圆角处露底。
                     (statusTopPx + videoMorphPx()).coerceAtMost(maxHeightPx)
+                }
+                // 「下滑进全屏」的判定区必须读到**最新**的播放带底边（2026-10-07 审查）：
+                // `pullDownToFullscreen` 内部是 `pointerInput(progress, windowBottomPx)`，
+                // 而 Compose 的 pointerInput 元素相等性**只比 key**（compose-ui 1.12.1 字节码实核：
+                // 不含 handler 引用）⇒ key 不变就不会重启手势块，块里捕获的 `zoneTopPx`
+                // 会**冻结在首次组合那一刻**（那时 `currentStream` 还是 null ⇒ target = 16:9 基准
+                // ⇒ 区顶停在 856）。竖屏视频贴合后带底涨到 ~2000px，画面下半部会被当成
+                // "播放带下方"：Initial pass 抢走亮度/音量手势，在列表顶部向下拖还会进全屏。
+                // 修法：稳定外壳（实例不变 ⇒ 手势块不重启）+ `rememberUpdatedState` 读最新 lambda。
+                val zoneTopPxLatest = rememberUpdatedState<() -> Float> {
+                    statusTopPx + lerp(baseVideoPx, targetVideoPx, aspectMorph.value)
+                }
+                val zoneTopPxStable: () -> Float = remember { { zoneTopPxLatest.value() } }
+                // 几何诊断（release 开「现场诊断日志」也可见）：画面框与预留骨架是否一致，靠这行判定。
+                LaunchedEffect(videoAspect, baseVideoPx, targetVideoPx, maxWidth) {
+                    val maxW = with(density) { maxWidth.toPx() }
+                    DiagnosticLog.i("PlayerGeometry") {
+                        "aspect=$videoAspect maxW=$maxW statusTop=$statusTopPx base=$baseVideoPx " +
+                            "target=$targetVideoPx morph=${aspectMorph.value} " +
+                            "paneContent=${videoMorphPx() - statusTopPx} band=${bandMorphHeightPx()}"
+                    }
                 }
 
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)
+                        // **根层铺「主题背景色」，不能铺黑、也不能留空（2026-10-07 用户反馈
+                        // 「视频上部分的圆角没了，要上下圆角统一」）**：
+                        // 播放区域的黑由**播放带自己**按 Shape 绘制（见下方
+                        // `background(Color.Black, compactPlayerShape)`），圆角因此自带；
+                        // 根层若铺方形黑，就会在圆角**外侧**补出直角黑边；
+                        // 根层若留空，露出的是**窗口背景**——`VideoDetailActivity` 为了过渡帧
+                        // 防闪白把它设成了纯黑（见那边的注释），所以结果同样是直角黑边。
+                        // 铺主题背景色后：圆角外 = 页面底色（与下沿的"详情区背景层"同色）⇒
+                        // 上下两沿的圆角读起来一致 ✓，而播放区域内部（含 letterbox）仍由
+                        // 播放带与 PlayerView 的黑底负责 ✓。
+                        .background(MaterialTheme.colorScheme.background)
                         .pullDownToFullscreen(
                             scope = scope,
                             progress = fullscreenMorph,
-                            zoneTopPx = {
-                                statusTopPx + lerp(baseVideoPx, targetVideoPx, aspectMorph.value)
-                            },
+                            zoneTopPx = zoneTopPxStable,
                             windowBottomPx = maxHeightPx,
                             // ── SX-01 要点②③：页面级下滑手势**只在简介页武装** ──────────
                             // 这个 lambda 的返回值语义是"让列表自己接管吗"：
@@ -841,7 +883,7 @@ fun VideoScreen(
                                         // 置位请求再进全屏，会话启用交给上面的 effect；
                                         // 「全屏」按钮不经过这里，因此只进全屏（R3）。
                                         swipeModeRequested = true
-                                        android.util.Log.i("PortraitSwipe", "enter: via=introPull")
+                                        DiagnosticLog.i("PortraitSwipe", "enter: via=introPull")
                                         fullscreenMorph.animateTo(1f, morphSpec)
                                         isFull = true
                                     } else {
@@ -857,8 +899,8 @@ fun VideoScreen(
                     // 光因此从圆角最亮处流出、向下衰减，与播放带圆角精确相切；
                     // 圆角内的部分被播放带（z 序最上）盖住，互不干扰。
                     // 浅色主题的"黑耳朵"（外层黑底从月牙透出）也由这套上移的
-                    // 背景层解决——`playerSeamStroke` 里那条会盖住光的垫底色因此删除。
-                    val seamGlowRadiusPx = with(density) { BiliRadius.playerCompact.toPx() }
+                    // 背景层解决——旧的接缝描边里那条会盖住光的垫底色已随描边一并删除。
+                    val seamGlowRadiusPx = 0f  // 播放区域直角 ⇒ 没有圆角月牙要盖，光晕层不再上移一个半径
                     // 1. 详情区背景层（主题背景色，z 最低；上移 r 覆盖月牙区）
                     // N-3（用户真机反馈：「部分视频尺寸较小 ⇒ 屏幕下方出现黑色部分」）：
                     // 这里**必须铺满整屏高度**，不能再用「预留高度」推出来的 height。
@@ -905,6 +947,11 @@ fun VideoScreen(
                     )
                     // 3. 简介 / 评论区：布局固定、形变期只做位移 + 淡退（绘制期读动画值）。
                     //    **透明背景、z 在光晕之上**——简介内容是最上层内容图层。
+                    //
+                    // 位置 = 播放带底边（= 画面底边）。**间距不能靠 offset 拉开**：
+                    // 那样中间会留出一段没有背景的空白（露出根层黑底）；间距交给
+                    // 简介内容自己的顶部 padding（见下面 contentTopPad），
+                    // 于是那段区域由接缝光晕/垫底铺满，圆角与简介区连成一片。
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -930,22 +977,24 @@ fun VideoScreen(
                             onOpenEpisode = switchEpisode,
                             onSwitchPage = switchPage,
                             // SX-01：把"当前是不是简介页"接进上面的手势门控。
-                            onIntroPageVisibleChange = { detailIntroPageVisible = it }
+                            onIntroPageVisibleChange = { detailIntroPageVisible = it },
+                            // 与画面之间的呼吸间距：给在**内容自身**（而不是把整块内容推下去，
+                            // 那样中间会露出没有背景的一段黑）。取状态栏高度 = 与改动前同量级。
+                            contentTopPad = statusTop
                         )
                     }
-                    // 播放带：黑底 + 底部圆角，高度随形变插值；底边压一道高光描边
+                    // 播放带：黑底 + 底部圆角，高度随形变插值（= 状态栏内缩 + 画面高度 ⇒ 带底 == 画面底）
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
                             .playerMorphHeight(bandMorphHeightPx)
-                            // 描边必须挂在 clip **之前**：整圈圆角描边要画在裁剪轮廓
-                            // 之外、压在接缝两侧（含圆角外的垫底色）；clip 之后的
-                            // background/画面仍被裁成圆角，两不干扰
-                            .then(seamStrokeModifier)
-                            // 先裁剪再画背景：底部圆角才能裁到黑色底块本身（垫底形变终点同此形状）
-                            .clip(compactPlayerShape)
-                            .background(Color.Black)
+                            // 先画背景再谈裁剪：省电模式（SurfaceView）下**不能**用 Compose clip
+                            // （裁剪层会把独立 surface 挖空 ⇒ 画面全黑），改成"按形状绘制黑底"
+                            // （background(color, shape) 不建图层）；画面的圆角由 PlayerView 的
+                            // outline 裁剪负责，视觉一致。
+                            .then(if (surfacePowersave == true) Modifier else Modifier.clip(compactPlayerShape))
+                            .background(Color.Black, compactPlayerShape)
                             .onGloballyPositioned {
                                 // 形变期间不上报垫底帧：终点矩形只在静止态有意义，
                                 // 且避免每帧新建 BackdropFrame 触发重组
@@ -962,13 +1011,41 @@ fun VideoScreen(
                         VideoPlayerPane(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .statusBarsPadding()
-                                .playerMorphHeight(videoMorphPx)
+                                // **用外层的 statusTop，不再各自解析 inset**（2026-10-07 实测：
+                                // 外层 `WindowInsets.statusBars` = 141，而播放页内部
+                                // `statusBarsPadding()` 只解析出 71 —— 两个来源不同 ⇒
+                                // 播放页实际占 [71, 927]，比播放带（底边 856）多出 71px 黑，
+                                // 画面还被挤得必须 letterbox，"与视频骨架对不上"就是这两笔）。
+                                // **顺序不能反（2026-10-07 真机 dump 定案）**：`playerMorphHeight`
+                                // 在外层（它给的是播放页**整页高度**），顶部内缩加在内层。
+                                // 反过来写（padding 在外层）时，内层那个高度表达式会整个变成"画面框"，
+                                // 于是画面框 = videoMorphPx + statusTop —— 真机 dump 实测
+                                // `PlayerView 1272×856`（= 716 + 141）：比画面高整整一个状态栏，
+                                // 16:9 画面被 FIT 居中 ⇒ 上下各一条 71px 黑边（用户报的"视频下方那条黑"），
+                                // 而且播放页比播放带高 141px、越过带底压到简介区。
+                                // 这样写：总高 = videoMorphPx + statusTop = 播放带高，
+                                // 画面框 = videoMorphPx（与视频同比例 ⇒ letterbox = 0），
+                                // 画面满宽满框、底边与播放带底边重合。
+                                .playerMorphHeight { videoMorphPx() + statusTopPx }
+                                .padding(top = statusTop)
                                 // 满屏形变终点 = 全屏分支布局（铺满窗口、无状态栏内缩）：
-                                // 用位移抵消 statusBarsPadding，提交切换时零跳变
-                                .graphicsLayer {
-                                    translationY = -statusTopPx * fullscreenMorph.value
-                                },
+                                // 用位移抵消这段顶部内缩，提交切换时零跳变。
+                                // 两套写法按需选：
+                                // · 省电模式（SurfaceView）：必须用 layout 期 offset —— graphicsLayer 会建
+                                //   图层，把独立 surface 挖空 ⇒ 画面全黑；
+                                // · 老渲染（TextureView）：保留 graphicsLayer，形变全程零 measure（当初的设计）。
+                                //   若统一改成 offset，会让所有人多付"逐帧重排"，属于无收益回归。
+                                .then(
+                                    if (surfacePowersave == true) {
+                                        Modifier.offset {
+                                            IntOffset(0, -(statusTopPx * fullscreenMorph.value).roundToInt())
+                                        }
+                                    } else {
+                                        Modifier.graphicsLayer {
+                                            translationY = -statusTopPx * fullscreenMorph.value
+                                        }
+                                    }
+                                ),
                             viewModel = viewModel,
                             videoTitle = videoState.detail?.title,
                             isFull = false,
@@ -991,10 +1068,22 @@ fun VideoScreen(
                                 // 贴在播放带**下沿**：读布局期的 bandMorphHeightPx（不在组合期
                                 // 读动画值，与文件顶部形变纪律一致）；全屏形变期间随之下移，
                                 // 同时按 morph 进度淡出（此时按钮已无意义，见 SX-05）。
+                                // **必须钳在窗口内**（2026-10-07 审查）：`bandMorphHeightPx()` 出口已经有
+                                // `coerceAtMost(maxHeightPx)`，而横屏手机窗口宽高比 ≈2.2 时
+                                // `compactVideoH = 0.5625 × maxWidth` 必然超过可用高 ⇒ 钳位必命中 ⇒
+                                // 按钮落到 `maxHeight + sm` = **屏幕外**，这个横屏专属入口根本点不到。
+                                // 上限留出按钮自身高度（`defaultMinSize` = xxxl×1.5 = 48dp）与一个 sm 间距。
                                 .offset {
                                     IntOffset(
                                         0,
                                         (bandMorphHeightPx() + with(density) { BiliSpacing.sm.toPx() })
+                                            .coerceAtMost(
+                                                maxHeightPx - with(density) {
+                                                    (BiliSpacing.xxxl * 1.5f).toPx() +
+                                                        BiliSpacing.sm.toPx()
+                                                }
+                                            )
+                                            .coerceAtLeast(0f)
                                             .roundToInt()
                                     )
                                 }
@@ -1044,11 +1133,15 @@ fun VideoScreen(
                 onOpenDownloadCache()
             },
             onStart = { kind, videoQuality, audioQuality ->
+                // `canStartDownload` 是**组合期**算的，而请求依赖 `videoState.detail`：
+                // 组合与点击之间详情被清空/切页（重试、换目标）就会拿到 null ——
+                // 原来这里 `?: error(...)` 是**必崩点**（IllegalStateException）。
+                // 拿不到请求就当作"这次没点上"直接返回，不崩。
                 val request = viewModel.currentDownloadRequest(
                     kind = kind,
                     videoQuality = videoQuality,
                     audioQuality = audioQuality
-                ) ?: error("下载参数无效")
+                ) ?: return@DownloadTaskSheet
                 onStartDownload(request)
             }
         )
@@ -1129,83 +1222,9 @@ private fun Modifier.playerMorphHeight(heightPx: () -> Float): Modifier =
         }
     }
 
-/** 接缝高光描边的线宽（dp 倍数，乘 density 得 px；dp 字面量棘轮已满）。 */
-private const val SEAM_CORE_DP = 1.2f
-
-/** 描边 rim light 的**峰值 alpha**（底边全亮处；弧段按比例起坡，见 playerSeamStroke）。 */
-private const val SEAM_STROKE_PEAK = 0.90f
-
-/**
- * 描边亮区的**起坡行程**（相对圆角半径 r 的倍数）：渐变从 `seamY − 1.6r` 处
- * 从 0 起坡——1r 之外（圆角上方）完全透明，1r..0.5r 是弧段，0.5r..0 是底边。
- * 取 1.6r 让弧段上下各留一段呼吸空间，弧中段落在峰值附近而不是坡底。
- */
-private const val SEAM_STROKE_RISE = 1.6f
 
 /** 光源取色的解码档（palette 内部还会压到 48×48 采样，档位只影响解码内存）。 */
 private val SeamTintSamplePx = 480 to 360
-
-/**
- * 接缝**高光描边**：整圈圆角矩形轮廓线（rim light）。
- *
- * 这是接缝处唯一的"实体"。上一版是"底边直线 + 两端横向淡出"，直线到圆角处
- * 直接断掉、与播放带的圆角形状对不上（用户反馈的问题 1）；本版改成与
- * `.clip(CompactPlayerShape)` 同构的 `drawRoundRect` 整圈描边，亮度沿**垂直
- * 渐变**走线：底边全亮（[SEAM_STROKE_PEAK]）→ 圆角弧段起坡（弧起点
- * ≈0.42·峰值、弧中段 ≈0.75·峰值）→ 圆角上方（[SEAM_STROKE_RISE]·r 之外）
- * 完全透明。描边跟着圆角收边，两角处仍读得出一条连续的高光走线。
- *
- * **描边色 = 接缝光晕色（封面代表色）**（用户定稿"描边与下方光同一个颜色"）：
- * 视频边缘发光、光从描边沿圆角流下、与下方光晕同源同色，是一个整体的"光源"。
- *
- * **本场地（圆角月牙区）由接缝层接管，这里刻意不垫底色**：早期为实现浅色主题
- * 的"黑耳朵"垫过一整条底部 r 带的背景色矩形——但它把月牙区涂成不透明，
- * 正好盖住了从下层透上来的光晕（真机症状："光色没有在圆角处显示"）。
- * 现在月牙区由"上移一个圆角半径的接缝背景层 + 光晕层"提供底色与光，
- * 浅色主题的黑耳朵与圆角处的光同时由那一套图层解决。
- *
- * 静态绘制、零逐帧成本。brush 在 drawWithCache 的 cache 块里按当前尺寸构建：
- * 静止态零分配；形变期间 size 逐帧变化会逐帧重建（几个 Pair 的小分配，
- * 动画结束即停）。**挂载点必须在 `.clip(CompactPlayerShape)` 之前**——
- * 描边要画在裁剪轮廓之外。
- */
-private fun Modifier.playerSeamStroke(
-    strokeBase: Color,
-    cornerRadius: Dp,
-): Modifier = drawWithCache {
-    val w = size.width
-    val seamY = size.height
-    if (w <= 0f || seamY <= 0f) {
-        onDrawWithContent { drawContent() }
-    } else {
-        val r = cornerRadius.toPx()
-        val corePx = SEAM_CORE_DP * density
-        // 亮区行程从 seamY − 1.6r 起坡（r 以上完全透明）；弧起点/弧中段按
-        // 「弧起点 ≈0.42·峰值、弧中段 ≈0.75·峰值」落在渐变的对应高度上。
-        val gradStart = (seamY - SEAM_STROKE_RISE * r).coerceAtLeast(0f)
-        val span = (seamY - gradStart).coerceAtLeast(1f)
-        val strokeBrush = Brush.verticalGradient(
-            0.00f to Color.Transparent,
-            ((r * 0.6f) / span).coerceIn(0f, 1f) to
-                strokeBase.copy(alpha = SEAM_STROKE_PEAK * 0.42f),
-            ((r * 1.1f) / span).coerceIn(0f, 1f) to
-                strokeBase.copy(alpha = SEAM_STROKE_PEAK * 0.75f),
-            1.00f to strokeBase.copy(alpha = SEAM_STROKE_PEAK),
-            startY = gradStart,
-            endY = seamY
-        )
-        onDrawWithContent {
-            drawContent()
-            drawRoundRect(
-                brush = strokeBrush,
-                topLeft = Offset.Zero,
-                size = Size(w, seamY),
-                cornerRadius = CornerRadius(r, r),
-                style = Stroke(width = corePx, join = StrokeJoin.Round)
-            )
-        }
-    }
-}
 
 /**
  * 接缝光晕的峰值 alpha——**BiliPai 上游「封面光晕渐变」（236c6a442）的 coverGlow 原值**
@@ -1312,6 +1331,12 @@ private data class BackdropCornerPx(
 )
 
 private fun Shape.cornerPxOrNull(density: Density): BackdropCornerPx? {
+    // **直角也要给一组 0 半径**（2026-10-07 回归修复）：播放窗口改成 `RectangleShape`
+    // 之后，`RectangleShape` 不是 `CornerBasedShape` ⇒ 这里返回 null ⇒ `CoverSettleBackdrop`
+    // 在 `if (cornerPx == null) return` 处直接退出 —— 封面垫底**整块不再绘制**，
+    // 首帧出来之前播放区退回纯黑（省电模式默认开，黑得更久）。
+    // 垫底要的是"按播放框形状裁剪"，直角就是 0 半径的圆角矩形，语义相同。
+    if (this === RectangleShape) return BackdropCornerPx(0f, 0f, 0f, 0f)
     val corners = this as? CornerBasedShape ?: return null
     return BackdropCornerPx(
         topStart = corners.topStart.toPx(Size.Unspecified, density),

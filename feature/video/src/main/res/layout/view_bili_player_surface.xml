@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  省电模式（设置 → 性能设置 → 省电模式：视频用 SurfaceView）用的播放器布局。
+
+  与 `view_bili_player.xml` 唯一的差别是 `surface_type`：SurfaceView 让系统显示管线
+  直接合成视频画面，省掉 TextureView 那条"每帧经应用渲染管线合成一次"的开销
+  （真机线程级实测：RenderThread ≈19% 单核；换 SurfaceView 后整机 CPU 105.5% → 75.2%）。
+
+  ⚠️ 配套约束（否则画面全黑，2026-10-07 真机实测）：
+  SurfaceView 是**独立图层**，不能被放进带裁剪/变换的 Compose 图层里 —— 一旦外层有
+  `clip(圆角)` 或 `graphicsLayer{...}`，surface 会被挖空 ⇒ 视频区域纯黑而声音/进度正常
+  （"全屏能播、内嵌黑屏"正是因为全屏用 RectangleShape、内嵌用 16dp 圆角）。
+  因此本模式生效时播放页内部**不套圆角裁剪**（四角变直角），且下列外层带变换/裁剪的
+  调用点显式传 `allowSurfaceView = false`：宽屏展开布局、形变布局、刷视频 Pager。
+-->
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:use_controller="false"
+    app:surface_type="surface_view" />

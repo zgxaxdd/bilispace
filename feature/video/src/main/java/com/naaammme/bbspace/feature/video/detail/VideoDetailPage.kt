@@ -142,7 +142,16 @@ internal fun VideoDetailPage(
      * `isIntroVisible` 只关心"哪一页"，不关心评论列表滚到哪 —— 这是有意的：
      * 任务书要点③要求"评论列表到顶继续上滑 = 关闭面板/不动，**不是**进刷视频"。
      */
-    onIntroPageVisibleChange: (Boolean) -> Unit = {}
+    onIntroPageVisibleChange: (Boolean) -> Unit = {},
+    /**
+     * 简介内容**额外的顶部间距**（px→dp 由调用点给）。
+     *
+     * 为什么需要：播放带底边 == 画面底边之后（见 VideoScreen 的几何注释），
+     * 简介区与画面之间不再有"播放带多出来的那段黑"充当间距 ⇒ 标题会贴着视频下沿
+     * （用户反馈"文字与视频挨得太近"）。间距必须由**内容自身**给：
+     * 用 offset 把整块内容推下去会在中间留出没有背景的一段（露出根层黑底）。
+     */
+    contentTopPad: Dp = 0.dp,
 ) {
     val aidKey = ids.aid.takeIf { it > 0L }
     val curCid = ids.cid.takeIf { it > 0L }
@@ -263,7 +272,8 @@ internal fun VideoDetailPage(
                 onOpenSpace = onOpenSpace,
                 onDownloadClick = onDownloadClick,
                 onAction = handleAction,
-                interaction = interaction
+                interaction = interaction,
+                contentTopPad = contentTopPad
             )
 
             else -> {
@@ -354,6 +364,8 @@ private fun DetailPageContent(
     detailLoading: Boolean,
     detailError: String?,
     horizontalPad: Dp,
+    /** 简介内容额外的顶部间距（由 VideoScreen 按播放带几何给，见 VideoDetailPage 同名参数）。 */
+    contentTopPad: Dp = 0.dp,
     infoListState: LazyListState,
     descOn: Boolean,
     tagOn: Boolean,
@@ -371,8 +383,8 @@ private fun DetailPageContent(
     val itemMod = remember(horizontalPad) {
         if (horizontalPad > 0.dp) Modifier.padding(horizontal = horizontalPad) else Modifier
     }
-    val infoTopPad = remember(horizontalPad) {
-        if (horizontalPad > 0.dp) 16.dp else 0.dp
+    val infoTopPad = remember(horizontalPad, contentTopPad) {
+        (if (horizontalPad > 0.dp) 16.dp else 0.dp) + contentTopPad
     }
 
     LazyColumn(

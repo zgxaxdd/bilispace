@@ -7,8 +7,13 @@ package com.naaammme.bbspace.core.swipe
  * - 拖动跨过 **25%** 偏移就预取目标页（`PORTRAIT_SWIPE_PREFETCH_OFFSET_THRESHOLD`）；
  * - 停稳后按网络与开关预取 1~3 页（`resolvePortraitPlayUrlPreloadCount`）。
  *
- * bbspace 只搬这两条**判据**，不搬字节级 head 预热（那需要 media3 `SimpleCache`，
- * 属独立立项，见 `docs/ai-loop/analysis-C10-playback.md`）。
+ * bbspace 只搬这两条**判据**。
+ *
+ * ⚠️ **这段注释此前过期**（报告 P2-7 登记项）：它写「不搬字节级 head 预热（那需要 media3
+ * `SimpleCache`，属独立立项）」—— 但字节级预热**后来已经补齐**了：
+ * `PlaybackHeadPrewarmPolicy`（策略）+ `PlaybackMediaCache.prewarm()`（实现，走的是
+ * `CacheDataSource` 有界读取）。本文件仍只负责"预取几页"这条判据，
+ * 预热那一层在 `infra:player`，两者是**并联**的，别再把它们读成"没做"。
  */
 object SwipePrefetchPolicy {
 

@@ -75,7 +75,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
@@ -108,6 +107,7 @@ import com.naaammme.bbspace.core.swipe.shouldAutoAdvanceToNextSwipePage
 import com.naaammme.bbspace.core.swipe.shouldExtendSwipeQueue
 import com.naaammme.bbspace.core.swipe.model.SwipeId
 import com.naaammme.bbspace.core.swipe.swipeKey
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -204,7 +204,7 @@ internal fun PortraitSwipePager(
                 lastChromeInteractionMs = android.os.SystemClock.elapsedRealtime()
                 if (entry.id != requestedKey) {
                     requestedKey = entry.id
-                    Log.i(
+                    DiagnosticLog.i(
                         TAG,
                         "swipe: page=$page key=${entry.legacyKey()} aid=${entry.target.aid} bvid=${entry.bvid}"
                     )
@@ -281,23 +281,41 @@ internal fun PortraitSwipePager(
     val playerSettings by viewModel.settingsState.collectAsStateWithLifecycle(
         initialValue = PlayerSettingsState()
     )
-    DisposableEffect(player, pages, playerSettings.playback.swipeAutoAdvance) {
+    // P1-8①：`DisposableEffect` 的 key **不再含整个 `pages` 列表**。
+    //
+    // 此前每追加一批 relate，`pages` 就是一个新列表 → key 变化 → **摘掉再重挂
+    // `Player.Listener`**。队列越长、补货次数越多，摘挂次数就是 O(N)。
+    // 而监听器真正依赖的只有 `player` 与「自动连播开关」两项；页面数据、当前页、
+    // 队列长度都是在**回调触发那一刻**才读的瞬时值 —— 这类读取用
+    // `rememberUpdatedState` 取最新值即可，不需要把列表塞进 key 去刷新闭包。
+    val latestPages by rememberUpdatedState(pages)
+    val latestAutoAdvance by rememberUpdatedState(playerSettings.playback.swipeAutoAdvance)
+    val latestRepeatOne by rememberUpdatedState(playerSettings.playback.repeatMode)
+    // **当前页身份也必须取最新值**（2026-10-07 审查，缺陷：自动连播"一场只生效一次"）：
+    // 下面监听器的 DisposableEffect key 只有 (player, 自动连播开关)，而 player 实例跨视频是
+    // **稳定**的（`Media3PlayerEngine.ensurePlayer` 只在没有实例时新建）⇒ 监听器只挂一次，
+    // 闭包里按值捕获的 `currentBvid/currentAid` 会永久停在挂监听器那一刻的那一支。
+    // 于是第一支自动翻页后 `noteSwipeAutoAdvancedKey` 记下的是**那一支**的 key，
+    // 之后每次比较都命中 alreadyAdvancedForThisVideo ⇒ 再也不会自动翻页。
+    val latestBvid by rememberUpdatedState(currentBvid)
+    val latestAid by rememberUpdatedState(currentAid)
+    DisposableEffect(player, playerSettings.playback.swipeAutoAdvance) {
         val p = player ?: return@DisposableEffect onDispose { }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState != Player.STATE_ENDED) return
-                val key = swipeKey(currentBvid, currentAid)
+                val key = swipeKey(latestBvid, latestAid)
                 val next = pagerState.currentPage + 1
                 val shouldAdvance = shouldAutoAdvanceToNextSwipePage(
-                    autoAdvanceEnabled = playerSettings.playback.swipeAutoAdvance,
-                    repeatOne = playerSettings.playback.repeatMode != PlayerRepeatMode.Off,
-                    isLastPage = next > pages.lastIndex,
+                    autoAdvanceEnabled = latestAutoAdvance,
+                    repeatOne = latestRepeatOne != PlayerRepeatMode.Off,
+                    isLastPage = next > latestPages.lastIndex,
                     alreadyAdvancedForThisVideo =
                         key.isNotEmpty() && key == viewModel.swipeLastAutoAdvancedKey.value
                 )
                 if (!shouldAdvance) return
                 viewModel.noteSwipeAutoAdvanced(key)
-                Log.i(TAG, "autoAdvance: page=${pagerState.currentPage} -> $next key=$key")
+                DiagnosticLog.i(TAG, "autoAdvance: page=${pagerState.currentPage} -> $next key=$key")
                 scope.launch { pagerState.animateScrollToPage(next) }
             }
         }
@@ -310,7 +328,7 @@ internal fun PortraitSwipePager(
     val currentLegacyKey = swipeKey(currentBvid, currentAid)
     LaunchedEffect(currentId, pagerState.currentPage, pages) {
         val owner = pages.indexOfFirst { it.isCurrentVideo(currentBvid, currentAid) }
-        Log.i(TAG, "bind: page=${pagerState.currentPage} current=$currentLegacyKey playerPage=$owner")
+        DiagnosticLog.i(TAG, "bind: page=${pagerState.currentPage} current=$currentLegacyKey playerPage=$owner")
     }
     // ── 等首帧（真机反馈：上滑后第一个出现的是"黑屏 + 大暂停键"）──────────────────
     // 症状链：翻页 → 新页立刻从 SwipeCoverPage 切成 VideoPlayerPane → 但播放器
@@ -372,7 +390,7 @@ internal fun PortraitSwipePager(
     // 「换页 → 遮罩出现 → 首帧到达 → 遮罩撤掉」四点的间隔，否则只能靠观感猜。
     // 只在状态翻转时各打一行，不进重组刷屏。
     LaunchedEffect(waitingFirstFrame, currentId, playbackState.hasRenderedFirstFrame) {
-        Log.i(
+        DiagnosticLog.i(
             TAG,
             "veil: waiting=$waitingFirstFrame key=$currentLegacyKey " +
                 "firstFrame=${playbackState.hasRenderedFirstFrame} " +
@@ -389,6 +407,9 @@ internal fun PortraitSwipePager(
     // 一处计时（本层），经 LocalSwipeChromeBurnIn 下发给 pane 的常驻件；
     // 交互 = 翻页落定 / 打开评论 / 打开收藏 / 打开侧栏 → 立刻回满亮并重置漂移相位基准。
     val burnInEnabled = playerSettings.playback.burnInGuard
+    // 防烧屏淡出时长走 token（此前硬编码 400ms）：动效速度档位必须能作用到它。
+    // 400 恰好等于 extraLong 档，所以这里是**等值替换**，默认档位下行为不变。
+    val chromeAnim = LocalAnimations.current
     val chromeAlpha = remember { Animatable(1f) }
     var chromeDrift by remember { mutableStateOf(0f to 0f) }
     LaunchedEffect(burnInEnabled) {
@@ -403,7 +424,7 @@ internal fun PortraitSwipePager(
             val now = android.os.SystemClock.elapsedRealtime()
             val target = SwipeChromeBurnInPolicy.chromeAlpha(now, lastChromeInteractionMs)
             if (chromeAlpha.value != target) {
-                chromeAlpha.animateTo(target, tween(durationMillis = 400))
+                chromeAlpha.animateTo(target, tween(durationMillis = chromeAnim.extraLong))
             }
             chromeDrift = SwipeChromeBurnInPolicy.driftOffsetPx(now)
         }
@@ -625,13 +646,19 @@ internal fun PortraitSwipePager(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 // 松手：阻尼位移回弹到 0（`animate` 是挂起函数，不是 animate*AsState，
-                // 不占帧预算棘轮的额度）
+                // 不占帧预算棘轮的额度）。
+                // 时长/曲线走 **token**：此前这里硬编码 240ms，而同函数的吸附动画
+                // （`snapAnimationSpec`）早已 token 化 —— 同一个函数里两套写法正是
+                // 「token 化靠手改、没门禁」的成因（报告 §2.2.4）。
                 if (rawOverScroll != 0f) {
                     val start = rawOverScroll
                     androidx.compose.animation.core.animate(
                         initialValue = start,
                         targetValue = 0f,
-                        animationSpec = tween(durationMillis = 240)
+                        animationSpec = tween(
+                            durationMillis = animations.medium,
+                            easing = animations.emphasized
+                        )
                     ) { value, _ -> rawOverScroll = value }
                 }
                 return Velocity.Zero
@@ -676,8 +703,29 @@ internal fun PortraitSwipePager(
             val entry = pages.getOrNull(page) ?: return@VerticalPager
             if (entry.isCurrentVideo(currentBvid, currentAid)) {
                 VideoPlayerPane(
-                    modifier = Modifier.fillMaxSize(),
+                    // P1-4②：播放器页此前**只有 `fillMaxSize()`**，而隔壁封面页有一套
+                    // `graphicsLayer` 变换 —— 于是刷视频时"最显眼的那一页"恰好是唯一
+                    // 不跟手的页。这里补上与封面页**同一套**变换（同一个
+                    // `SwipePageTransformPolicy.transformFor`），进出页观感才一致。
+                    //
+                    // 与玻璃背板录制无冲突：`VideoPlayerPane` 内部自己的
+                    // `graphicsLayer`（`:678` 附近）与 `layerBackdrop(videoBackdrop)`
+                    // 就在同一条修饰符链上、且变换在前 —— 录制本来就支持"变换后再录"；
+                    // 而这里是**页级**变换，与只录制视频节点的背板是不同作用域。
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val offset = (pagerState.currentPage - page) +
+                                pagerState.currentPageOffsetFraction
+                            val t = SwipePageTransformPolicy.transformFor(offset, reduceMotion)
+                            scaleX = t.scale
+                            scaleY = t.scale
+                            alpha = t.alpha
+                        },
                     viewModel = viewModel,
+                    // 刷视频页的页面级 graphicsLayer 变换（缩放/透明度）+ pager 位移：
+                    // SurfaceView 是独立图层，被这种变换层包含会被挖空 ⇒ 本会话禁用省电模式
+                    allowSurfaceView = false,
                     videoTitle = detailTitle,
                     isFull = isFull,
                     onToggleFull = onToggleFull,
@@ -1247,8 +1295,8 @@ private val SwipeGlowSamplePx = 480 to 360
 /** 卡片阴影高度（4dp 档：浮起但不"飘"）。 */
 private val COMMENT_CARD_ELEVATION = 8.dp
 
-/** 玻璃卡片描边：白色微光，勾出卡片轮廓（与中央播放键同档）。 */
-private val CommentSheetBorderColor = Color.White.copy(alpha = 0.18f)
+// K-7（2026-10-04 审查报告）：这里原有 `CommentSheetBorderColor = White 18%`，
+// 全仓零引用（评论面板的描边实际取自主题色）。属"换了配色、旧 token 忘了删"。
 
 /**
  * 会话底部信息块（@名/标题/话题）的底部内边距：抬到系统手势导航条之上。

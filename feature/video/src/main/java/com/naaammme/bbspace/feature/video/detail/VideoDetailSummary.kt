@@ -479,14 +479,16 @@ internal fun RowScope.ActionChip(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null
 ) {
-    // A3：选中态颜色 150ms 渐变 + 图标 spring 弹跳（0.85→1.0，一次回弹）
+    // A3：选中态颜色渐变 + 图标 spring 弹跳（0.85→1.0，一次回弹）。
+    // 时长走 token（此前两处都硬编码 150ms）——动效速度档位与 reduceMotion 必须能作用到它们。
+    val actionAnim = LocalAnimations.current
     val iconTint by animateColorAsState(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.primary
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = actionAnim.short),
         label = "actionChipTint"
     )
     val textColor by animateColorAsState(
@@ -495,7 +497,7 @@ internal fun RowScope.ActionChip(
         } else {
             MaterialTheme.colorScheme.onSurface
         },
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = actionAnim.short),
         label = "actionChipText"
     )
     val iconScale = remember { Animatable(1f) }
