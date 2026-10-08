@@ -47,6 +47,14 @@ enum class VideoCdnMode(
     val label: String,
     val description: String
 ) {
+    /**
+     * 智能选线：**按本机实测的健康度排序**，用当前最稳的一条；
+     * 后续备用线路同样按健康度排，于是引擎"打开失败依次切换"的次序自然就是最优序。
+     *
+     * 与其它档的本质区别：其它档是"用我指定的那条"，本档是"用你实测最好的那条"。
+     * 健康度只看本机观察（出画面/缓冲/起播超时），不联网、不上报、重启归零。
+     */
+    Smart("智能选线（推荐）", "按本机实测的线路健康度自动排序，越用越准"),
     BaseUrl("基础 URL（不推荐）", "直接使用服务端原始 base_url"),
     Backup1("备用 URL 1", "直接使用服务端第一个备用线路"),
     Backup2("备用 URL 2", "直接使用服务端第二个备用线路"),
@@ -72,6 +80,8 @@ enum class VideoCdnMode(
 
     val host: String?
         get() = when (this) {
+            // 智能档没有固定 host：它由健康度决定，见 selectPlaybackCdn
+            Smart,
             BaseUrl,
             Backup1,
             Backup2 -> null
@@ -119,6 +129,26 @@ data class PlayerPlaybackPrefs(
     val autoRotateFullscreen: Boolean = true,
     val gestureSpeed: Float = 2f,
     val videoCdnMode: VideoCdnMode = VideoCdnMode.Backup2,
+    /**
+     * **CDN 并行分片下载**（对齐 BiliPai `CdnRegionPluginCache.parallelDownloadEnabled`）。
+     *
+     * 开：一次范围请求切成 2~3 片并发竞速（并发数按缓冲/码率自适应，见
+     * `resolveCdnConnections`），弱网与起播更快；关：回落到单连接顺序读
+     * （`CdnPlaybackDataSource` 会自己降级，见 `read()` 的 `parallel = false` 分支）。
+     *
+     * ⚠️ **默认值与源仓库相反**：BiliPai 默认关（要在插件面板里手动开），本仓默认开 ——
+     * 因为并行数据源在本仓是播放主链的一部分，改成默认关等于把已发布的能力收回；
+     * 开关语义仍按源仓库口径（可关）。
+     */
+    val cdnParallelDownload: Boolean = true,
+    /**
+     * **DASH 分段自适应预取**（对齐 BiliPai `CdnRegionPluginCache.prefetchEnabled` +
+     * `VideoPlaybackViewModel.scheduleCdnDashPrefetch`）。
+     *
+     * 开：进度轮询里发现"缓冲已经够厚（≥15s）"时，按缓冲自适应预取 3/5/8 个后续分段；
+     * 只在 Wi‑Fi/以太网下做（蜂窝不预取，避免偷跑流量）；缓冲变薄立即取消。
+     */
+    val cdnAdaptivePrefetch: Boolean = true,
     /** 双击画面点赞：关闭时双击为暂停（默认） */
     val doubleTapLike: Boolean = false,
     /** ColorOS 系统级无缝过渡动画（首页卡片 → 全屏详情）：关闭则退回应用内覆盖层路径 */

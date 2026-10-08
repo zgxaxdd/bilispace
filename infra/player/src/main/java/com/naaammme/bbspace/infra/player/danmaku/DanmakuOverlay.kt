@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.DanmakuSessionState
 import master.flame.danmaku.api.SegmentDanmakuSession
@@ -109,7 +110,7 @@ fun DanmakuLayer(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             )
-            android.util.Log.i(
+            DiagnosticLog.i(
                 "BbDanmaku",
                 "attach danmaku view to ${host.javaClass.simpleName} " +
                     "hostAttached=${host.isAttachedToWindow} size=${host.width}x${host.height}"
@@ -128,7 +129,11 @@ fun DanmakuLayer(
             }
         }
         onDispose {
-            (view.parent as? ViewGroup)?.removeView(view)
+            // **只摘自己挂上去的那一个宿主**（2026-10-07 审查）：宿主会因省电模式翻转
+            // （`key(useSurfaceView)` 重建 PlayerView）而更换，而同一个 danmakuView 是复用的 ——
+            // 若旧 effect 的清理在新 effect 挂载之后才跑，按"当前 parent"删就会把刚挂到
+            // **新宿主**上的同一个 view 摘掉 ⇒ 之后弹幕永久不显示（弹幕线程还在跑）。
+            if (view.parent === host) host.removeView(view)
         }
     }
 

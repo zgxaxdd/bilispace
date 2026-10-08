@@ -1,12 +1,12 @@
 package com.naaammme.bbspace.infra.player.danmaku
 
-import android.util.Log
 import android.view.View
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.DanmakuItem
 import com.naaammme.bbspace.core.model.DanmakuSessionState
 import com.naaammme.bbspace.core.model.DanmakuWindow
 import com.naaammme.bbspace.core.model.toDanmakuWindowId
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import master.flame.danmaku.api.DanmakuSegmentData
@@ -133,7 +133,7 @@ class DanmakuOverlayState internal constructor(
         lastPlayState = nextState
 
         if (!enabled || !hasSource) {
-            Log.i(
+            DiagnosticLog.i(
                 TAG,
                 "syncPlayback -> hidden (enabled=$enabled hasSource=$hasSource) " +
                     "prepared=${danmakuCtrl.isPrepared()}"
@@ -145,7 +145,7 @@ class DanmakuOverlayState internal constructor(
             return
         }
 
-        Log.i(
+        DiagnosticLog.i(
             TAG,
             "syncPlayback -> visible isPlaying=$isPlaying prepared=${danmakuCtrl.isPrepared()} " +
                 "paused=${danmakuCtrl.isPaused()} shown=${danmakuView.isShown}"
@@ -171,14 +171,14 @@ class DanmakuOverlayState internal constructor(
             pendingSeek = true
             return
         }
-        Log.i(TAG, "syncPosition -> seekTo=$positionMs prepared=${danmakuCtrl.isPrepared()}")
+        DiagnosticLog.i(TAG, "syncPosition -> seekTo=$positionMs prepared=${danmakuCtrl.isPrepared()}")
         session.seekTo(positionMs)
         pendingSeek = false
     }
 
     fun release() {
         if (!released.compareAndSet(false, true)) return
-        Log.i(TAG, "release prepared=${danmakuCtrl.isPrepared()}")
+        DiagnosticLog.i(TAG, "release prepared=${danmakuCtrl.isPrepared()}")
         appliedWindowId = null
         session.setPlayerTimeProvider(null)
         session.pause()
@@ -260,7 +260,7 @@ class DanmakuOverlayState internal constructor(
         if (appliedWindowId == targetWindow.id && appliedWindowSignature == nextSignature) {
             return
         }
-        Log.i(
+        DiagnosticLog.i(
             TAG,
             "syncWindow -> replaceSegments windowId=${targetWindow.id} " +
                 "items=${targetWindow.items.size} positionMs=${

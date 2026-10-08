@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import com.naaammme.bbspace.infra.player.cdn.hostFromCdnUrl
 import java.io.IOException
 
 /**
@@ -13,16 +14,27 @@ import java.io.IOException
  */
 internal class CdnFailoverDataSourceFactory(
     private val delegateFactory: DataSource.Factory,
-    private val candidatesByUrl: Map<String, List<String>>
+    private val candidatesByUrl: Map<String, List<String>>,
+    /** 换线真实结果回传（闭环修复）：只有这里知道**到底哪条线通了**。 */
+    private val lineOutcomeListener: CdnLineOutcomeListener = CdnLineOutcomeListener.NoOp,
+    /** 「实际供数的是哪条 host」回传（会话层记账用）。 */
+    private val servingHostListener: CdnServingHostListener = CdnServingHostListener.NoOp
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource {
-        return CdnFailoverDataSource(delegateFactory.createDataSource(), candidatesByUrl)
+        return CdnFailoverDataSource(
+            delegateFactory.createDataSource(),
+            candidatesByUrl,
+            lineOutcomeListener,
+            servingHostListener
+        )
     }
 }
 
 internal class CdnFailoverDataSource(
     private val delegate: DataSource,
-    private val candidatesByUrl: Map<String, List<String>>
+    private val candidatesByUrl: Map<String, List<String>>,
+    private val lineOutcomeListener: CdnLineOutcomeListener = CdnLineOutcomeListener.NoOp,
+    private val servingHostListener: CdnServingHostListener = CdnServingHostListener.NoOp
 ) : DataSource {
     private var preferredIndex = 0
 
@@ -49,9 +61,15 @@ internal class CdnFailoverDataSource(
             try {
                 val length = delegate.open(spec)
                 preferredIndex = index
+                // **实际通了的那条**才加分（不是"选中"的那条 —— 这正是闭环断点所在）
+                lineOutcomeListener.onOutcome(url, true)
+                // 也让会话层知道"现在供数的是哪条"（记账口径修正）。
+                hostFromCdnUrl(url).takeIf(String::isNotBlank)?.let(servingHostListener::onServingHost)
                 return length
             } catch (error: IOException) {
                 lastError = error
+                // 失败线路必须被记账，否则下次还会把它排到前面
+                lineOutcomeListener.onOutcome(url, false)
                 runCatching { delegate.close() }
             }
         }

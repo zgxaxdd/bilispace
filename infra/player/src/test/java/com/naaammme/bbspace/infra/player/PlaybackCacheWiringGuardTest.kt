@@ -87,8 +87,13 @@ class PlaybackCacheWiringGuardTest {
             failoverAt < cacheAt
         )
         assertTrue(
-            "缓存包的是 failover 本身（playbackMediaCache.wrapForPlayback(failover)），不是它的内层",
-            body.any { it.contains("wrapForPlayback(failover)") }
+            "缓存必须包在**整条链**之外：现在是 `playbackMediaCache.wrapForPlayback(parallelAware)`，" +
+                "而 parallelAware = CdnPlaybackDataSource(upstream = failover.createDataSource())。" +
+                "2026-10-06 移植源仓库的 CdnPlaybackDataSource 后多了这一层，**源仓库同形**：" +
+                "Cache → CdnPlaybackDataSource → 上游（见 BiliPai PlaybackMediaCache.kt:79-90）。" +
+                "注意牙齿没丢：缓存仍必须在换线工厂**之外** —— 套在内侧会让主备线路各存一份同一分片。",
+            body.any { it.contains("wrapForPlayback(parallelAware)") } &&
+                body.any { it.contains("upstream = failover.createDataSource()") }
         )
     }
 

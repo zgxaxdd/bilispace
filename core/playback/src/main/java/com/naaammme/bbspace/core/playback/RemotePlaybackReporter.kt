@@ -4,6 +4,7 @@ import com.naaammme.bbspace.core.common.AuthProvider
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.BiliConstants
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.network.NetworkTypeProvider
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.model.PlayBiz
 import com.naaammme.bbspace.core.model.PlaybackRequest
@@ -13,7 +14,9 @@ import com.naaammme.bbspace.infra.network.BiliRestParamBuilder
 import com.naaammme.bbspace.infra.network.BiliRestProfile
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Singleton
@@ -21,8 +24,22 @@ class RemotePlaybackReporter @Inject constructor(
     private val restClient: BiliRestClient,
     private val authProvider: AuthProvider,
     private val restParamBuilder: BiliRestParamBuilder,
-    private val playerSettings: AppSettings
+    private val playerSettings: AppSettings,
+    private val networkTypeProvider: NetworkTypeProvider
 ) {
+    /**
+     * 宿主前后台信号（由 [PlaybackReporter.setHostBackground] 下发；默认前台）。
+     *
+     * 信号本来就在仓里（`PlaybackReporter.isHostInBackground` 已驱动心搏判据），
+     * 这里只是把同一个信号接到上报字段 `scene` 上，不新增信号源。
+     */
+    @Volatile
+    private var hostInBackground = false
+
+    fun setHostInBackground(inBackground: Boolean) {
+        hostInBackground = inBackground
+    }
+
     internal suspend fun startHeartbeat(active: PlaybackReportSession): Long {
         if (!canReport(active)) return 0L
         val params = buildHeartbeatParams(
@@ -88,6 +105,16 @@ class RemotePlaybackReporter @Inject constructor(
                 val code = json.optInt("code", 0)
                 if (code != 0) {
                     Logger.w(TAG) { "report code=$code msg=${json.optString("message")}" }
+                } else {
+                    // P2-4：**成功路径此前完全没有日志**，字段级内容也从不打印——
+                    // 于是"请求成功但形状可疑"（例如字段恒为常量）靠日志永远发现不了。
+                    // 这里按开关输出（`Logger.d` 本身由 isDebug 门控，release 不产生噪音），
+                    // 只打 URL 与字段数 + 关键字段，不打整包（`extra` 等字段很长）。
+                    Logger.d(TAG) {
+                        "report ok url=${url.substringAfterLast('/')} fields=${params.size} " +
+                            "network_type=${params["network_type"]} scene=${params["scene"]} " +
+                            "auto_play=${params["auto_play"]} progress=${params["progress"] ?: params["last_play_progress_time"]}"
+                    }
                 }
             }
         }.onFailure { error ->
@@ -95,7 +122,7 @@ class RemotePlaybackReporter @Inject constructor(
         }.getOrNull()
     }
 
-    private fun buildHeartbeatParams(
+    private suspend fun buildHeartbeatParams(
         active: PlaybackReportSession,
         startPacket: Boolean,
         positionMsOverride: Long? = null
@@ -104,6 +131,7 @@ class RemotePlaybackReporter @Inject constructor(
         val report = active.report
         val now = nowSec()
         val common = buildCommonParams(now)
+        val networkType = resolveNetworkType()
         val base = mutableMapOf<String, String>()
         base["session"] = active.sessionId
         base["mid"] = active.uid.toString()
@@ -114,7 +142,7 @@ class RemotePlaybackReporter @Inject constructor(
         base["quality"] = active.quality.toString()
         base["video_duration"] = active.durationSec().toString()
         base["play_type"] = playType(active.request).toString()
-        base["network_type"] = NETWORK_TYPE_WIFI
+        base["network_type"] = networkType
         base["from"] = src.from
         base["from_spmid"] = src.fromSpmid
         base["spmid"] = VideoTargetTool.SPMID
@@ -180,7 +208,7 @@ class RemotePlaybackReporter @Inject constructor(
         base["device_ts"] = now.toString()
         base["start_ts"] = active.playbackHistoryStartTs.toString()
         base["source"] = PLAYBACK_HISTORY_SOURCE
-        base["scene"] = PLAYBACK_HISTORY_SCENE_FRONT
+        base["scene"] = PlaybackReportFieldsPolicy.scene(hostInBackground)
         report.seasonId?.takeIf { it > 0L }?.let { base["sid"] = it.toString() }
         report.epId?.takeIf { it > 0L }?.let { base["epid"] = it.toString() }
         report.subType?.let { base["sub_type"] = it.toString() }
@@ -192,6 +220,18 @@ class RemotePlaybackReporter @Inject constructor(
 
     private fun buildCommonParams(ts: Long): Map<String, String> {
         return restParamBuilder.app(BiliRestProfile.APP, ts, authProvider.accessToken)
+    }
+
+    /**
+     * `network_type` 取真实网络类别。
+     *
+     * 读 `ConnectivityManager` 是一次系统服务调用：上报链路会在**首帧沿**被调
+     * （`StreamPlaybackSessionImpl` 的 `runtimeScope` 是 `Dispatchers.Main.immediate`），
+     * 所以这里显式下沉到 IO，不让系统服务调用落在主线程上。
+     */
+    private suspend fun resolveNetworkType(): String {
+        val unmetered = withContext(Dispatchers.IO) { networkTypeProvider.isUnmetered() }
+        return PlaybackReportFieldsPolicy.networkType(unmetered)
     }
 
     private fun playType(request: PlaybackRequest): Int {
@@ -223,11 +263,9 @@ class RemotePlaybackReporter @Inject constructor(
     private companion object {
         const val TAG = "PlaybackReporter"
         const val PLAYBACK_HISTORY_SOURCE = "player-old"
-        const val PLAYBACK_HISTORY_SCENE_FRONT = "front"
         const val ZERO = "0"
         const val ONE = "1"
         const val USER_STATUS = "0"
-        const val NETWORK_TYPE_WIFI = "1"
         const val DEFAULT_PLAY_MODE = "1"
         const val HB_URL = "${BiliConstants.BASE_URL_API}/x/report/heartbeat/mobile"
         const val PLAYBACK_HISTORY_URL = "${BiliConstants.BASE_URL_API}/x/v2/history/report"

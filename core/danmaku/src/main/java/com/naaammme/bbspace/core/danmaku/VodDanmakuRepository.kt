@@ -3,6 +3,7 @@ package com.naaammme.bbspace.core.danmaku
 import com.bapis.bilibili.community.service.dm.v1.DmSegMobileReply
 import com.bapis.bilibili.community.service.dm.v1.DmSegMobileReq
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.model.DanmakuItem
 import com.naaammme.bbspace.core.model.VodDanmakuRequest
@@ -86,7 +87,7 @@ class VodDanmakuRepository @Inject constructor(
             "Loaded danmaku segment aid=${request.ids.aid}, cid=${request.ids.cid}, segment=${request.segmentIndex}, elems=${elems.size}"
         }
         // release 下也可见的诊断日志（Logger 在 release 是关闭的）
-        android.util.Log.i(
+        DiagnosticLog.i(
             "BbDanmaku",
             "fetchSegment aid=${request.ids.aid} cid=${request.ids.cid} " +
                 "segment=${request.segmentIndex} elems=${elems.size}"

@@ -87,6 +87,10 @@ class PlaybackReporter @Inject constructor(
      */
     fun setHostBackground(inBackground: Boolean) {
         isHostInBackground = inBackground
+        // 同一个信号接到历史包的 `scene` 字段（此前恒 "front"，后台/画中画被记成前台）。
+        // 只转发**信号**，不改这里的落本地历史行为——不变式 2 的守卫（只写本地、
+        // 不许在进后台时发远端上报）仍然成立：这里没有发起任何远端请求。
+        remoteReporter.setHostInBackground(inBackground)
         if (inBackground) {
             flushLocalHistoryOnBackground()
         }
@@ -105,6 +109,58 @@ class PlaybackReporter @Inject constructor(
     fun onPlaybackProgress(positionMs: Long) {
         lastKnownPositionMs = positionMs
         checkpointLocalHistory(positionMs)
+        // P1-2：会话中途的低频远端写回。**独立于** checkpointLocalHistory ——
+        // 后者被守卫钉死为"只写本地"（PlaybackHistoryFlushGuardTest 不变式 4），
+        // 这里是在它之外另开的一条**有节流**的通道。
+        // 挂到 flushScope（IO）而不是就地做：判据要读/写会话快照，那是挂起操作；
+        // 而 onPlaybackProgress 本身**不能**改成 suspend —— 既有守卫按
+        // `fun onPlaybackProgress(` 这个签名前缀做括号扫描，改签名会让它红。
+        flushScope.launch { syncRemoteProgressIfDue(positionMs) }
+    }
+
+    /**
+     * P1-2：会话中途把进度补写回远端（低频 + 有实质增量才发）。
+     *
+     * 为什么需要：本地 5s 检查点只落本地，`finalizeSession` 只在正常退出/切集时跑。
+     * 长视频中途被系统杀掉 / 断电 / 崩溃 → 远端永远停在起播点（用户重开后续播回 0:00）。
+     *
+     * 与既有守卫的关系（重要）：`PlaybackHistoryFlushGuardTest` 有两条不变式要求
+     * 「检查点只写本地」「进后台不许发远端」。那条决策是**有意**做的（避免稳态每分钟
+     * 多次网络请求），本方法不推翻它：
+     * - 它**不在** `checkpointLocalHistory` / `flushLocalHistoryOnBackground` 里，
+     *   所以两条守卫的括号扫描都不会命中它；
+     * - 它自带 5 分钟间隔 + 60s 增量门控，请求量远低于"每分钟多次"；
+     * - 后台一律不发（与周期心跳同一口径），后台的进度由既有的只写本地通道负责。
+     *
+     * ⚠️ **服务端限流未抓包确认**（报告 §3.7.2 的真机前置）。5 分钟是最保守的取值：
+     * 1 小时视频最多多发 12 次；若日后抓包证明服务端不接受这个频率，改
+     * [PlaybackHistoryReportPolicy.REMOTE_SYNC_INTERVAL_MS] 一处即可。
+     */
+    private suspend fun syncRemoteProgressIfDue(positionMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        val snapshot = mu.withLock {
+            val active = ctx ?: return@withLock null
+            if (!active.playbackHistoryStarted || active.finalized) return@withLock null
+            if (!PlaybackHistoryReportPolicy.shouldSyncRemoteProgress(
+                    nowElapsedMs = now,
+                    lastSyncElapsedMs = active.lastRemoteSyncElapsedMs,
+                    positionMs = positionMs,
+                    lastSyncedPositionMs = active.lastRemoteSyncedPositionMs,
+                    inBackground = isHostInBackground
+                )
+            ) {
+                return@withLock null
+            }
+            active.lastRemoteSyncElapsedMs = now
+            active.lastRemoteSyncedPositionMs = positionMs
+            active.lastReportedHistoryPositionMs = positionMs
+            active.copy()
+        } ?: return
+        flushScope.launch {
+            runCatchingCancellable {
+                remoteReporter.reportPlaybackHistory(snapshot, positionMs, completePlayback = false)
+            }.onFailure { Logger.w(TAG) { "中途远端写回失败 pos=$positionMs msg=${it.message}" } }
+        }
     }
 
     private fun flushLocalHistoryOnBackground() {
@@ -265,7 +321,13 @@ class PlaybackReporter @Inject constructor(
             reportPlaybackHistory(current.ctx, progress.positionMs, completePlayback = false)
         }
         if (current.ended && current.ctx.playbackHistoryStarted) {
-            reportPlaybackHistory(current.ctx, progress.positionMs, completePlayback = true)
+            // force=true：播完沿必须发（completePlayback=true 已经让它必发，这里显式表达意图）。
+            reportPlaybackHistory(
+                current.ctx,
+                progress.positionMs,
+                completePlayback = true,
+                force = true
+            )
             endHeartbeat(current.ctx)
             mu.withLock {
                 ctx = ctx?.takeIf { it.sessionId != current.ctx.sessionId } ?: ctx?.copy(finalized = true)
@@ -356,28 +418,57 @@ class PlaybackReporter @Inject constructor(
         active: PlaybackReportSession,
         positionMs: Long
     ) {
-        reportPlaybackHistory(active, positionMs, completePlayback = false)
+        // force=true：起播沿必须发（它的作用是"证明看过"，与"有没有新进展"无关）。
+        reportPlaybackHistory(active, positionMs, completePlayback = false, force = true)
     }
 
     private suspend fun reportPlaybackHistory(
         active: PlaybackReportSession,
         positionMs: Long,
-        completePlayback: Boolean
+        completePlayback: Boolean,
+        force: Boolean = false
     ) {
         recordAndReportPlaybackHistory(
             active = active,
             positionMs = positionMs,
-            completePlayback = completePlayback
+            completePlayback = completePlayback,
+            force = force
         )
     }
 
+    /**
+     * @param force 起播沿 / 播完沿必须发；其余沿走 [PlaybackHistoryReportPolicy]
+     *   的"有进展才发"门控（P2-2）。
+     *
+     * **本地记录不受门控影响**：`localHistoryRecorder.record` 每次都写。
+     * 被挡掉的只是"位置没动过的重复远端请求"——本地历史是续播的真值源，
+     * 拿它去省网络请求是错的。
+     */
     private suspend fun recordAndReportPlaybackHistory(
         active: PlaybackReportSession,
         positionMs: Long,
-        completePlayback: Boolean
+        completePlayback: Boolean,
+        force: Boolean = false
     ) {
         localHistoryRecorder.record(active, positionMs)
+        val shouldSendRemote = force || completePlayback ||
+            PlaybackHistoryReportPolicy.shouldReportHistoryProgress(
+                positionMs = positionMs,
+                lastReportedPositionMs = active.lastReportedHistoryPositionMs
+            )
+        if (!shouldSendRemote) {
+            Logger.d(TAG) {
+                "history report skipped (no progress) pos=$positionMs last=${active.lastReportedHistoryPositionMs}"
+            }
+            return
+        }
         remoteReporter.reportPlaybackHistory(active, positionMs, completePlayback)
+        mu.withLock {
+            val current = ctx ?: return@withLock
+            if (current.sessionId == active.sessionId) {
+                current.lastReportedHistoryPositionMs = positionMs
+            }
+        }
     }
 
     private data class SnapshotEdge(

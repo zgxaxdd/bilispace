@@ -33,7 +33,15 @@ internal data class PlaybackReportSession(
     var finalized: Boolean = false,
     var lastIsPlaying: Boolean = false,
     var lastPlayWhenReady: Boolean = false,
-    var lastPlaybackState: PlaybackState = PlaybackState.Idle
+    var lastPlaybackState: PlaybackState = PlaybackState.Idle,
+    /**
+     * P2-2：本会话**上一次真正发出去**的历史位置（远端与本地共用同一条去重口径）。
+     * 用于挡住"暂停沿重复上报"（位置没动就不发）。
+     */
+    var lastReportedHistoryPositionMs: Long = 0L,
+    /** P1-2：上一次会话中途远端写回的时刻（`elapsedRealtime`）与当时的进度。 */
+    var lastRemoteSyncElapsedMs: Long = 0L,
+    var lastRemoteSyncedPositionMs: Long = 0L
 )
 
 internal fun PlaybackReportSession.sync(

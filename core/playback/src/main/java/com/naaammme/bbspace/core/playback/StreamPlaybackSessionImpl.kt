@@ -6,6 +6,7 @@ import androidx.media3.common.MimeTypes
 import com.naaammme.bbspace.core.common.AuthProvider
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.settings.AppSettings
 import com.naaammme.bbspace.core.video.VideoDetailRepository
 import com.naaammme.bbspace.core.danmaku.VodDanmakuRepository
@@ -37,8 +38,12 @@ import com.naaammme.bbspace.core.model.StreamPlaybackSessionState
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.VideoPlaybackState
 import com.naaammme.bbspace.core.model.VideoTarget
+import com.naaammme.bbspace.core.model.PlaybackState
+import com.naaammme.bbspace.core.model.player.CdnHealthPolicy
+import com.naaammme.bbspace.core.model.player.CdnSmartSelectionPolicy
 import com.naaammme.bbspace.core.model.VideoCdnMode
 import com.naaammme.bbspace.core.model.mergePlaybackUrls
+import com.naaammme.bbspace.core.model.orderPlaybackUrlsForMode
 import com.naaammme.bbspace.core.model.selectPlaybackCdn
 import com.naaammme.bbspace.core.model.toReportParams
 import com.naaammme.bbspace.core.model.toPlayableParams
@@ -79,15 +84,19 @@ class StreamPlaybackSessionImpl @Inject constructor(
     private val playbackHistoryRepo: PlaybackHistoryRepository,
     private val liveRepository: LiveRepository,
     private val playerEngine: PlayerEngine,
-    private val arbiter: PlayerEngineArbiter
+    private val arbiter: PlayerEngineArbiter,
+    private val cdnHealthStore: CdnHealthStore
 ) : StreamPlaybackSession, VideoPlaybackController, LivePlaybackController {
 
     //  engine
     override val player: StateFlow<Player?> = playerEngine.player
     private val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    // danmaku
-    private val danmakuSession = VodDanmakuSession(scope = runtimeScope, repository = danmakuRepository)
+    // danmaku（取段以函数注入：源 VodDanmakuRepository 是 final class，测试用假实现走同一条链路）
+    private val danmakuSession = VodDanmakuSession(
+        scope = runtimeScope,
+        fetchSegment = danmakuRepository::fetchSegment
+    )
     override val danmakuState: StateFlow<DanmakuSessionState> = danmakuSession.state
 
     // vod state
@@ -98,8 +107,25 @@ class StreamPlaybackSessionImpl @Inject constructor(
     private val prepMu = Mutex()
     private val openId = AtomicLong(0L)
     private var lastDiscontinuitySeq = 0L
+
+    /** 已消费的「起播超时」计数（只增不减的事件流，见 [recordCdnHealth]）。 */
+    private var lastFirstFrameTimeoutSeq = 0L
     private var nextPlayWhenReady = true
     private var currentVideoCdnMode = VideoCdnMode.Backup2
+
+    /**
+     * 本次开播的线路健康度快照（智能选线用）。
+     *
+     * 为什么缓存成字段而不是每次现取：`buildVideoEngineSource` 是**非挂起**函数，
+     * 而取快照要过 [CdnHealthStore] 的互斥锁。开播时刷新一次即可 ——
+     * 一次开播只选一次线路，中途不需要重算。
+     */
+    @Volatile
+    private var cdnHealthSnapshot: Map<String, CdnHealthPolicy.Health> = emptyMap()
+
+    /** 当前主线路的 host（健康度回写按它记账）。 */
+    @Volatile
+    private var currentVideoHost: String = ""
 
     // live state
     private val _liveState = MutableStateFlow(LivePlaybackViewState())
@@ -116,6 +142,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
             playerEngine.playbackState.collect { state ->
                 when (_currentTarget.value) {
                     is StreamPlaybackTarget.Video -> {
+                        recordCdnHealth(state)
                         onVideoPlayerState(state)
                         reporter.onPlaybackState(
                             state = vodSession.value,
@@ -169,6 +196,21 @@ class StreamPlaybackSessionImpl @Inject constructor(
                 if (state.playbackSource == null || state.currentStream == null) return@collect
                 applyVideoSelection(state)
             }
+        }
+        runtimeScope.launch {
+            // CDN 并行/预取开关：**不重建播放器**的活配置。
+            // 为什么单列一条流：`updateConfig` 一旦发现配置变化就会重建 ExoPlayer，
+            // 而"改个 CDN 开关"不该打断正在播的视频（源仓库改设置也是即时生效、不断流）。
+            // flow 订阅即发一次当前值 ⇒ "先改设置、再开播放"同样覆盖。
+            playerSettings.state
+                .map { it.playback.cdnParallelDownload to it.playback.cdnAdaptivePrefetch }
+                .distinctUntilChanged()
+                .collect { (parallelDownload, adaptivePrefetch) ->
+                    playerEngine.setCdnTransferOptions(
+                        parallelDownload = parallelDownload,
+                        adaptivePrefetch = adaptivePrefetch
+                    )
+                }
         }
     }
 
@@ -431,6 +473,10 @@ class StreamPlaybackSessionImpl @Inject constructor(
                 val audio = selectAudio(stream, source.audios, preferredAudioId)
                 val cdnMode = playerSettings.state.first().playback.videoCdnMode
                 currentVideoCdnMode = cdnMode
+                // 智能选线：开播前取一次健康度快照（已按当前时间折现）。
+                // 非 Smart 档也会取 —— 成本是一次 map 拷贝，但换来"切到智能档立刻生效"，
+                // 不必重开播放。
+                cdnHealthSnapshot = cdnHealthStore.snapshot()
                 val engineSource = buildVideoEngineSource(
                     stream = stream,
                     audio = audio,
@@ -671,7 +717,38 @@ class StreamPlaybackSessionImpl @Inject constructor(
     ): EngineSource? {
         return when (stream) {
             is PlaybackStream.Dash -> {
-                val cdn = selectPlaybackCdn(stream, audio, cdnMode) ?: return null
+                val cdn = selectPlaybackCdn(stream, audio, cdnMode, cdnHealthSnapshot) ?: return null
+                currentVideoHost = CdnSmartSelectionPolicy.hostOf(cdn.videoUrl)
+                // 备用线路的顺序同样按模式处理：**首元素是已选主线路，其后是其余备选**。
+                // 智能档下这一条尤其重要 —— 引擎"打开失败依次切换"的次序本身就成了智能序，
+                // 不需要另造一套切换机制。
+                val videoOrder = orderPlaybackUrlsForMode(
+                    urls = mergePlaybackUrls(stream.videoUrl, stream.videoBackupUrls),
+                    selected = cdn.videoUrl,
+                // 闭环修复：不传 healthByHost 时默认 emptyMap()，备用线路顺序永远走「无观测」分支
+                healthByHost = cdnHealthSnapshot,
+                    mode = cdnMode
+                )
+                val audioOrder = cdn.audioUrl?.let { selected ->
+                    orderPlaybackUrlsForMode(
+                        urls = mergePlaybackUrls(audio?.url, audio?.backupUrls.orEmpty()),
+                        selected = selected,
+                    // 音频同理（同一处修复）
+                    healthByHost = cdnHealthSnapshot,
+                        mode = cdnMode
+                    )
+                } ?: emptyList()
+                // 现场取证（选线闭环的**唯一**可判定证据）：
+                // 服务端原始次序 vs 服务端没有的健康度快照下选出来的那条。
+                // 没有这行，"智能选线到底有没有用健康度"在真机上就只剩"结果对不对"的猜测
+                // —— 2026-10-06 真机 A/B 正是靠它证明了"被重罚的 host 会被排到后面"。
+                DiagnosticLog.i("BbCdnSelect") {
+                    val server = mergePlaybackUrls(stream.videoUrl, stream.videoBackupUrls)
+                        .joinToString(",") { CdnSmartSelectionPolicy.hostOf(it) }
+                    val ranked = videoOrder.joinToString(",") { CdnSmartSelectionPolicy.hostOf(it) }
+                    "mode=$cdnMode observations=${cdnHealthSnapshot.size} " +
+                        "server=[$server] ranked=[$ranked] chosen=${CdnSmartSelectionPolicy.hostOf(cdn.videoUrl)}"
+                }
                 EngineSource.SingleFileDash(
                     videoUrl = cdn.videoUrl,
                     audioUrl = cdn.audioUrl,
@@ -679,14 +756,8 @@ class StreamPlaybackSessionImpl @Inject constructor(
                     audioSampleMimeType = audio?.let { resolveAudioSampleMimeType(it.id) },
                     durationMs = durationMs,
                     // 首元素为已选主线路，其后为其余备用线路，打开失败时依次切换
-                    videoBackupUrls = (
-                        listOf(cdn.videoUrl) +
-                            mergePlaybackUrls(stream.videoUrl, stream.videoBackupUrls)
-                        ).distinct(),
-                    audioBackupUrls = cdn.audioUrl?.let { selected ->
-                        (listOf(selected) + mergePlaybackUrls(audio?.url, audio?.backupUrls.orEmpty()))
-                            .distinct()
-                    } ?: emptyList()
+                    videoBackupUrls = videoOrder,
+                    audioBackupUrls = audioOrder
                 )
             }
 
@@ -732,7 +803,10 @@ class StreamPlaybackSessionImpl @Inject constructor(
             } else {
                 DecoderMode.Hard
             },
-            decoderFallback = playback.decoderFallback
+            decoderFallback = playback.decoderFallback,
+            // CDN 并行/预取开关（对齐 BiliPai CdnRegionPlugin 的两个开关；由设置流 → PlayerConfig → 引擎）
+            cdnParallelDownload = playback.cdnParallelDownload,
+            cdnAdaptivePrefetch = playback.cdnAdaptivePrefetch
         )
     }
 
@@ -821,7 +895,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
     }
 
     private suspend fun syncDanmakuSource(state: PlayerSessionState) {
-        android.util.Log.i(
+        DiagnosticLog.i(
             "BbDanmaku",
             "syncDanmakuSource detail=${state.detail != null} idsReady=${state.ids.danmakuReady} " +
                 "source=${state.playbackSource != null}"
@@ -830,7 +904,7 @@ class StreamPlaybackSessionImpl @Inject constructor(
         val ids = state.ids.takeIf { it.danmakuReady } ?: return
         val source = state.playbackSource ?: return
         if (!playerSettings.state.first().danmaku.enabled) return
-        android.util.Log.i(
+        DiagnosticLog.i(
             "BbDanmaku",
             "syncDanmakuSource -> setSource aid=${ids.aid} cid=${ids.cid} durationMs=${source.durationMs}"
         )
@@ -879,6 +953,57 @@ class StreamPlaybackSessionImpl @Inject constructor(
             seekEventId = if (isNewSeekEvent) prev.seekEventId + 1L else prev.seekEventId,
             playerError = state.errorMessage
         )
+    }
+
+    /**
+     * 把播放状态折算成**线路健康度事件**（智能选线的输入）。
+     *
+     * 口径（如实）：
+     * - `Ready` → 出画面（加分）；`Buffering` → 卡顿（减分）；
+     * - **`PlayerError` 没接**：本仓的 `PlaybackState` 只有 Idle/Buffering/Ready/Ended，
+     *   没有错误态；引擎的失败切换发生在播放源内部，不上抛到这里。所以"报错扣分"
+     *   这条维度**目前拿不到信号**，`CdnHealthPolicy.PlayerError` 保留但暂无人调用 ——
+     *   要接它得先让引擎把"实际用了哪条线路、失败了几次"暴露出来（需要改
+     *   `SingleFileDashMediaSourceFactory` 的切换回调），属后续工作，不在这里假装接上。
+     * - 记账对象是**本次开播选中的主线路 host**；引擎内部切到备用线路后，这里记不到
+     *   （同上，需要引擎回传实际使用的 URL）。
+     * - **`Buffering` 追加了一条前置判据**（2026-10-07 缓存审查）：只有本次会话**刚发生过
+     *   真实网络读**时才记 —— 字节缓存命中时播放不走 CDN 传输层，那种"卡顿"与该线路无关
+     *   （实测纯缓存重播会给某条线白扣 −220 分并显示"易缓冲"）。
+     */
+    private fun recordCdnHealth(state: PlayerPlaybackState) {
+        when (state.playbackState) {
+            PlaybackState.Ready -> recordHealthEvent(CdnHealthPolicy.Event.PlaybackReady)
+            PlaybackState.Buffering -> recordHealthEvent(CdnHealthPolicy.Event.Buffering)
+            PlaybackState.Idle, PlaybackState.Ended -> Unit
+        }
+        // 起播超时（`FirstFrameTimeout`，−180 分）：引擎在 500ms 轮询里判、计数只增不减，
+        // 这里按增量消费一次。在此之前这条判据在真机上**从不产生**（定义在策略里没人调）。
+        if (state.firstFrameTimeoutSeq != lastFirstFrameTimeoutSeq) {
+            lastFirstFrameTimeoutSeq = state.firstFrameTimeoutSeq
+            recordHealthEvent(CdnHealthPolicy.Event.FirstFrameTimeout)
+        }
+    }
+
+    /**
+     * 把一次事件记到"**此刻真正在供数的** host"（拿不到就退回开播选中的那条），
+     * 并先过"惩罚必须有网络证据"的判据。
+     *
+     * 两个口径都是 2026-10-08 的修正（见 `docs/port-analysis/12-播放链路与缓存策略交互审查.md`）：
+     * - **目标 host**：换线之后不再把好线的功劳记到原来那条头上（[PlayerEngine.currentServingHost]）；
+     * - **证据闸门**：缓存命中时播放不走 CDN 层，此时"进入缓冲/起播慢"与线路无关，不许扣分。
+     */
+    private fun recordHealthEvent(event: CdnHealthPolicy.Event) {
+        val host = playerEngine.currentServingHost()?.takeIf(String::isNotBlank) ?: currentVideoHost
+        if (host.isBlank()) return
+        if (!CdnHealthPolicy.shouldRecordSessionEvent(
+                event = event,
+                networkActive = playerEngine.isNetworkActiveWithin()
+            )
+        ) {
+            return
+        }
+        runtimeScope.launch { cdnHealthStore.record(host, event) }
     }
 
     private fun onVideoPlayerState(state: PlayerPlaybackState) {
