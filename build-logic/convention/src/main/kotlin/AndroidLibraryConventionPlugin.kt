@@ -8,9 +8,12 @@ import org.gradle.kotlin.dsl.configure
  * 所有 Android library 模块的公共配置。
  *
  * 这些值此前在 50 个模块的 `android { }` 里逐份内联，且经盘点**完全一致**
- * （compileSdk 36 / minSdk 24 / AndroidJUnitRunner / Java 17 ×50），
+ * （compileSdk 37.2 / minSdk 33 / AndroidJUnitRunner / Java 17 ×50），
  * 因此搬到一处。`namespace` 默认由路径推导（见 [derivedNamespace]），
  * 与源码包结构不一致的少数模块仍可显式覆盖。
+ *
+ * （C-6，2026-10-04 审查报告：这行注释原先写的是"compileSdk 36 / minSdk 24"，
+ *  与同文件代码和 ApplicationConventionPlugin 都已不一致 —— 口径已改正。）
  *
  * 注意：`jvmTarget` 不在这里设 —— 根 build.gradle.kts 的 `subprojects { }`
  * 已对全部 KotlinCompile 统一设为 JVM_17，重复设置不会更正确、只会掩盖不一致。

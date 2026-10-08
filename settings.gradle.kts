@@ -73,7 +73,9 @@ include(":core:space")
 include(":core:swipe")
 include(":core:video")
 include(":core:designsystem")
-include(":core:navigation")
+// P2-6：`:core:navigation` 已删除 —— 它只有 build.gradle.kts、**没有任何源码**，
+// 唯一作用是 `api(libs.navigation.compose)` 的传递边（已在 feature/video 显式补上）。
+// 空模块会让人读结构图时误判分层，也白拉长配置阶段。
 
 // Feature 层
 include(":feature:home")

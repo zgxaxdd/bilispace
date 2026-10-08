@@ -45,6 +45,16 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    // 真机 instrumented 测试（R-13）：
+    // 1) `SystemReduceMotionInstrumentedTest` —— 用真实 ContentResolver + 真实系统设置
+    //    验证移植来的「系统移除动效」判据（键名/取值语义/观察者跟随）；
+    // 2) `ParticleDissolveInstrumentedTest` —— 在真机上把消散跑到 onDissolveComplete，
+    //    补上 04 文档登记的"GL 渲染路径运行期未验"。
+    // 为什么必须真机：这两件事都依赖系统设置与 GLES 上下文，JVM 单测只能验纯策略。
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
 android {

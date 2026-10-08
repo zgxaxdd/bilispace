@@ -114,7 +114,6 @@ dependencies {
     implementation(project(":core:auth"))
     implementation(project(":core:comment"))
     implementation(project(":core:designsystem"))
-    implementation(project(":core:navigation"))
     implementation(project(":core:common"))
     implementation(project(":core:download"))
     implementation(project(":core:feed"))
@@ -133,6 +132,9 @@ dependencies {
 
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
+    // P2-6：空壳模块 `:core:navigation` 删除后补齐它原本经 `api` 传递的 navigation-compose。
+    // AppNavHost 直接用到 NavHost / rememberNavController / NavBackStackEntry。
+    implementation(libs.navigation.compose)
     ksp(libs.hilt.compiler)
 
     implementation(platform(libs.androidx.compose.bom))

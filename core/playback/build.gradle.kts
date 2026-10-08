@@ -30,4 +30,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
 
     testImplementation(libs.junit)
+    // 弹幕分段会话（VodDanmakuSession）用假取段器做确定性调度测试
+    testImplementation(libs.kotlinx.coroutines.test)
 }

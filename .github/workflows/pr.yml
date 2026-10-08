@@ -28,6 +28,22 @@ jobs:
       - name: Assemble debug
         run: chmod +x gradlew && ./gradlew :app:assembleDebug --stacktrace
 
+      - name: Assemble release (R8 / 混淆 / lintVital 校验)
+        # T-3（2026-10-04 审查报告）：此前 release 只在 `push: tags v*` 或手动 dispatch 时构建，
+        # 于是 `app/proguard-rules.pro` 里的 keep 规则（Protobuf-lite / OkHttp / Oplus 无缝动画）
+        # 出错时 `assembleDebug` 全绿、只有打 tag 才炸。
+        # 无签名凭据时 `app/build.gradle.kts` 会跳过签名，所以 PR 不需要 secrets。
+        # 顺带覆盖 lintVital（release 的 fatal 级 lint 检查，含资源/API 级别问题）。
+        run: ./gradlew :app:assembleRelease -PversionName=ci -PversionCode=1 --stacktrace
+
+      - name: Unit tests (all modules)
+        # T-3：上面那段"结构守卫清单"是按"是否扫源码"挑的，**纯行为型**模块的回归
+        # 因此完全不在门禁里（core:swipe 的 21 个策略测试、core:model、infra:network-http、
+        # core:download、infra:crypto 等）。这里用一次调用把**全部模块**的单元测试跑掉：
+        # `testDebugUnitTest` 会在所有含该任务的子项目上执行（实测 51 个），
+        # `--continue` 让"一个模块红"不掩盖其它模块的结果。
+        run: ./gradlew testDebugUnitTest --continue --console=plain --stacktrace
+
       - name: Unit tests
         # ── 为什么不能写成「一条命令 + --rerun」（2026-10-03 实测，NX-11）────────────
         # `--rerun` 是**任务选项**，多任务命令行下它只作用于**命令行的最后一个任务**，
