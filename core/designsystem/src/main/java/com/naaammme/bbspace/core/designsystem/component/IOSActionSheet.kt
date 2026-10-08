@@ -116,11 +116,11 @@ fun IOSActionSheet(
         // reduceMotion（动效速度=关）：位移/缩放类退化为纯 fade（方案 3.2.5）
         val anim = LocalAnimations.current
         val enter: EnterTransition =
-            if (anim.reduceMotion) fadeIn(tween(160))
-            else slideInVertically(tween(300)) { it } + fadeIn(tween(200))
+            if (anim.reduceMotion) fadeIn(tween(anim.short))
+            else slideInVertically(tween(anim.long)) { it } + fadeIn(tween(anim.medium))
         val exit: ExitTransition =
-            if (anim.reduceMotion) fadeOut(tween(160))
-            else slideOutVertically(tween(150)) { it } + fadeOut(tween(150))
+            if (anim.reduceMotion) fadeOut(tween(anim.short))
+            else slideOutVertically(tween(anim.short)) { it } + fadeOut(tween(anim.short))
         Box(
             modifier = modifier
                 .fillMaxSize()

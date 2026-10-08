@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -60,7 +61,7 @@ fun rememberVideoCardCoverTint(
     }
     val animated by animateColorAsState(
         targetValue = tint ?: Color.Transparent,
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = LocalAnimations.current.long),
         label = "videoCardCoverTint"
     )
     return if (animated.alpha > 0f) animated else null

@@ -62,7 +62,6 @@ fun resolveVideoCardAmbientDrawSpec(
     defaultContainerColor: Color,
     defaultBorderColor: Color,
     wallpaperTintEnabled: Boolean = false,
-    isDataSaverActive: Boolean = false,
     frostedGlassEnabled: Boolean = true
 ): VideoCardAmbientDrawSpec {
     if (!frostedGlassEnabled || (!wallpaperTintEnabled && coverTint == null)) {
@@ -116,17 +115,18 @@ fun resolveVideoCardAmbientDrawSpec(
     // 卡片正文是**黑字**，染色不能把底色压太暗（WCAG AA 正文要 4.5:1）。
     // 实测最暗的红色封面 `#59140d`：0.70 → 对比度 **5.1** ✅；0.80 → 3.5 ❌。
     // 所以 0.70 是"颜色对应得上"与"文字仍可读"的交点。
-    val glassTransparency = if (isDarkTheme) {
-        if (isDataSaverActive) 0.82f else 0.70f
-    } else {
-        if (isDataSaverActive) 0.82f else 0.70f
-    }
+    //
+    // B-4/C-3（2026-10-04）：这里原先还有一个
+    //   `val glassTransparency = if (isDarkTheme) { if (isDataSaverActive) 0.82f else 0.70f }
+    //                            else { if (isDataSaverActive) 0.82f else 0.70f }`
+    // —— 两个外层分支逐字相同，且**全仓无任何使用点**（染色改 `lerp` 一次兑白后它已被
+    // 取代，只剩注释与测试在提它）。连同只服务于它的 `isDataSaverActive` 入参一起删除：
+    // 留一个没人读的参数比留注释更容易让后来者以为"省流量档会影响染色"。
 
     val baseColor = if (hasValidCoverTint) {
         // 一步兑白：直接与不透明底色按比例混合，得到**实色**。
         // 不再 `.copy(alpha = ...)` —— 那会叠第二次白，是本次修复的核心。
-        val blendFraction = if (isDarkTheme) 0.70f else 0.70f
-        lerp(defaultContainerColor, coverTint!!, blendFraction)
+        lerp(defaultContainerColor, coverTint!!, 0.70f)
     } else {
         // 无壁纸且无封面：保持中性玻璃表面，不要沿用上一张封面的颜色
         defaultContainerColor

@@ -53,6 +53,130 @@ class AccessibilityStructureTest {
     // ── 硬断言：图标按钮必须可被读屏念出 ──────────────────────────────────────
 
     /**
+     * **扩展守卫（报告 P1-6）**：所有 `IconButton` / `FilledIconButton` / `IconToggleButton`
+     * 里的 `Icon(contentDescription = null)` 都算违规——不再只看 `ArrowBack` / `MoreVert`。
+     *
+     * 为什么原来那条不够：它只认两个具体图标，播放器控制件、互动栏、胶囊、弹幕开关上
+     * 新加的图标按钮**漏写标签也不会红**。
+     *
+     * ## 为什么判据是"在 IconButton 里"而不是"所有 Icon(null)"
+     * 全仓有 35 处 `contentDescription = null`，**绝大多数是正确的**：封面图、
+     * 相邻文字旁的对勾/警告字形、装饰性粒子——这些的语义由旁边的文字承担，
+     * 硬给标签反而让读屏念两遍。真正的缺陷是「**容器是个按钮，而里面唯一的图标没有名字**」，
+     * 所以判据必须带上容器。
+     *
+     * ## 实测结论（2026-10-05）
+     * 报告写「当前**必然有**新增违规，需一并修」——**实测 0 处**：
+     * 全仓 70 处 `IconButton(` 的图标都已带标签。所以这条守卫是**防回归**用的，
+     * 不是修缺陷用的。（唯一发现的真缺陷不在 IconButton 里，见
+     * [colorSwatchesAreAnnounced] 的说明。）
+     */
+    @Test
+    fun iconButtonIconsAreAnnounced() {
+        val offenders = mainSources.flatMap { file ->
+            val lines = codeLines(file)
+            iconButtonScopes(lines).mapNotNull { scope ->
+                val iconArgs = firstIconArgs(lines, scope.first, scope.second) ?: return@mapNotNull null
+                val silent = Regex("""contentDescription\s*=\s*null""").containsMatchIn(iconArgs)
+                if (silent) "${file.name}:${scope.first + 1}" else null
+            }
+        }
+        assertTrue(
+            "以下 IconButton 里的图标 contentDescription 是 null，读屏用户听到的是无名按钮：" +
+                offenders.joinToString() +
+                "。图标按钮请写显式标签（如 \"播放\"/\"暂停\"/\"更多操作\"）；" +
+                "若语义由相邻文字承担，就不要用 IconButton 而改用带文字的控件。",
+            offenders.isEmpty()
+        )
+    }
+
+    /**
+     * 色板选色块必须可被念出——**本轮实测发现的唯一真缺陷**。
+     *
+     * `AppearanceSettingsScreen.ColorItem` 是一个 48dp 的可点 `Box`，里面只有一块纯色
+     * 与一个选中对勾，**没有任何文字**；读屏用户听到的是一个没有名字的按钮，
+     * 分不清"哔哩粉"和"蓝色"。
+     *
+     * 更值得注意的是：颜色名**本来就有**（`PresetColors` 是 `Color to String`，
+     * 名字是 `"哔哩粉"` / `"蓝色"`…），调用点却用 `{ (color, _) ->` 把它丢掉了。
+     * 也就是说这不是"缺数据"，是"数据在手边没接"。
+     */
+    @Test
+    fun colorSwatchesAreAnnounced() {
+        val file = mainSources.firstOrNull { it.name == "AppearanceSettingsScreen.kt" }
+        assertTrue("找不到 AppearanceSettingsScreen.kt，本断言在假绿。", file != null)
+        val text = codeLines(file!!).joinToString("\n")
+        assertTrue(
+            "PresetColors 的名称字段被调用点丢弃了（写成 `{ (color, _) ->`）——" +
+                "色板块因此没有可读名称。",
+            !Regex("""PresetColors\.forEach\s*\{\s*\(color,\s*_\)""").containsMatchIn(text)
+        )
+        assertTrue(
+            "ColorItem 必须给可点区域一个可读名称（semantics { contentDescription = … }）。",
+            Regex("""fun ColorItem\([\s\S]{0,200}?contentDescription""").containsMatchIn(text) ||
+                text.contains("contentDescription = name")
+        )
+    }
+
+    /**
+     * 取第 [start] 行起的 `IconButton` 调用范围（行号区间，含 trailing lambda）。
+     *
+     * **必须两段配平**：先按圆括号取出实参列表，再（若后面紧跟 `{`）按花括号取出
+     * trailing lambda。只按花括号配平会在 `onClick = { … }` 处提前收口 —— 那正是
+     * 第一版扫描器的假阴性来源（实测：写成只按 `{}` 配平时全仓违规数恒为 0，
+     * 而那几个按钮的标签明明都在，所以没人会发现）。
+     */
+    private fun iconButtonScopes(lines: List<String>): List<Pair<Int, Int>> {
+        val scopes = mutableListOf<Pair<Int, Int>>()
+        var i = 0
+        while (i < lines.size) {
+            val isButton = BUTTON_OPENERS.any { lines[i].contains(it) }
+            if (!isButton) {
+                i++
+                continue
+            }
+            val argsEnd = balancedEnd(lines, i, '(', ')') ?: run { i++; return@run null } ?: continue
+            var end = argsEnd
+            val tail = lines.getOrElse(argsEnd) { "" }.substringAfter(')', "")
+            if (tail.contains('{')) {
+                end = balancedEnd(lines, argsEnd, '{', '}') ?: argsEnd
+            }
+            scopes += i to end
+            i = end + 1
+        }
+        return scopes
+    }
+
+    /** 在 [from]..[to] 行里找第一个 `Icon(` 并返回它的实参块。 */
+    private fun firstIconArgs(lines: List<String>, from: Int, to: Int): String? {
+        for (i in from..minOf(to, lines.size - 1)) {
+            if (!lines[i].contains("Icon(")) continue
+            return argumentBlock(lines, i)
+        }
+        return null
+    }
+
+    /** 从第 [start] 行起按 [open]/[close] 配平，返回闭合行号（找不到返回 null）。 */
+    private fun balancedEnd(lines: List<String>, start: Int, open: Char, close: Char): Int? {
+        var depth = 0
+        var opened = false
+        for (j in start until lines.size) {
+            for (ch in lines[j]) {
+                when (ch) {
+                    open -> {
+                        depth++
+                        opened = true
+                    }
+
+                    close -> depth--
+                }
+            }
+            if (opened && depth <= 0) return j
+        }
+        return null
+    }
+
+    /**
      * 返回箭头与"更多"菜单触发器的 `contentDescription` 不允许为 null。
      *
      * 制定本断言时全仓有 5 处违反，而**同仓另有 8 处返回箭头都写了 `"返回"`**
@@ -211,4 +335,9 @@ class AccessibilityStructureTest {
                 line
             }
         }
+
+    private companion object {
+        /** 按钮容器：图标在里面就必须有名字（`IconButton` 的 M3 变体一并算上）。 */
+        val BUTTON_OPENERS = listOf("IconButton(", "FilledIconButton(", "IconToggleButton(")
+    }
 }

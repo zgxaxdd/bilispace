@@ -119,9 +119,10 @@ class GlassDrawChainStructureTest {
             }
         }
         assertTrue(
-            "videoGlassActive 必须同时包含 playWhenReady、controlsBlur 与材质 OFF 判断：$def",
+            "videoGlassActive 必须同时包含 playWhenReady、模糊开（effectiveControlsBlur，含" +
+                "「省电模式/SurfaceView 下强制关」这一层）与材质 OFF 判断：$def",
             def.contains("state.playWhenReady") &&
-                def.contains("controlsBlur") &&
+                def.contains("effectiveControlsBlur") &&
                 def.contains("GlassMaterial.OFF")
         )
     }

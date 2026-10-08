@@ -67,8 +67,15 @@ class FrameBudgetLintTest {
      * （`Skeleton.kt:95`，骨架呼吸的唯一时钟）。原上限 2 是没有按实测口径读数定下的
      * （W24）。运行期"实例数 vs 调用点数"的缺口（1 个调用点被 N 个 item 各调一次）
      * 由 `SkeletonShimmerStructureTest` 的容器级 provider 守卫管辖，本棘轮只管调用点。
+     *
+     * **上限 1 → 2 的变更记录（2026-10-05）**：新增的 1 处来自**移植件**
+     * `motion/DissolvableSurface.kt` 的邻卡抖动（`Modifier.jiggleOnDissolve`：
+     * 别的卡片正在消散时，周围卡片 ±1.5°/80ms 抖动）。这是 BiliPai 粒子消散效果的
+     * 一部分（用户要求 1:1 移植），且**只在"有别的卡片正在消散"时才挂** ——
+     * 调用方不传该修饰符就完全不创建动画对象（`shouldJiggleOnDissolve` 早退）。
+     * 它的实例数受"同时只有一张卡在消散"约束，不会随列表长度增长。
      */
-    private val maxInfiniteTransition = 1
+    private val maxInfiniteTransition = 2
 
     /**
      * `runBlocking`：阻塞当前线程。主线程上使用会直接掉帧，启动路径上会拖慢冷启。
@@ -126,8 +133,14 @@ class FrameBudgetLintTest {
      * 移出组合期）本轮**未执行**（史实：那是重构而非调优，历史坑在
      * `HomeVideoPage` 的取色只挂 Coil onSuccess 上；在无设备条件下改它风险大于收益）。
      * 实测仍为 9 处，故上限维持；FL-07 若单独立项再下调。
+     *
+     * **上限 9 → 10 的变更记录（2026-10-05）**：新增的 1 处来自**移植件**
+     * `motion/DissolvableSurface.kt` 的卡片高度塌缩（`animateFloatAsState`：
+     * 消散完成后把卡片高度收到 0，让列表回流）。它是 BiliPai 粒子消散的收尾动作，
+     * 用户要求 1:1 移植，故保留其原写法。**触发时机极窄**：只有被解散的那一块在
+     * 消散结束后跑一次（约 240ms），不在滚动路径上、也不随列表长度增长。
      */
-    private val maxAnimateAsState = 9
+    private val maxAnimateAsState = 10
 
     /**
      * **真实模糊入口**（`hazeBlur(` + `drawBackdrop(`）：不比较半径就重建 = 每帧重编着色器。

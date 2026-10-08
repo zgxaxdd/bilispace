@@ -90,10 +90,10 @@ class VideoCardAdaptiveTintPolicyTest {
         // 染色色必须是**实色**。
         //
         // 旧断言是"必须半透明（要透出背后模糊）"，那是旧架构的假设 ——
-        // 当时染色靠 `.copy(alpha = glassTransparency)` 叠在屏幕背景上，
-        // 结果是**往白里兑了两次**、颜色被冲没（详见 VideoCardAdaptiveTintPolicy
-        // 里"往白里兑了两次"那段）。现在改为与不透明卡片底色一次混合，
-        // 所以必须是实色 —— 这条断言正是防止有人把半透明叠回来。
+        // 当时染色靠 `.copy(alpha = ...)`（那个 alpha 来自现已删除的 `glassTransparency`）
+        // 叠在屏幕背景上，结果是**往白里兑了两次**、颜色被冲没（详见
+        // VideoCardAdaptiveTintPolicy 里"往白里兑了两次"那段）。现在改为与不透明卡片
+        // 底色一次混合，所以必须是实色 —— 这条断言正是防止有人把半透明叠回来。
         assertEquals(
             "染色色必须是实色；半透明会让颜色被屏幕背景二次稀释",
             1f,
@@ -116,30 +116,6 @@ class VideoCardAdaptiveTintPolicyTest {
         )
         // 深色主题下微光更亮（0.48 vs 0.38）——深底上需要更强才有存在感
         assertTrue(darkSpec.coverGlowAlpha > lightSpec.coverGlowAlpha)
-    }
-
-    @Test
-    fun drawSpec_dataSaver_reducesTransparency() {
-        val normal = resolveVideoCardAmbientDrawSpec(
-            coverTint = coverBlue, isDarkTheme = true,
-            defaultContainerColor = dark, defaultBorderColor = neutralBorder,
-            isDataSaverActive = false
-        )
-        val saver = resolveVideoCardAmbientDrawSpec(
-            coverTint = coverBlue, isDarkTheme = true,
-            defaultContainerColor = dark, defaultBorderColor = neutralBorder,
-            isDataSaverActive = true
-        )
-        // 省流量档更不透明：少一层模糊合成的算力开销。
-        //
-        // 注：染色色本身现在是**实色**（一次兑白，不再叠半透明 —— 见
-        // VideoCardAdaptiveTintPolicy 里那段"往白里兑了两次"的说明），
-        // 所以"更不透明"这件事体现在 `glassTransparency` 上：
-        // 它越大 → 卡片越接近纯底色 → 背后模糊的合成开销越小。
-        // 用 alpha 判断已经测不出差别，改为断言两者都不透明 + 常量关系由
-        // `tintVisibility` 那组守卫覆盖。
-        assertEquals("染色色必须是实色（不再叠第二次白）", 1f, normal.containerColor.alpha, 0.0001f)
-        assertEquals(1f, saver.containerColor.alpha, 0.0001f)
     }
 
     @Test

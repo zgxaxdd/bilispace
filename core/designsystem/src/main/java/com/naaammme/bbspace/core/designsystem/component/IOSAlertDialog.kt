@@ -83,9 +83,9 @@ fun IOSAlertDialog(
         val container = MaterialTheme.colorScheme.surfaceContainerHigh
         val confirmColor = if (destructive) roles.destructive else MaterialTheme.colorScheme.primary
         val enter: EnterTransition =
-            if (anim.reduceMotion) fadeIn(tween(160))
-            else scaleIn(tween(220), initialScale = 0.96f) + fadeIn(tween(160))
-        val exit: ExitTransition = fadeOut(tween(150))
+            if (anim.reduceMotion) fadeIn(tween(anim.short))
+            else scaleIn(tween(anim.medium), initialScale = 0.96f) + fadeIn(tween(anim.short))
+        val exit: ExitTransition = fadeOut(tween(anim.short))
         Box(
             modifier = modifier
                 .fillMaxSize()

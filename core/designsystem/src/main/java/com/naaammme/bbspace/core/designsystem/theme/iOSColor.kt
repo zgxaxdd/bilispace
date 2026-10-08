@@ -149,8 +149,9 @@ fun iOSColorScheme(
 /** 浅色页面底色：iOS systemGroupedBackground。 */
 private val IosLightGroupedBackground = Color(0xFFF2F2F7)
 
-/** 深色页面底色：iOS 纯黑（深色 grouped 语义）。 */
-private val IosDarkGroupedBackground = Color.Black
+// K-7（2026-10-04 审查报告）：这里原有 `IosDarkGroupedBackground = Color.Black`，
+// 全仓零引用（深色页面底色由 iOSColorScheme 的染色阶梯负责）—— 与上面那条
+// `IosDarkLiftedBackground` 同类，直接删除，别再回来加"平行的一档"。
 
 // 这里曾有 `IosDarkLiftedBackground = 0xFF0A0A0B`（"非纯黑档的抬升底"），
 // 深色改 seed 染色炭色之后它再无任何引用，随 BACKLOG UI-10 删除。

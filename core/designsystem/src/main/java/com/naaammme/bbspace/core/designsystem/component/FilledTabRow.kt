@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
@@ -185,7 +186,7 @@ private fun IOSSegmented(
                 val selected = index == selectedIndex
                 val textColor by animateColorAsState(
                     targetValue = if (selected) onBackground else onSurfaceVariant,
-                    animationSpec = tween(durationMillis = 150),
+                    animationSpec = tween(durationMillis = LocalAnimations.current.short),
                     label = "segmentText"
                 )
                 val interactionSource = remember { MutableInteractionSource() }

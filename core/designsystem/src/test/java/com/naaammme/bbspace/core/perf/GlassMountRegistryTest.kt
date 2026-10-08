@@ -64,12 +64,12 @@ class GlassMountRegistryTest {
      */
     private val registry: List<GlassMount> = listOf(
         GlassMount(
-            "app/src/main/java/com/naaammme/bbspace/navigation/AppNavHost.kt", "hazeSource", 820,
+            "app/src/main/java/com/naaammme/bbspace/navigation/AppNavHost.kt", "hazeSource", 828,
             surface = "根 haze 源（Crossfade 全屏录制）",
             gating = "hazeGlassOn = glassOn && !liquidGlassOn（LIQUID 档互斥，GlassRecordChainStructureTest 钉死）"
         ),
         GlassMount(
-            "app/src/main/java/com/naaammme/bbspace/playback/capsule/LinkedBottomDock.kt", "glassEffect", 419,
+            "app/src/main/java/com/naaammme/bbspace/playback/capsule/LinkedBottomDock.kt", "glassEffect", 421,
             surface = "Dock 玻璃面（BOTTOM_BAR，预算值来源见 AP-27）",
             gating = "glassOn（材质≠OFF）；消费端 glassFrameRefresh 重采样"
         ),
@@ -96,13 +96,13 @@ class GlassMountRegistryTest {
         ),
         GlassMount(
             "feature/home/src/main/java/com/naaammme/bbspace/feature/home/video/HomeVideoPage.kt",
-            "layerBackdrop", 750,
+            "layerBackdrop", 755,
             surface = "每卡角标背板（录制源，N 卡 = N 份）",
             gating = "badgeGlassOn 前置（iOS+LIQUID 才创建；默认 MATERIAL 下为 null，见 coverBackdrop 注释）"
         ),
         GlassMount(
             "feature/home/src/main/java/com/naaammme/bbspace/feature/home/video/HomeVideoPage.kt",
-            "drawBackdrop", 920,
+            "drawBackdrop", 930,
             surface = "glassBadgeSurface 工厂（角标采样，每卡最多 2 角标）",
             gating = "badgeGlassOn 前置；remember 住整条链。" +
                 "**AP-26 ② 合并评估结论：两个角标必须两次采样** —— 左下（时长）/右下（播放量）" +
@@ -114,16 +114,18 @@ class GlassMountRegistryTest {
         ),
         GlassMount(
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt",
-            "drawBackdrop", 403,
+            "drawBackdrop", 412,
             surface = "playerControlGlass 工厂（播放控件采样）",
             gating = "!enabled || backdrop==null || material==OFF 早退；videoGlassTick 逐帧；" +
                 "AP-25 已接 LocalGlassGuard + resolveGlassBudget（降级档早退为纯底色）"
         ),
         GlassMount(
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt",
-            "layerBackdrop", 689,
+            "layerBackdrop", 780,
             surface = "播放页视频层背板（录制源）",
-            gating = "videoGlassTick 驱动重录（AP-25：守卫降级时 tick 循环同停）"
+            gating = "videoGlassTick 驱动重录（AP-25：守卫降级时 tick 循环同停）；" +
+                "省电模式（SurfaceView）下整条录制链不挂载 —— 画面是独立图层，采不到也无消费者" +
+                "（模糊已按 effectiveControlsBlur 强制关）"
         ),
         GlassMount(
             "core/designsystem/src/main/java/com/naaammme/bbspace/core/designsystem/glass/LiquidBackdrop.kt",

@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 
 /**
  * 系统无缝动画「打开 / 返回」两个阶段的进行中标记。
@@ -238,7 +239,7 @@ object SeamlessTransitionState {
         // 回调缺失时的兜底路径也要清源卡片标识，否则它会一直残留到下一次过渡
         sourceCardKey = null
         if (byDeadline) {
-            android.util.Log.w(
+            DiagnosticLog.w(
                 "OplusViewSeamless",
                 "awaitOpenEnd hit deadline (system onEnd callback missed)"
             )
@@ -253,7 +254,7 @@ object SeamlessTransitionState {
         val byDeadline = returnRunning
         returnRunning = false
         if (byDeadline) {
-            android.util.Log.w(
+            DiagnosticLog.w(
                 "OplusViewSeamless",
                 "awaitReturnEnd hit deadline (system onEnd callback missed)"
             )

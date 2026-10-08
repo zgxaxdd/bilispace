@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 
 /**
  * Compose 卡片与 View 体系无缝动画之间的桥接状态，持有充当过渡锚点的宿主 View。
@@ -70,7 +71,7 @@ fun SeamlessAnchor(state: SeamlessAnchorState, modifier: Modifier = Modifier) {
             // 交叉淡出（`view not attach to window or error, do alpha anim`）。
             // 实测曾因详情页过早 `capsuleState.deactivate()` 卸载小横条，在这里打出
             // `wasAttached=false`，是"返回没有无缝感"的直接证据，故保留这条日志。
-            android.util.Log.i(
+            DiagnosticLog.i(
                 "OplusViewSeamless",
                 "anchor released (wasAttached=${it.isAttachedToWindow})"
             )

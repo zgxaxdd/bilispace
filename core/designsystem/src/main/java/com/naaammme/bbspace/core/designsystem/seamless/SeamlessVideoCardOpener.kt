@@ -7,7 +7,6 @@ import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.PixelCopy
 import android.view.View
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -19,6 +18,7 @@ import coil3.BitmapImage
 import coil3.SingletonImageLoader
 import coil3.memory.MemoryCache
 import com.naaammme.bbspace.core.common.log.Logger
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.common.media.BiliCoverSize
 import com.naaammme.bbspace.core.common.media.coverUrlFor
 import com.naaammme.bbspace.core.model.VideoTarget
@@ -174,16 +174,16 @@ class SeamlessCardOpener(
         runCatching {
             PixelCopy.request(window, srcRect, bitmap, { result ->
                 if (result == PixelCopy.SUCCESS) {
-                    Log.i(TAG, "PixelCopy captured ${w}x$h for anchor content")
+                    DiagnosticLog.i(TAG, "PixelCopy captured ${w}x$h for anchor content")
                     onCaptured(bitmap)
                 } else {
-                    Log.w(TAG, "PixelCopy failed result=$result -> fallback decoration")
+                    DiagnosticLog.w(TAG, "PixelCopy failed result=$result -> fallback decoration")
                     bitmap.recycle()
                     onCaptured(null)
                 }
             }, android.os.Handler(android.os.Looper.getMainLooper()))
         }.onFailure {
-            Log.w(TAG, "PixelCopy threw: ${it.message} -> fallback decoration")
+            DiagnosticLog.w(TAG, "PixelCopy threw: ${it.message} -> fallback decoration")
             bitmap.recycle()
             onCaptured(null)
         }
@@ -312,7 +312,7 @@ class SeamlessCardOpener(
         val cover = if (decorateAnchor) {
             // 优先级 1：整卡真实像素。这是唯一含"简介文字"的内容，必须优先。
             if (cardBitmap != null && !cardBitmap.isRecycled) {
-                Log.i(
+                DiagnosticLog.i(
                     TAG,
                     "using frozen card bitmap ${cardBitmap.width}x${cardBitmap.height} " +
                         "for anchor ${anchor.width}x${anchor.height}"
@@ -323,7 +323,7 @@ class SeamlessCardOpener(
                 // 卡片场景若走到这里，简介区将没有文字——说明冻结失败，需查上游。
                 val base = buildSoftwareCoverDrawable(anchor, coverUrl, coverLarge, anchorRadiusPx)
                 if (cardBitmap == null) {
-                    Log.w(
+                    DiagnosticLog.w(
                         TAG,
                         "cardBitmap unavailable (freeze failed?) -> falling back to cover-only; " +
                             "info band will have no text"
@@ -341,14 +341,14 @@ class SeamlessCardOpener(
             val drawable = cover.drawableFor(anchor.resources, anchorRadiusPx)
             anchor.background = drawable
             anchor.foreground = drawable
-            Log.i(
+            DiagnosticLog.i(
                 TAG,
                 "anchor decorated: preview=${cover.bitmap.width}x${cover.bitmap.height} " +
                     "anchor=${anchor.width}x${anchor.height} coverH=$coverHeightPx " +
                     "isCardPreview=${coverHeightPx > 0}"
             )
         } else {
-            Log.w(
+            DiagnosticLog.w(
                 TAG,
                 "anchor NOT decorated (decorateAnchor=$decorateAnchor, coverH=$coverHeightPx) " +
                     "-> return direction will have no preview content"
@@ -375,15 +375,15 @@ class SeamlessCardOpener(
         if (!registered) {
             anchor.foreground = null
             anchor.background = null
-            Log.i(TAG, "registerOpenTransition=false, fallback to plain open")
+            DiagnosticLog.i(TAG, "registerOpenTransition=false, fallback to plain open")
             return false
         }
-        Log.i(TAG, "registerOpenTransition ok, seamless open pending")
+        DiagnosticLog.i(TAG, "registerOpenTransition ok, seamless open pending")
         // 诊断：锚点矩形。锚点铺满整卡后比例应接近 1:1（封面 4:3 + 简介区），
         // 若仍是 0.75 左右说明锚点又退回只覆盖封面，"简介没被带上"会复现。
         if (Logger.isDebug) {
             anchor.screenRect()?.let { r ->
-                Log.d(
+                DiagnosticLog.d(
                     TAG,
                     "anchor rect=${r.width()}x${r.height()} " +
                         "ratio=${"%.2f".format(r.height().toFloat() / r.width())}"
@@ -419,7 +419,7 @@ class SeamlessCardOpener(
             }
             delay(800)
             if (lastDecorated === anchor) {
-                Log.i(TAG, "cleanup anchor decoration (fallback, callback missed)")
+                DiagnosticLog.i(TAG, "cleanup anchor decoration (fallback, callback missed)")
                 anchor.foreground = null
                 anchor.background = null
                 lastDecorated = null
@@ -514,15 +514,15 @@ class SeamlessCardOpener(
             ?.image
         val cached = (image as? BitmapImage)?.bitmap
         if (cached == null) {
-            Log.d(TAG, "cover bitmap not in memory cache: $resolved")
+            DiagnosticLog.d(TAG, "cover bitmap not in memory cache: $resolved")
             return null
         }
-        Log.d(TAG, "cover bitmap found, config=${cached.config}")
+        DiagnosticLog.d(TAG, "cover bitmap found, config=${cached.config}")
         // 系统返回阶段快照为软件画布：硬件位图必须转软件配置，否则绘制抛异常
         val safeBitmap = if (cached.config == Bitmap.Config.HARDWARE) {
             runCatching { cached.copy(Bitmap.Config.ARGB_8888, false) }
                 .getOrNull()
-                ?.also { Log.d(TAG, "hardware bitmap copied to software") }
+                ?.also { DiagnosticLog.d(TAG, "hardware bitmap copied to software") }
                 ?: return null
         } else {
             cached
@@ -545,17 +545,17 @@ class SeamlessCardOpener(
             // 而不是按猜测的时长（实测该回调每帧送达，见 SeamlessTransitionState.progress）。
             SeamlessTransitionState.onProgress(progress)
             // 诊断：逐帧进度日志量很大（一帧一条），仅在 debug 打，避免 release 刷屏
-            if (Logger.isDebug) Log.i(TAG, "progress=$progress")
+            if (Logger.isDebug) DiagnosticLog.i(TAG, "progress=$progress")
         }
 
         override fun onStart(isOpen: Boolean) {
             // 诊断动画问题：确认系统回调是否送达（缺失 = 应用走 1.2s/1.6s 超时兜底）
-            Log.i(TAG, "onAnimationStart isOpen=$isOpen")
+            DiagnosticLog.i(TAG, "onAnimationStart isOpen=$isOpen")
             if (isOpen) SeamlessTransitionState.beginOpen() else SeamlessTransitionState.beginReturn()
         }
 
         override fun onEnd(isOpen: Boolean) {
-            Log.i(TAG, "onAnimationEnd isOpen=$isOpen")
+            DiagnosticLog.i(TAG, "onAnimationEnd isOpen=$isOpen")
             if (isOpen) {
                 SeamlessTransitionState.endOpen()
                 // 打开已完成：补进 BUNDLE_BITMAP 不影响开画面面；若框架在返回开始时
@@ -564,7 +564,7 @@ class SeamlessCardOpener(
                     // 回调由系统线程路径触发，任何异常都不应外抛
                     runCatching {
                         bundle.putParcelable(OplusViewSeamless.BUNDLE_BITMAP, it)
-                        Log.d(TAG, "BUNDLE_BITMAP attached for return fallback")
+                        DiagnosticLog.d(TAG, "BUNDLE_BITMAP attached for return fallback")
                     }
                 }
             } else {

@@ -5,6 +5,7 @@ import android.os.Build
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
 import androidx.palette.graphics.Palette
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -189,7 +190,9 @@ object VideoCardCoverColorStore {
         }.onFailure {
             // 取色失败的表现是"卡片没颜色"这种**静默降级**：不崩、不报错、单测也照绿。
             // 没有这行日志就只能靠人眼发现（2026-10-01 的真机回归就是这么踩到的）。
-            android.util.Log.w("VideoCardCoverColor", "封面取色失败：${it.message}", it)
+            // Q-3：原先直写 android.util.Log，release 常开；现收口到 DiagnosticLog
+            // （「设置 → 性能 → 现场诊断日志」控制，debug 包始终可见）。
+            DiagnosticLog.w("VideoCardCoverColor", "封面取色失败：${it.message}", it)
         }.getOrNull()
     }
 

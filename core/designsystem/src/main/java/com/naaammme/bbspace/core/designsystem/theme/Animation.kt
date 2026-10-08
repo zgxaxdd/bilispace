@@ -45,7 +45,19 @@ val LocalAnimations = compositionLocalOf {
 private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val StandardEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 
-fun createAnimations(speed: AnimationSpeed): BiliAnimations {
+/**
+ * @param systemReduceMotion 系统级「减弱/移除动效」（`ANIMATOR_DURATION_SCALE == 0`）。
+ *   移植自 BiliPai 的 `readSystemReduceMotion`（见 [rememberSystemReduceMotion]）。
+ *
+ *   修复前本仓**只有 `ForegroundEnterBox` 一处**读了系统动画缩放，其余全部设计系统组件
+ *   只认 App 内的「动效速度」设置 —— 也就是说：用户在系统里开了「移除动画」，
+ *   bbspace 的粒子消散、转场、骨架呼吸照旧播。这与无障碍设置冲突。
+ *
+ *   **两处任一为真即降级**：用户表达"不要动画"的意图，App 内设置与系统设置等价。
+ *   只动 `reduceMotion` 标志，**不动时长** —— 时长口径保持由 App 设置单独决定，
+ *   免得一次改动同时改变所有动画的节奏（那是另一个话题）。
+ */
+fun createAnimations(speed: AnimationSpeed, systemReduceMotion: Boolean = false): BiliAnimations {
     val m = speed.multiplier
     // OFF 时用 1ms 而不是 0，避免 Compose 动画边界问题
     val factor = if (m == 0f) 0.001f else m
@@ -58,7 +70,7 @@ fun createAnimations(speed: AnimationSpeed): BiliAnimations {
         morphEasing = IosEaseInOut,
         emphasized = EmphasizedEasing,
         standard = StandardEasing,
-        reduceMotion = m == 0f
+        reduceMotion = m == 0f || systemReduceMotion
     )
 }
 
@@ -67,7 +79,11 @@ fun ProvideAnimations(
     speed: AnimationSpeed,
     content: @Composable () -> Unit
 ) {
-    val anim = remember(speed) { createAnimations(speed) }
+    // 系统「移除动画」实时跟随（ContentObserver），与 App 内设置取或
+    val systemReduceMotion = rememberSystemReduceMotion()
+    val anim = remember(speed, systemReduceMotion) {
+        createAnimations(speed, systemReduceMotion)
+    }
     CompositionLocalProvider(
         LocalAnimations provides anim,
         content = content

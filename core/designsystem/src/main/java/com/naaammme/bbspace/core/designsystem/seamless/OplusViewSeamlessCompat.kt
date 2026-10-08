@@ -4,8 +4,8 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Bundle
-import android.util.Log
 import android.view.View
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.oplus.animation.OplusViewSeamless
 
 /**
@@ -104,7 +104,8 @@ object OplusViewSeamlessCompat {
     ): Boolean = runGuarded(fallback = false) {
         val context = anchor.context
         if (context !is Activity) {
-            Log.w(TAG, "setSeamlessView requires an Activity context, got ${context.javaClass.name}")
+            // Q-3：收口到 DiagnosticLog（原为裸 Log.w / Log.d，release 常开）
+            DiagnosticLog.w(TAG, "setSeamlessView requires an Activity context, got ${context.javaClass.name}")
             return@runGuarded false
         }
         OplusViewSeamless.setSeamlessView(anchor, context, bundle, callback?.delegate)
@@ -137,11 +138,11 @@ object OplusViewSeamlessCompat {
             block()
         } catch (e: LinkageError) {
             // compileOnly：非 ColorOS 机型无系统类，或系统版本与桩包不匹配
-            Log.d(TAG, "view seamless unavailable: ${e.javaClass.simpleName}")
+            DiagnosticLog.d(TAG, "view seamless unavailable: ${e.javaClass.simpleName}")
             fallback
         } catch (e: RuntimeException) {
             // 官方「异常处理」一节要求捕获的版本不匹配运行时异常
-            Log.d(TAG, "view seamless runtime error: $e")
+            DiagnosticLog.d(TAG, "view seamless runtime error: $e")
             fallback
         }
 

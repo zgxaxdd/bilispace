@@ -691,35 +691,6 @@ private fun ActionSkeletonChip(modifier: Modifier = Modifier) {
     }
 }
 
-@Composable
-private fun DetailEntryCardSkeleton() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = MaterialTheme.shapes.large
-            )
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        SkeletonBlock(
-            modifier = Modifier
-                .fillMaxWidth(0.28f)
-                .height(20.dp),
-            shape = MaterialTheme.shapes.extraSmall
-        )
-        SkeletonBlock(
-            modifier = Modifier
-                .fillMaxWidth(0.72f)
-                .height(18.dp),
-            shape = MaterialTheme.shapes.extraSmall
-        )
-        SkeletonBlock(
-            modifier = Modifier
-                .fillMaxWidth(0.46f)
-                .height(16.dp),
-            shape = MaterialTheme.shapes.extraSmall
-        )
-    }
-}
+// K-7（2026-10-04 审查报告）：这里原有一个 `private fun DetailEntryCardSkeleton()`
+// （详情入口卡的骨架），**全仓零调用**——详情页最终用的是 `detailItems` 那套骨架。
+// 属"组件换了、旧骨架忘了删"，故删除而不是留着当参考实现。
