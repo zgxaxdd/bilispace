@@ -17,8 +17,8 @@
   <a href="https://github.com/zgxaxdd/bilispace/releases/latest">
     <img src="https://img.shields.io/github/downloads/zgxaxdd/bilispace/latest/total?style=flat" alt="latest release downloads" />
   </a>
-  <a href="https://developer.android.com/about/versions/nougat">
-    <img src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat&logo=android&logoColor=white" alt="android 7+" />
+  <a href="https://developer.android.com/about/versions/13">
+    <img src="https://img.shields.io/badge/Android-13%2B-3DDC84?style=flat&logo=android&logoColor=white" alt="android 13+" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/github/license/zgxaxdd/bilispace?style=flat" alt="license" />
@@ -101,7 +101,12 @@
 
 ## 更新日志
 
-### v1.9.0（2026-09-06，bilispace 首个发布）
+### v1.8.04（2026-09-06，bilispace 首个发布）
+
+> 版本口径说明（C-1，2026-10-04 审查报告）：本节标题原先写 `v1.9.0`，与
+> `app/build.gradle.kts` 的 `versionName = "1.8.04"`、`git tag`（最新 `v1.8.04`）
+> 以及 `dist/` 里的产物名三处都不一致。以 **`app/build.gradle.kts` 的
+> `versionCode` / `versionName` 为唯一真相**，此处已对齐。
 
 - **OPPO ColorOS「View 无缝动画」适配**：视频详情页 Activity 化（`VideoDetailActivity`），接入 `OplusViewSeamless` 系统级无缝过渡——首页卡片封面从卡片矩形丝滑展开到全屏，支持跟手、阻断、回弹，返回精准回到卡片当前位置；非 ColorOS 16.1+ 设备自动降级为应用内封面展开动画
 - **互动闭环**：视频点赞 / 投币 / 收藏 / 一键三连 / 双击点赞，状态回显与失败回滚
@@ -124,8 +129,9 @@
 ## 下载与运行
 
 - 用户安装：前往 [Releases](https://github.com/zgxaxdd/bilispace/releases) 下载最新 APK
-- 系统要求：Android 7.0 及以上
-- 开发环境：JDK 17、Android SDK 36
+- 系统要求：**Android 13（API 33）及以上** —— 与 `AndroidApplicationConventionPlugin` /
+  `AndroidLibraryConventionPlugin` 的 `minSdk = 33` 一致（Liquid Glass 的 AGSL 从 API 33 起可用）
+- 开发环境：JDK 17、Android SDK 37（compileSdk 37.2：`haze 2.0.0-beta03` 的 AAR 元数据要求 `minCompileMinorSdk=2`）
 - 发布签名：release 构建需通过环境变量注入 `SIGNING_STORE_FILE` / `SIGNING_STORE_PASSWORD` / `SIGNING_KEY_ALIAS` / `SIGNING_KEY_PASSWORD`
 
 ## 说明
