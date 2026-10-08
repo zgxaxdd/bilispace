@@ -795,3 +795,95 @@ SponsorBlock 上游补的 `-1`→`0` 投票 bug 在 bbspace **不存在**（本�
 **建议落地顺序**（单独立项）：#16 点赞在途送达（1 文件 3 行）→ #17 评论留白 → #23 乐观更新（与 BACKLOG `LK-01` 合并）。
 **本批未写任何应用代码**：`_ref/bbspace` 工作区未因本轮提案产生改动。
 
+---
+
+## 批次 PV · 2026-10-08 · 刷视频链路性能分析的执行轮（立尺 + 摘两处每帧成本）
+
+｜**输入**：`D:\111j\c\bbspace-perf\2026-10-08-视频播放链路性能分析-刷视频.md`（纯静态走查，含 §5 对上轮 10-02 结论的逐条复核）
+｜**接手状态**：HEAD `2e279836` + **169 处未提交改动**（前序会话产出）
+｜**设备**：**无**（`adb devices` 为空）⇒ 本批不含任何性能数字
+｜**台账**：BACKLOG 新增 `PF-07 ~ PF-17`；L4 新增 `L4-124 ~ L4-129`
+
+### 0. 前置：把脏工作区归档（仓库既定纪律）
+
+工作区里混着 169 处未提交变更，直接在上面叠提交会让每一项都无法单独回滚
+（2026-09-22 用户就这件事定过口径：**先按主题分组归档，再开工**）。本轮按路径分组落成 6 个
+`chore(archive)` 本地提交，每个都在 message 里写明"非本会话产出、未逐条复核、
+**中间提交不保证逐个可编译，只有 tip 经过构建与单测验证**"：
+
+| SHA | 范围 |
+|---|---|
+| `91d5c315` | 构建脚本 / CI / `tools/` |
+| `c1e65fef` | `core/designsystem`（粒子消散动效、无缝转场、Inter 字体、系统减弱动效、取色染色、组件与配色、perf/a11y 守卫 —— 一个提交里含多个主题，**刻意不拆**：拆它等于替前序会话臆造主题） |
+| `e86ae78e` | 播放链路（CDN 智能选线与线路健康度、单文件 DASH 建源、SimpleCache 接线、错误恢复与防活锁、播放上报、弹幕分段窗口） |
+| `dae66ba3` | `feature/video` + `core/swipe`（播放器 UI 与刷视频会话） |
+| `08ab5048` | app 接线 / `infra/crypto` 签名与凭据 / 安全与隐私配置 / 设置 / feed / 其余界面 |
+| `a335abe1` | 台账与文档 |
+
+> 为了让 V1 的提交只含本会话的改动，先把已经写进 `Media3PlayerEngine.kt` 的 8 处 V1 接线**逐条 Edit 撤回**
+> （不是 `git checkout`，那会连带丢掉前序 497 行未提交工作），归档后再原样接回并核对 sha256 一致、
+> `git diff` 恰好 +60/−0。**没有用 shell 改源码内容**（§2.3 第一条）。
+
+### 1. 复核：三条 P0 成立，但一条优化的前提被推翻
+
+| 报告断言 | 复核 |
+|---|---|
+| P0-1 会话被锁定 TextureView（`PortraitSwipePager.kt:728` `allowSurfaceView=false`） | ✅ 成立 |
+| P0-2 播放器视图栈随页槽销毁重建（`:704-705` 只在 `isCurrentVideo` 分支组合） | ✅ 成立 |
+| P0-3 切页必停播放器（`Media3PlayerEngine.kt:568-569`） | ✅ 事实成立，**但由此推出的 D1a 不成立** |
+
+**【推翻 D1a】**（实读 `media3-exoplayer-1.11.0-sources.jar`，非二手结论）：
+`prepare()` → `prepareInternal`（`:1061`）→ `resetInternal`（`:1063`）→ **无条件 `disableRenderers()`（`:2088`）**；
+`setMediaSource` 换 period 时 `seekToPeriodPosition`（`:1825`）也走 `disableRenderers()`（`:1860`）。
+⇒ "不调 stop() 就能复用解码器"在 Media3 1.11 的这条路径上不成立。
+再加一条：`MediaCodecRenderer.onDisabled()` → `flushOrReleaseCodec()`（`:1038`）在多数机型上是 **flush 而非 release**，
+只有 `c2.mtk.{avc,hevc,vp9}.decoder` 强制 release（`MediaCodecVideoRenderer:1712`，b/362904942）
+⇒ 切页到底重不重新初始化解码器**本身是机型相关**，静态推不出来 → **D1a 判为不做**（BACKLOG PF-13）。
+
+**【补漏 R1】**：报告只处理了播放页自己的页级 `graphicsLayer`，漏了 `PortraitSwipePager.kt:699-701`
+—— `VerticalPager` 本体的越界阻尼也是一层祖先 `graphicsLayer{translationY}`（大部分时间恒等、阻尼瞬间非恒等，
+正是"平时好、一拉就黑"那一类）。R1 因此转 PF-11 + L4-126，**默认不得翻转**。
+
+**【L1a 前置约束】**：`VideoPlayerPane.kt:511-519`、`:710-714` 记着 2026-10-07 的真机事故
+—— `AndroidView` 的 holder **只认第一次 factory 返回的视图**，池化必须连组合节点一起重建；
+弹幕摘挂要守"只摘自己挂的那个 host"（`DanmakuOverlay.kt:131-137`）。转 PF-12 + L4-127。
+
+### 2. 落地的四项（顺序按报告 §3：先立尺，再动成本）
+
+| 提交 | 项 | 内容 |
+|---|---|---|
+| `3a610cc4` | **N4 / PF-07** | `FirstFrameTimeline`（纯逻辑 + 时钟注入）与引擎五点接线：t0 `setSource`、t1 建源交播放器、t2 `onVideoDecoderInitialized`（**顺带把此前被接收即丢弃的 `initializationDurationMs` 用起来**）、t3 新增 `onSurfaceSizeChanged`（代理指标）、t4 `onRenderedFirstFrame`。DASH 索引走没走网络随 t1 打 `index=NET\|CACHE\|-`；起播超时另打一行残缺解剖。格式是**给脚本解析**的 `key=value`，缺失打 `-` 而不是 0 |
+| `5b882c45` | **R5+N2 / PF-08** | `PlaybackByteCacheMetrics`（`CacheDataSource.EventListener`，**只挂读路径**）；`PlaybackWatchdog` + `PlaybackWatchdogPolicy`（500ms 轮询里读 `videoDecoderCounters` 的渲染/丢帧/主动跳过/**`decoderInitCount`** + 缓存与网络字节，2s 一行、无变化不打、首次读数只建基线）；`DecoderReuseReport`（result 0..3 + 17 个 discard bit → 名字，并有一条与 Media3 真值比对的**漂移测试**） |
+| `01a4f974` | **R2 + U2 / PF-09、PF-10** | 玻璃背板 tick 由逐帧改**按绝对时间节流约 30Hz**（`VideoGlassTickPolicy`；按时间而非按帧，否则高刷机型成本又翻倍）；手势 HUD 填充条从 `Modifier.height((100*barH).dp)`（拖动期每帧 relayout）改固定尺寸 `Canvas` 绘制，`dragFraction` 在 draw 阶段读 |
+
+**判据来源与可证伪信号**（这才是本批的真正交付 —— 后续 D1b/N1/R1/L1a 都靠这三行读数决定）：
+连滑同编码视频时 `FirstFrame` 的 `t2=` 是否再现、`PlayWatch` 的 `decInits=` 是否每次切页 +1、
+`DecoderReuse` 的 `result=` 是什么。三者互为印证，见 L4-128（**一连上真机先做这条**）。
+
+### 3. 门禁与守卫
+
+- `:infra:player:testDebugUnitTest --rerun` → **94/0**（V1 后）→ **125/0**（V2 后）
+- `:feature:video:testDebugUnitTest --rerun` → **118/0**（V3+V4）
+- `:core:designsystem:testDebugUnitTest --rerun` → 首轮 **179 里 1 失败 = `GlassMountRegistryTest`**
+  （登记行号 780、实际 791 —— 我加注释导致漂移，守卫按预期咬了），按它给的实号回填后 **179/0**
+- 全量 `:app:assembleDebug testDebugUnitTest` → **BUILD SUCCESSFUL**，22 个模块 **997 项、0 失败 0 错误**
+  （接手时基线 938 ⇒ 本批 **+59**）
+- **未做破坏性验证的守卫**：V1/V2/V3/V4 新增的四个守卫文件本轮只跑到"绿"，没有逐条改坏验证据
+  （每条都按 W21 配了正/反成对断言，且与本轮**确实咬过**的 `GlassMountRegistryTest` 同一套扫描器形态）。
+  诚实口径：**"会咬"目前只对登记表那一条有实证。**
+
+### 4. 未落地（都写了原因，不要当"漏做"再来一轮）
+
+D1a（判为不做）· D1b、N1（**先测再动**，等 L4-128 的三行读数）· R1/U4、L1a、R3/R4（**需真机**）·
+D2/N3/L3/U5（离线可判部分尚未开工）。
+
+### 5. 本批的操作口径备忘（踩过的坑，写进 FINDINGS 更细）
+
+- `--rerun` 只在命令行**只有一个任务**时生效，多任务并列会被静默丢弃 ⇒ 逐模块调用。
+- 扫源码型守卫读的文件**不是**测试任务的声明输入 ⇒ 宣称绿之前必须看到 `> Task :x:testDebugUnitTest`
+  而不是 `UP-TO-DATE` / `FROM-CACHE`。
+- 改任何 `VideoPlayerPane.kt` 的行位置都会牵动 `GlassMountRegistryTest` 的登记表 —— 它按
+  (file, kind, **line**) 双向校验，失败消息里直接给实号，照抄即可。
+- 全程**只有本地提交，未推送**；无设备 ⇒ 不写任何帧率/内存/功耗数字。
+
+

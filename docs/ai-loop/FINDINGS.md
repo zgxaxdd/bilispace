@@ -558,3 +558,75 @@ SX-06（评论区滚动帧率）在无真机时被整项搁置了三轮。第 4 
 ⇒ 遇到此类症状，**先穷举静默返回路径并在每条上埋点**，再谈功能是否有 bug；否则会像我本轮一样，
 在"自相矛盾的两组观察"之间来回，最后只能诚实地写"根因未定位"（**这是正确的取舍，不是失败**
 —— 按铁律不许猜）。同时：**矛盾信号本身就是重要线索**，它排除了"简单地点击没送达"这一类解释。
+
+## W47 · 依赖库的"机制类结论"必须读它的**实码**，别拿社区经验当架构事实（2026-10-08）
+
+10-08 那份刷视频链路分析给了 P0-3 的一条优化：「ExoPlayer 语义里 stop() 会释放解码器，
+所以切页不要 stop()，直接 setMediaSource + prepare() 就能复用已初始化的解码器」，
+并引 Reddit 的 ExoPlayer 实践作为出处。**读了 Media3 1.11.0 的源码之后，这条不成立**：
+
+| 核对点 | 源码事实 |
+|---|---|
+| `ExoPlayerImplInternal.prepareInternal()`（`:1061`） | 第一件事就是 `resetInternal(...)` |
+| `resetInternal()`（`:2072`） | **无条件** `disableRenderers()`（`:2088`） |
+| `setMediaItemsInternal()`（`:1075`） | 不直接 disable，但经 `handleMediaSourceListInfoRefreshed` → period 变化时落 `seekToPeriodPosition`（`:1825`），那里 `forceDisableRenderers \|\| period 变了` 就 `disableRenderers()`（`:1860`） |
+| `MediaCodecRenderer.onDisabled()` | → `flushOrReleaseCodec()`（`:1038`）：**多数机型只 flush 不 release**；`MediaCodecVideoRenderer:1712` 恰恰是给 `c2.mtk.{avc,hevc,vp9}.decoder` 开例外才 release（b/362904942） |
+
+⇒ "不调 stop()"跳不过任何一次渲染器 disable；而"切页到底重不重新初始化解码器"**本身是机型相关**，
+静态推不出来 —— 只能测（本轮把它落成 `FirstFrame` 的 `t2=`、`PlayWatch` 的 `decInits=`、
+`DecoderReuse` 的 `result=` 三行读数，见 L4-128）。
+
+**核对手法**（比 javap 快且能读注释，记下来复用）：
+```
+curl -sSLo src.jar https://dl.google.com/android/maven2/androidx/media3/media3-exoplayer/1.11.0/media3-exoplayer-1.11.0-sources.jar
+```
+注意 **sources jar 不是每个 artifact 都有**：`media3-datasource-cache` 在 1.11.0 已经并进
+`media3-datasource`（拿它的 sources jar 会 404，而 404 的 HTML 会被 curl 存成"jar"，unzip 才报错）。
+只有 class 的 aar 时用 `javap -p -c classes.jar <类>` 看字节码里的 `// Method xxx:()V` 也能定调用点。
+
+**How to apply**：报告/交接文档里凡是"**因为 A 机制所以 B 优化有效**"的句子，动手前把 A 读到源码行；
+数值与行号要复核（W4/W6）已经守过几轮，**机制断言是同一类风险但更隐蔽** ——
+它错了不会编译失败，只会让一整套改动方向白做（本轮直接撤掉了一条 P0）。相关：[[bbspace-perf-taskbook-execution]]。
+
+## W48 · 归档脏工作区之前，先把自己刚写进去的改动**撤回**（2026-10-08）
+
+本轮开工顺序错了半拍：先在某文件里写完了新接线，才发现工作区还压着 169 处前序会话的未提交改动。
+此时若直接归档，那个文件的 diff 就同时含"别人的 497 行 + 我的 60 行"，
+**归档提交与本会话第一项的提交都无法单独回滚** —— 而分组归档的全部目的就是这个。
+
+做法（没用 shell 改内容，见 §2.3 第一条）：
+1. `cp` 当前文件到 `/tmp` 并记 sha256；
+2. 用 Edit **逐条撤回自己的改动**（我这里是 8 条），撤回后 `grep -c` 自己引入的符号必须为 0；
+3. 按路径分组归档前序工作；
+4. `cp` 复原 → 核对 sha256 与步骤 1 一致、`git diff` **恰好等于**自己那 +60/−0；
+5. 再提交本会话的第一项。
+
+**不要用 `git checkout HEAD -- <文件>` 撤销**：那会连带丢掉同一文件里前序会话的未提交工作。
+
+## W49 · 哨兵值 `<= 0` 会让"注入 0 时钟"的单测**静默变成没开始**（2026-10-08）
+
+`FirstFrameTimeline` 沿用本仓口径（`FirstFrameTimeoutPolicy.startedAtMs <= 0` 表示"还没开播"）
+用 `t0 > 0` 判"时间线是否已启动"。三条单测用 `FirstFrameTimeline { 0L }` 注入常量时钟 ⇒
+`begin()` 记下的 t0 就是 0 ⇒ 整条时间线被判为"未开播"、`completeLine()` 恒 null、三连红。
+
+**How to apply**：凡是"`<= 0` = 未设置"的哨兵语义，(a) 测试里注入的时钟**从非零起步**；
+(b) 顺手补一条**正面钉住哨兵**的用例（本轮加了 `monotonicClockZeroMeansNoTimelineStarted`），
+否则下一个人还会踩，而且报错形态是"字段全是 `-`"这种最难倒回去的一种。
+
+## W50 · 埋点类改动最常见的失效是"被悄悄拆掉且看起来仍然绿"，守卫要**按调用形态 + 函数体限定 + 反向成对**（2026-10-08）
+
+功能测试管不着"引擎里有没有人读 `videoDecoderCounters`"：接线一旦被删，日志只是永远打 `-` /
+`dropped=0`，编译与单测全绿。本轮四个新守卫（`FirstFrameAnatomyWiringGuardTest`、
+`PlaybackObservabilityWiringGuardTest`、`VideoPlayerRenderCostGuardTest`）统一按三条写：
+
+1. **匹配调用形态**而不是符号名（`firstFrameTimeline.begin(`、`has(body, "player.videoDecoderCounters")`）—— W20；
+2. **限定在对应函数体内**（花括号配对取体）—— "把 begin 挪出 setSource"和"删掉 begin"都会红，
+   而注释里提一句名字不会让它假绿（扫描先剥注释与 import 行）；
+3. **正向必配反向**：`VideoPlayerRenderCostGuardTest` 里"不得再出现 `withFrameNanos { }`"、
+   "`Modifier.height((100 *` 不得回来"；`PlaybackObservabilityWiringGuardTest` 里更有一条
+   **语义反向** —— 缓存监听器**只许挂在读路径**，预热/预取（往缓存里写）挂了就把命中率
+   算成"预取越猛越命中"的假结论。
+
+**本轮的实证缺口要诚实记下**：只有 `GlassMountRegistryTest` 在这一轮**真的咬过**
+（我加注释导致行号漂移，179 项里唯一失败就是它，按 W44 的"改表"修法回填实号后绿）。
+上面四个守卫只跑到"绿"，没逐条改坏验证据 —— 说"会咬"之前别把它当成已证。

@@ -84,6 +84,28 @@
 
 ---
 
+## B-流畅 · 2026-10-08《视频播放链路性能分析·刷视频》新增（PF-07 ~ PF-17）
+
+> 来源：`D:\111j\c\bbspace-perf\2026-10-08-视频播放链路性能分析-刷视频.md`（纯静态走查）。
+> 本会话已按 §8 复核：**三条 P0 证据成立，但报告的 D1a 机制前提被推翻、R1 方案不完整**。
+> 编号沿用该报告的项号（R*/D*/L*/N*/U*）以免出现第二套命名。
+
+| 编号 | 报告项 | 标题 | 模块 | 级 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|
+| PF-07 | **N4** | 首帧耗时解剖（t0 建源→t1 交源→t2 解码器 init→t3 surface→t4 出帧），一切切页优化的度量尺 | `infra/player` | A（可测性） | `FirstFrameTimelineTest` 10 条 + `FirstFrameAnatomyWiringGuardTest` 8 条（按调用形态钉五个点）；日志 `adb logcat -s FirstFrame` 每次开播一行 | **已关闭(V1)** |
+| PF-08 | **R5+N2** | 稳态观测：丢帧/主动跳过/解码器初始化次数 + 字节缓存命中率 + `DecoderReuseEvaluation` 落成名字 | `infra/player` | A（可测性） | `PlaybackWatchdogPolicyTest` 6 + `PlaybackWatchdogTest` 5 + `DecoderReuseReportTest` 6（含与 Media3 真值的**漂移比对**）+ `PlaybackByteCacheMetricsTest` 4 + `PlaybackObservabilityWiringGuardTest` 8（含反向断言：预热/预取写路径不得进命中率） | **已关闭(V2)** |
+| PF-09 | **R2** | 玻璃背板逐帧重录 → 按绝对时间节流约 30Hz（模糊是低频信号；按时间而非按帧，高刷机型成本不翻倍） | `feature/video` | A | `VideoGlassTickPolicyTest` 6 条（含"1 秒录 29~31 次"、时间戳倒退不许卡死）+ `VideoPlayerRenderCostGuardTest` 正/反各 1 条；实际 GPU 收益待真机 | **已关闭(V3，数值待 L4-124)** |
+| PF-10 | **U2** | 手势亮度/音量 HUD 由 `Modifier.height((100*barH).dp)`（拖动期每帧 relayout）改绘制层 | `feature/video` | A | `VideoPlayerRenderCostGuardTest` 反向断言钉死旧写法不得回来；帧时间收益待真机 | **已关闭(V4，数值待 L4-125)** |
+| PF-11 | **R1/U4** | 刷视频会话可用 SurfaceView（省电模式合成收益）；**方案范围比报告大**：`VerticalPager` 本体还挂着 pager 级 `graphicsLayer{translationY}`（`PortraitSwipePager.kt:699-701`），是所有页的祖先图层 | `feature/video` | **B**（黑屏类事故史 + 观感） | 只能真机判"恒等图层是否也挖空独立 surface"。步骤与预期见 **L4-126**；默认值不得翻转，改动必须带一键回退 + 守卫 | 待办（**需真机**） |
+| PF-12 | **L1a** | 播放器视图栈随页槽销毁重建（每次切页 inflate + surface 创建 + 弹幕会话重建） | `feature/video` `infra/player` | **B** | 前置约束：`AndroidView` 的 holder 只认**第一次** factory 返回的视图（`VideoPlayerPane.kt:511-519`、`:710-714` 是 2026-10-07 的真机黑屏事故），池化必须连组合节点一起重建；弹幕宿主"只摘自己挂的那个"（`DanmakuOverlay.kt:131-137`）。验收见 L4-127 | 待办（**需真机**） |
+| PF-13 | **D1a** | ~~切页不 `stop()` 以复用解码器~~ | `infra/player` | — | **经实读 Media3 1.11.0 源码判为不成立，撤销该优化**：`prepare()` → `prepareInternal` → `resetInternal` → **无条件 `disableRenderers()`**；`setMediaSource` 换 period 时 `seekToPeriodPosition` 同样 disable。且 `flushOrReleaseCodec()` 在多数机型是 flush 而非 release（MTK 三型才强制 release）⇒ "切页到底重不重新初始化"本身机型相关 | **已判不做(见报告 §8.2)**；改用 PF-07/PF-08 的 `t2` / `decInits` / `result=` 三信号先测 |
+| PF-14 | **D1b** | 播放列表 + `experimentalSetEnableMediaCodecVideoRendererPrewarming`（1.11.0 `DefaultRenderersFactory:309` 已确认存在） | `infra/player` | B | **前置：先读真机的 `decInits` 与 `result=`**；若切页本来就没重建解码器，这条零收益。实验 API，官方提示自定义 renderer 需覆写 `buildSecondaryVideoRenderer`，且有"预热下 seek 可能阻塞媒体项切换"的历史 bug | 待办（**需真机 + 前置 PF-07/08 读数**） |
+| PF-15 | **N1** | `DefaultPreloadManager`（下一条的媒体源/缓冲级预加载） | `infra/player` `core/playback` | B | 与自建 CDN 分段预取**必须划清边界**（建议：分段预取管当前条的深预取，PreloadManager 管下一条就绪）；需设备压力门控（Meta 教训）。收益读数依赖 PF-07 的 t0→t4 中位数 | 待办（**需真机 + 独立立项**） |
+| PF-16 | **R3/R4** | 会话容器与 pane 顶层订阅 `videoState` / 500ms 进度 ⇒ 每次状态翻转整段重组 | `feature/video` | B | **刻意不蒙改**：`PortraitSwipePager.kt:336-399` 的 veil 时序结论全部来自真机日志实证（19ms→37ms 那一类），改订阅形态会影响 effect 派发时序。验收要先有真机遮罩时序读数 | 待办（**需真机**） |
+| PF-17 | **D2 / N3 / L3 / U5** | 解码器排除记忆、首帧超时与选线降序联动、内存峰值、图层最小组合守卫 | `infra/player` `core/model` | A~B | 各自可离线判定的部分（守卫断言）与需要设备的部分（错误率、PSS 峰值）在报告 §2 已分开；未开工 | 待办 |
+
+---
+
 ## C-好看
 
 > UI 主线在 `docs/2026-09-25-iOS界面风格升级方案.md` 的阶段框架内推进；
