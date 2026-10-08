@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -255,6 +256,19 @@ class Media3PlayerEngine @Inject constructor(
      * 那已经是本仓唯一的周期性观测点，再造一个循环只是多一次唤醒。
      */
     private val playbackWatchdog = PlaybackWatchdog(android.os.SystemClock::elapsedRealtime)
+
+    /**
+     * 上一次取到的 `DecoderCounters` **实例** + 累计换代次数（`PlayWatch` 的 `swaps=`）。
+     *
+     * 为什么不能用 `DecoderCounters.decoderInitCount`：那份计数是**每个解码器实例一份**
+     * （`MediaCodecRenderer:1453` 新建解码器时 `decoderCounters.decoderInitCount++`，
+     * 而 `counterResultSet` 随每次新建换一份全新的），所以取到的实例里它**恒等于 1**，
+     * 差分永远是 0 —— 真机实测（2026-10-08 PLC110，连滑 10 支）每一支都有
+     * `t2` + `decoderInit=26~57ms`，而按 `decoderInitCount` 差分的 `decInits` 一路报 0。
+     * 实例身份变化才是"换了解码器"的真信号。
+     */
+    private var lastDecoderCounters: DecoderCounters? = null
+    private var decoderSwapCount = 0L
 
     private fun newPlayerListener(boundGen: Long): Player.Listener = object : Player.Listener {
         override fun onPositionDiscontinuity(
@@ -1085,7 +1099,8 @@ class Media3PlayerEngine @Inject constructor(
      * R5/N2：采一次稳态观测（丢帧、解码器重建、缓存 vs 网络字节），该出行时打一行 [WATCH_TAG]。
      *
      * 三个来源都是一次快照读，成本可以忽略，所以不需要额外的开关位：
-     * - `player.videoDecoderCounters` —— Media3 的视频解码器计数（渲染/丢帧/跳过/初始化次数）；
+     * - `player.videoDecoderCounters` —— Media3 的视频解码器计数（渲染/丢帧/主动跳过），
+     *   并用**实例身份变化**认出"新建了一个解码器"（`swaps`）；
      * - [PlaybackByteCacheMetrics] —— `CacheDataSource` 报回来的"从缓存读到过的字节"；
      * - `CdnTransferRuntime` —— 真的走网络拿到的字节（关掉时按 0 算，命中率会打 `-` 而不是假 0）。
      *
@@ -1094,12 +1109,19 @@ class Media3PlayerEngine @Inject constructor(
     private fun reportPlaybackWatch(player: ExoPlayer?) {
         if (player == null) return
         val counters = runCatching { player.videoDecoderCounters }.getOrNull()
+        // 实例换了 = 新建了一个解码器（`decoderInitCount` 不能用来判，见字段注释）。
+        // counters 为 null（渲染器正在 disable/未 enable）时**不清基线**，否则下一次
+        // 非空会被误判成"第一次见到"，切页这件事就完全不会被记进 swaps。
+        if (counters != null && counters !== lastDecoderCounters) {
+            lastDecoderCounters = counters
+            decoderSwapCount += 1L
+        }
         val line = playbackWatchdog.report(
             PlaybackWatchSample(
                 renderedFrames = counters?.renderedOutputBufferCount?.toLong() ?: 0L,
                 droppedFrames = counters?.droppedBufferCount?.toLong() ?: 0L,
                 skippedFrames = counters?.skippedOutputBufferCount?.toLong() ?: 0L,
-                decoderInits = counters?.decoderInitCount?.toLong() ?: 0L,
+                decoderSwaps = decoderSwapCount,
                 maxConsecutiveDropped = counters?.maxConsecutiveDroppedBufferCount?.toLong() ?: 0L,
                 cachedBytes = PlaybackByteCacheMetrics.cachedBytes(),
                 networkBytes = if (CdnTransferRuntime.enabled) {

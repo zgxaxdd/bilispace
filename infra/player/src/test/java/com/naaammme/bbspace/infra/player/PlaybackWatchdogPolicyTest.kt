@@ -74,7 +74,7 @@ class PlaybackWatchdogPolicyTest {
             dropped = 12L,
             rendered = 180L,
             skipped = 3L,
-            decoderInits = 1L,
+            decoderSwaps = 1L,
             maxConsecutiveDropped = 7L,
             cachedBytes = 1_258_291L,
             networkBytes = 307_200L,
@@ -82,7 +82,7 @@ class PlaybackWatchdogPolicyTest {
             host = "xydcy1"
         )
         assertEquals(
-            "play-watch dropped=12 rendered=180 drop=6% skipped=3 maxConsecDropped=7 decInits=1 " +
+            "play-watch dropped=12 rendered=180 drop=6% skipped=3 maxConsecDropped=7 swaps=1 " +
                 "cached=1258291 net=307200 hit=80% ignored=0 host=xydcy1",
             line
         )
@@ -94,7 +94,7 @@ class PlaybackWatchdogPolicyTest {
             dropped = 0L,
             rendered = 0L,
             skipped = 0L,
-            decoderInits = 0L,
+            decoderSwaps = 0L,
             maxConsecutiveDropped = 0L,
             cachedBytes = 0L,
             networkBytes = 500L,
@@ -112,7 +112,7 @@ class PlaybackWatchdogPolicyTest {
             dropped = 0L,
             rendered = 0L,
             skipped = 0L,
-            decoderInits = 0L,
+            decoderSwaps = 0L,
             maxConsecutiveDropped = 0L,
             cachedBytes = 0L,
             networkBytes = 0L,

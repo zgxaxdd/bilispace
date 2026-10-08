@@ -34,7 +34,7 @@ class PlaybackWatchdogTest {
         renderedFrames = rendered,
         droppedFrames = dropped,
         skippedFrames = skipped,
-        decoderInits = inits,
+        decoderSwaps = inits,
         maxConsecutiveDropped = 0L,
         cachedBytes = cached,
         networkBytes = network,
@@ -99,13 +99,13 @@ class PlaybackWatchdogTest {
         assertTrue("倒退必须夹到 0：$line", line!!.contains(" rendered=0"))
         assertTrue(line.contains(" dropped=0"))
         // 但"重新起了一个解码器"这件事本身必须看得见 —— 这正是复用/重建的判据。
-        assertTrue(line.contains(" decInits=1"))
+        assertTrue(line.contains(" swaps=1"))
         // 基线跟着前移到新读数，下一个窗口才不会被旧值一直压着。
         clock.advance(PlaybackWatchdogPolicy.REPORT_INTERVAL_MS)
         val next = watchdog.report(sample(rendered = 45L, dropped = 0L, inits = 2L, cached = 5_400L))
         assertNotNull(next)
         assertTrue(next!!.contains(" rendered=40"))
-        assertTrue(next.contains(" decInits=0"))
+        assertTrue(next.contains(" swaps=0"))
     }
 
     @Test
@@ -130,7 +130,7 @@ class PlaybackWatchdogTest {
                 renderedFrames = 0L,
                 droppedFrames = 0L,
                 skippedFrames = 0L,
-                decoderInits = 0L,
+                decoderSwaps = 0L,
                 maxConsecutiveDropped = 9L,
                 cachedBytes = 0L,
                 networkBytes = 1L,
@@ -144,7 +144,7 @@ class PlaybackWatchdogTest {
                 renderedFrames = 30L,
                 droppedFrames = 0L,
                 skippedFrames = 0L,
-                decoderInits = 0L,
+                decoderSwaps = 0L,
                 maxConsecutiveDropped = 9L,
                 cachedBytes = 0L,
                 networkBytes = 2L,

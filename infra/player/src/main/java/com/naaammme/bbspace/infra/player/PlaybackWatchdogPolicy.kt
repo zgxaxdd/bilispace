@@ -8,8 +8,10 @@ package com.naaammme.bbspace.infra.player
  * 1. **"切页/滑动的时候到底丢了几帧"** —— 在此之前全仓没有任何地方能回答。Media3 把计数放在
  *    `ExoPlayer.getVideoDecoderCounters()`（`renderedOutputBufferCount` / `droppedBufferCount` /
  *    `skippedOutputBufferCount` / `maxConsecutiveDroppedBufferCount`），没人读过；
- * 2. **"切页有没有重新起解码器"** —— 同一个 `DecoderCounters.decoderInitCount` 每初始化一次加一，
- *    这是"解码器复用"最省事的**可证伪信号**（与首帧解剖行里 `t2` 是否出现互为印证），
+ * 2. **"切页有没有重新起解码器"** —— 判据是 `PlayWatch` 的 `swaps=`（**`DecoderCounters` 实例身份变化**）
+ *    与 `DecoderReuse` 的 `result=`，**不是** `decoderInitCount` 的差分：那份计数是每个解码器实例
+ *    一份、新建时 `++`，取到的实例里它恒等于 1，差分永远是 0（真机实测踩到，见
+ *    [PlaybackWatchSample.decoderSwaps]）。它与首帧解剖行的 `t2` 互为印证，
  *    也正是 D1a/D1b/N1 这类改动唯一能离线立起来的验收尺；
  * 3. **"这一段时间的字节有多少来自缓存"** —— [PlaybackByteCacheMetrics] 有累计值，但只有配上
  *    同窗口的网络字节（`CdnTransferRuntime` 的计数）才是命中率，否则"切页省了多少流量/几秒"
@@ -36,8 +38,17 @@ internal data class PlaybackWatchSample(
     val droppedFrames: Long,
     /** 主动跳过的输出帧（seek 等，**不计入丢帧率** —— 那是设计行为不是卡顿）。 */
     val skippedFrames: Long,
-    /** 本窗口内解码器初始化次数（每次 +1 就意味着真的重新起了一个解码器）。 */
-    val decoderInits: Long,
+    /**
+     * 进程级累计的"换过解码器计数实例"的次数（差值即"本窗口新建了几个解码器"）。
+     *
+     * ⚠️ 这里**不能**直接用 `DecoderCounters.decoderInitCount`：它是**每个解码器实例一份**的计数
+     * （`MediaCodecRenderer:1453` 在 init 时 `decoderCounters.decoderInitCount++`，而
+     * `counterResultSet` 随每次新建解码器换一份新的），所以取到的那个实例里它恒等于 1 ——
+     * 差分永远是 0，看起来像"从来没重建过解码器"。**真机实测踩过**（2026-10-08，PLC110：
+     * 连滑 10 支每支都有 `t2` + `decoderInit=26~57ms`，而 `decInits` 一路 0）。
+     * 因此引擎改按"实例身份是否变化"记账，见 `Media3PlayerEngine.reportPlaybackWatch`。
+     */
+    val decoderSwaps: Long,
     /** 最长连续丢帧（比平均值更能指向"卡了一下"）。 */
     val maxConsecutiveDropped: Long,
     /** 缓存读到的累计字节。 */
@@ -93,7 +104,7 @@ internal object PlaybackWatchdogPolicy {
         dropped: Long,
         rendered: Long,
         skipped: Long,
-        decoderInits: Long,
+        decoderSwaps: Long,
         maxConsecutiveDropped: Long,
         cachedBytes: Long,
         networkBytes: Long,
@@ -105,7 +116,7 @@ internal object PlaybackWatchdogPolicy {
         append(" drop=").append(percentText(dropPercent(dropped, rendered)))
         append(" skipped=").append(skipped)
         append(" maxConsecDropped=").append(maxConsecutiveDropped)
-        append(" decInits=").append(decoderInits)
+        append(" swaps=").append(decoderSwaps)
         append(" cached=").append(cachedBytes)
         append(" net=").append(networkBytes)
         append(" hit=").append(percentText(cacheHitPercent(cachedBytes, networkBytes)))
@@ -149,7 +160,7 @@ internal class PlaybackWatchdog(private val nowMs: () -> Long) {
             dropped = window.droppedFrames,
             rendered = window.renderedFrames,
             skipped = window.skippedFrames,
-            decoderInits = window.decoderInits,
+            decoderSwaps = window.decoderSwaps,
             maxConsecutiveDropped = sample.maxConsecutiveDropped,
             cachedBytes = window.cachedBytes,
             networkBytes = window.networkBytes,
@@ -167,7 +178,7 @@ internal class PlaybackWatchdog(private val nowMs: () -> Long) {
             renderedFrames = delta(previous.renderedFrames, current.renderedFrames),
             droppedFrames = delta(previous.droppedFrames, current.droppedFrames),
             skippedFrames = delta(previous.skippedFrames, current.skippedFrames),
-            decoderInits = delta(previous.decoderInits, current.decoderInits),
+            decoderSwaps = delta(previous.decoderSwaps, current.decoderSwaps),
             cachedBytes = delta(previous.cachedBytes, current.cachedBytes),
             networkBytes = delta(previous.networkBytes, current.networkBytes),
             cacheIgnored = delta(previous.cacheIgnored, current.cacheIgnored)
@@ -176,6 +187,10 @@ internal class PlaybackWatchdog(private val nowMs: () -> Long) {
     /**
      * 取差并**夹到 0**：解码器重新初始化时 Media3 会把 `DecoderCounters` 清零，
      * 读数倒退不是"负增量"，而是"窗口从这里重新开始"。
+     *
+     * 正因为实例换代会让 `rendered/dropped` 从 0 重计，**换实例的那一窗口里
+     * `rendered` 会偏小**（上一支视频尾巴上的帧不计入）—— 同一行里的 `swaps` 就是
+     * 用来认出这种情况的，读表时先看 `swaps` 再看 `rendered`。
      */
     private fun delta(baseValue: Long, current: Long): Long =
         (current - baseValue).coerceAtLeast(0L)
@@ -184,7 +199,7 @@ internal class PlaybackWatchdog(private val nowMs: () -> Long) {
         val renderedFrames: Long,
         val droppedFrames: Long,
         val skippedFrames: Long,
-        val decoderInits: Long,
+        val decoderSwaps: Long,
         val cachedBytes: Long,
         val networkBytes: Long,
         val cacheIgnored: Long
@@ -192,6 +207,6 @@ internal class PlaybackWatchdog(private val nowMs: () -> Long) {
         /** 这一窗口里有没有任何一件事在动（全 0 就是"静止播放"，不打行）。 */
         fun hasActivity(): Boolean =
             renderedFrames > 0L || droppedFrames > 0L || skippedFrames > 0L ||
-                decoderInits > 0L || cachedBytes > 0L || networkBytes > 0L || cacheIgnored > 0L
+                decoderSwaps > 0L || cachedBytes > 0L || networkBytes > 0L || cacheIgnored > 0L
     }
 }

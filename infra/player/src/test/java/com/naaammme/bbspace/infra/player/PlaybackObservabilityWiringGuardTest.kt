@@ -97,19 +97,28 @@ class PlaybackObservabilityWiringGuardTest {
     // ---- R5：丢帧与解码器重建 ----
 
     @Test
-    fun frameAndDecoderCountersAreSampledFromMedia3NotGuessed() {
+    fun frameCountersComeFromMedia3AndDecoderSwapUsesInstanceIdentityNotInitCount() {
         val body = blockBody(engine, "private fun reportPlaybackWatch(")
         assertTrue("必须读 Media3 的视频解码器计数", has(body, "player.videoDecoderCounters"))
         listOf(
             "renderedOutputBufferCount",
             "droppedBufferCount",
-            "skippedOutputBufferCount",
-            "decoderInitCount"
+            "skippedOutputBufferCount"
         ).forEach { field ->
             assertTrue("缺 `$field` 就等于这一路的观测白埋", has(body, field))
         }
         // 取不到 counters 只能降级成"这一行少一个字段"，不许打断进度轮询。
         assertTrue(has(body, "runCatching { player.videoDecoderCounters }"))
+        // 真机踩过的坑（2026-10-08 PLC110）：`DecoderCounters` 是**每个解码器实例一份**，
+        // 对它做差分永远得 0 ⇒ "换了解码器"必须按**实例身份**判。这条断言不许退回读
+        // `decoderInitCount`（那会把一个恒等于 1 的数当累计值，日志永远报 swaps=0）。
+        assertTrue("换解码器必须按 counters 实例身份识别", has(body, "counters !== lastDecoderCounters"))
+        assertTrue(has(body, "lastDecoderCounters = counters"))
+        assertTrue(has(body, "decoderSwapCount += 1L"))
+        assertTrue(
+            "不得再用 decoderInitCount 的差分清账",
+            body.none { it.contains("decoderInitCount") }
+        )
     }
 
     @Test
