@@ -639,7 +639,9 @@ internal fun VideoPlayerPane(
         val zoomOffsetX = if (useSurfaceView) zoomState.offsetX else 0f
         val zoomOffsetY = if (useSurfaceView) zoomState.offsetY else 0f
         // 播放页专用背板：视频节点录进它，控制条玻璃采样它做真模糊。
-        // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 逐帧 tick 强制重录。
+        // 视频逐帧更新而录制节点不自动重绘——播放中用 withFrameNanos 驱动 tick 强制重录，
+        // 但**按时间节流到约 30Hz**（R2，见 [VideoGlassTickPolicy]）：模糊是低频信号，
+        // 满帧率的 GPU 重录在肉眼上换不来任何东西。
         val videoBackdrop = rememberLayerBackdrop()
         var videoGlassTick by remember { mutableIntStateOf(0) }
         // 设置项「播放页控件模糊 / 质感」：叶子控件经 CompositionLocal 读取，
@@ -672,9 +674,18 @@ internal fun VideoPlayerPane(
             !glassGuard.forceLowBlurBudget
         LaunchedEffect(videoGlassActive) {
             if (!videoGlassActive) return@LaunchedEffect
+            // R2：帧时钟照旧逐帧回调，但只有跨过最小间隔才递增 tick ——
+            // 不递增就没有失效，也就没有那一次 backdrop 的 GPU 重录。
+            // 按**绝对时间**而不是"每 N 帧"节流：面板刷新率会变（60/90/120Hz），
+            // 按帧数节流会在高刷机型上把成本又翻倍回去。
+            var lastTickNanos = -1L
             while (true) {
-                withFrameNanos { }
-                videoGlassTick++
+                withFrameNanos { frameTimeNanos ->
+                    if (VideoGlassTickPolicy.shouldRecord(frameTimeNanos, lastTickNanos)) {
+                        lastTickNanos = frameTimeNanos
+                        videoGlassTick++
+                    }
+                }
             }
         }
         // 侧栏显隐上报（会话互动栏让位用，见参数注释）。

@@ -3,6 +3,7 @@ package com.naaammme.bbspace.feature.video.player
 import android.app.Activity
 import android.media.AudioManager
 import android.os.SystemClock
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -37,7 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -339,7 +342,6 @@ fun VideoGestureFeedback(
         if (state.dragType == DragType.Brightness || state.dragType == DragType.Volume) {
             val isBrightness = state.dragType == DragType.Brightness
             val label = if (isBrightness) "亮度" else "音量"
-            val barH = state.dragFraction.coerceIn(0f, 1f)
 
             Box(
                 modifier = Modifier
@@ -362,16 +364,26 @@ fun VideoGestureFeedback(
                             .width(6.dp)
                             .height(100.dp)
                             .clip(MaterialTheme.shapes.extraSmall)
-                            .background(Color.White.copy(alpha = 0.24f)),
-                        contentAlignment = Alignment.BottomCenter
+                            .background(Color.White.copy(alpha = 0.24f))
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .width(6.dp)
-                                .height((100 * barH).dp)
-                                .clip(MaterialTheme.shapes.extraSmall)
-                                .background(Color.White)
-                        )
+                        // U2：填充条在**绘制期**读 dragFraction。
+                        // 原来是 `Modifier.height((100 * barH).dp)` —— 拖动期间每帧一次布局，
+                        // 本节点与整条父链都要 relayout（HUD 恰恰只在拖动时出现，等于给手势
+                        // 最忙的那段时间再加一次布局成本）。Canvas 的尺寸固定，
+                        // 变化只发生在 draw 阶段：既不 relayout，也不重组。
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val fraction = state.dragFraction.coerceIn(0f, 1f)
+                            if (fraction <= 0f) return@Canvas
+                            val fillHeight = size.height * fraction
+                            drawRoundRect(
+                                color = Color.White,
+                                topLeft = Offset(0f, size.height - fillHeight),
+                                size = Size(size.width, fillHeight),
+                                // 半径取半宽：这条只有 6dp 宽，extraSmall（约 3dp）在这里
+                                // 就已经是胶囊端，绘制期按半宽取整与原视觉同形。
+                                cornerRadius = CornerRadius(size.width / 2f, size.width / 2f)
+                            )
+                        }
                     }
                 }
             }

@@ -116,14 +116,15 @@ class GlassMountRegistryTest {
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt",
             "drawBackdrop", 412,
             surface = "playerControlGlass 工厂（播放控件采样）",
-            gating = "!enabled || backdrop==null || material==OFF 早退；videoGlassTick 逐帧；" +
+            gating = "!enabled || backdrop==null || material==OFF 早退；videoGlassTick 驱动采样" +
+                "（R2 起按绝对时间节流到约 30Hz，见 VideoGlassTickPolicy）；" +
                 "AP-25 已接 LocalGlassGuard + resolveGlassBudget（降级档早退为纯底色）"
         ),
         GlassMount(
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt",
-            "layerBackdrop", 780,
+            "layerBackdrop", 791,
             surface = "播放页视频层背板（录制源）",
-            gating = "videoGlassTick 驱动重录（AP-25：守卫降级时 tick 循环同停）；" +
+            gating = "videoGlassTick 驱动重录（AP-25：守卫降级时 tick 循环同停；R2 起约 30Hz 而不是逐帧）；" +
                 "省电模式（SurfaceView）下整条录制链不挂载 —— 画面是独立图层，采不到也无消费者" +
                 "（模糊已按 effectiveControlsBlur 强制关）"
         ),
