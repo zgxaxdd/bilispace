@@ -206,14 +206,22 @@ class FeedSourceDispatchGuardTest {
      * 「MERGED 有没有真的把两路合起来」只能靠计数日志回答；而 `Logger.d` 是
      * debug 门控的（`Logger.isDebug`），稳定版根本打不出来 —— 上一会话之所以
      * 只能"在 debug 包上看"，就是因为这条日志被门控了，于是这条命题在真机上
-     * **永远缺证据**。断言锚在「直写 Log.i」这个**调用形态**上（W18/W20/W21）。
+     * **永远缺证据**。断言锚在「走 release 可见通道」这个**调用形态**上（W18/W20/W21）。
+     *
+     * 2026-10-04（Q-3）：通道由裸 `android.util.Log.i` 改为
+     * `DiagnosticLog.i` —— 29 处同类直写统一收口到「设置 → 性能 → 现场诊断日志」这个
+     * 开关（debug 包恒开）；`DiagnosticLog.enabled=false` 时一个字节都不输出。
+     * 断言随之改为**只认 `DiagnosticLog.i`**：退回裸 `android.util.Log` 或退回
+     * `Logger.d` 都会红。
      */
     @Test
     fun mergedCountLogIsVisibleInRelease() {
         val merged = blockBody(codeOf("feed${FS}FeedRepository.kt"), "private suspend fun fetchMergedFeed(")
         assertTrue(
-            "MERGED 的计数日志必须直写 android.util.Log.i（release 可见），不得退回 Logger.d。",
-            merged.any { it.contains("android.util.Log.i(") } &&
+            "MERGED 的计数日志必须走 DiagnosticLog（release 可见、且受统一开关控制），" +
+                "不得退回 `android.util.Log` 直写或 `Logger.d`。",
+            merged.any { it.contains("DiagnosticLog.i(") } &&
+                merged.none { it.contains("android.util.Log.i(") } &&
                 merged.none { it.contains("Logger.d(TAG)") }
         )
         assertTrue(

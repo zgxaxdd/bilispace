@@ -230,6 +230,25 @@ class SettingsViewModel @Inject constructor(
         false
     )
 
+    /** Q-3：现场诊断日志开关（量产默认关；debug 包不看它、始终可见）。 */
+    val diagnosticLogEnabled = appSettings.diagnosticLogEnabled.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        false
+    )
+
+    /**
+     * 「省电模式」：视频画面用 SurfaceView（**默认开**，重进播放页生效）。
+     *
+     * 初值必须与 `AppSettings.playerSurfaceView` 的默认值（`?: true`）一致：
+     * 给 `false` 会让设置页首帧显示"关"、数据到达后再跳成"开"（开关自己滑一下）。
+     */
+    val playerSurfaceView = appSettings.playerSurfaceView.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        true
+    )
+
     val topProgressiveFade = appSettings.topProgressiveFade.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
@@ -462,6 +481,20 @@ class SettingsViewModel @Inject constructor(
     fun updateUseSystemDns(enabled: Boolean) {
         viewModelScope.launch {
             appSettings.updateUseSystemDns(enabled)
+        }
+    }
+
+    /** Q-3：现场诊断日志开关（写入后由 AppInitializer 的收集器同步到 DiagnosticLog）。 */
+    fun updateDiagnosticLogEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updateDiagnosticLogEnabled(enabled)
+        }
+    }
+
+    /** 「省电模式」开关：见 [AppSettings.playerSurfaceView]。 */
+    fun updatePlayerSurfaceView(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updatePlayerSurfaceView(enabled)
         }
     }
 

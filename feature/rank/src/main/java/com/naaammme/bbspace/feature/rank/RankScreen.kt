@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.rank
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -248,7 +250,13 @@ private fun RankSelectors(
                     } else {
                         MaterialTheme.colorScheme.surfaceContainerHigh
                     },
-                    modifier = Modifier.clickable { onSelectType(type) }
+                    // F-5：这是单选项那组 chip，语义上不是 Button 而是 RadioButton ——
+                    // 补 role + selected 后 TalkBack 才会播报"已选中/未选中"。
+                    modifier = Modifier.selectable(
+                        selected = selectedNow,
+                        role = Role.RadioButton,
+                        onClick = { onSelectType(type) }
+                    )
                 ) {
                     Text(
                         text = type.label,

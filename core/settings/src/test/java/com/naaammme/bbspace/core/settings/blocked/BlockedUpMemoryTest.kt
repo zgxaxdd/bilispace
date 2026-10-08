@@ -73,6 +73,32 @@ class BlockedUpMemoryTest {
         assertTrue("最新加入的 999 应在名单里", memory.contains(999L))
     }
 
+    /**
+     * F-6：淘汰必须**可被调用方感知**（修复前 `add` 只返回新内存，淘汰完全静默）。
+     *
+     * 第 201 条 add 后 `evicted == true` 且最旧条消失；未满时 `evicted == false`；
+     * 幂等重复 add 不产生淘汰。
+     */
+    @Test
+    fun addWithEvictionReportsEvictionExactlyOnce() {
+        var memory = BlockedUpMemory()
+        var evicted = false
+        repeat(200) { i ->
+            val (next, wasEvicted) = memory.addWithEviction(i.toLong() + 1L, name = null, nowMs = i.toLong())
+            memory = next
+            assertFalse("未满额时不该报淘汰（i=$i）", wasEvicted)
+        }
+        val (atCap, notEvicted) = memory.addWithEviction(999L, name = null, nowMs = 9_999L)
+        memory = atCap
+        assertTrue("第 201 条必须报淘汰", notEvicted)
+        assertFalse("被淘汰的是最旧的 1 号", memory.contains(1L))
+        assertTrue(memory.contains(999L))
+        // 幂等：同 mid 重复 add 不该再报淘汰
+        val (again, evictedAgain) = memory.addWithEviction(999L, name = null, nowMs = 10_000L)
+        assertFalse("重复 add 同一 mid 是幂等的，不报淘汰", evictedAgain)
+        assertEquals(200, again.entries.size)
+    }
+
     /** NX-08：blank 名字退化为 null（列表页显示"未知 UP"而不是空字符串）。 */
     @Test
     fun blankNameDegradesToNull() {

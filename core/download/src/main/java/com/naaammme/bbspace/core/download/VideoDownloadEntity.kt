@@ -12,6 +12,19 @@ import com.naaammme.bbspace.core.model.VideoDownloadTask
 import com.naaammme.bbspace.core.model.VideoDownloadTaskStatus
 import com.naaammme.bbspace.core.model.fallbackTitle
 
+/**
+ * 下载队列表。
+ *
+ * ## Q-6（2026-10-04 审查报告）：`status` / `created_at_ms` 为什么**不建索引**
+ *
+ * `VideoDownloadDao.findFirstByStatus`（`WHERE status = ? ORDER BY created_at_ms ASC, id ASC LIMIT 1`）
+ * 与 `observeAll`（`ORDER BY created_at_ms DESC, id DESC`）都会全表扫描 + 排序。
+ * 但本表存的是**用户自己的下载队列**：量级是几条到几十条（下载管理页一屏就装完），
+ * 全表扫描的代价可忽略；而加索引会引入写放大，并且 **Room schema 变更要连带 bump 版本 +
+ * 写迁移 + 更新 schema 快照**（`RoomSchemaGuardTest` / `RoomMigrationCopyListTest` 会红）。
+ * 所以这里刻意只留唯一业务键索引，并把理由写在实体上 —— 真要支持"几千条任务"时再补
+ * `Index(value = ["status", "created_at_ms"])` 与迁移，别默默加上。
+ */
 @Entity(
     tableName = "video_download_task",
     indices = [

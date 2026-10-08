@@ -6,7 +6,6 @@ import bilibili.api.ticket.v1.TicketOuterClass
 import bilibili.metadata.MetadataOuterClass
 import bilibili.metadata.device.DeviceOuterClass
 import bilibili.metadata.fawkes.Fawkes
-import bilibili.metadata.locale.LocaleOuterClass
 import bilibili.metadata.network.NetworkOuterClass
 import com.google.protobuf.ByteString
 import com.naaammme.bbspace.core.common.BiliConstants
@@ -293,22 +292,8 @@ class TicketGenerator(
         }.build().toByteArray()
     }
 
-    private fun buildLocaleProtobuf(): ByteArray {
-        val cLocale = LocaleOuterClass.LocaleIds.newBuilder()
-            .setLanguage("zh")
-            .setRegion("CN")
-            .build()
-        val sLocale = LocaleOuterClass.LocaleIds.newBuilder()
-            .setLanguage("zh")
-            .setRegion("CN")
-            .build()
-
-        return LocaleOuterClass.Locale.newBuilder().apply {
-            this.cLocale = cLocale
-            this.sLocale = sLocale
-            timezone = ""
-        }.build().toByteArray()
-    }
+    // Q-4：这里原有本文件私有的 `buildLocaleProtobuf()`（与 BuvidFetcher 里那份逐字重复），
+    // 已收口到 BiliAuthPrimitives.buildLocaleProtobuf。
 
     private fun buildFawkesProtobuf(): ByteArray {
         val sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 8)

@@ -1,7 +1,6 @@
 package com.naaammme.bbspace.infra.crypto
 
 import android.util.Base64
-import bilibili.metadata.locale.LocaleOuterClass
 import com.naaammme.bbspace.core.common.BiliConstants
 import com.naaammme.bbspace.core.common.UserAgentBuilder
 import com.naaammme.bbspace.core.common.log.Logger
@@ -103,21 +102,7 @@ class BuvidFetcher(
         }
     }
 
-    private fun buildLocaleProtobuf(): ByteArray {
-        val cLocale = LocaleOuterClass.LocaleIds.newBuilder()
-            .setLanguage("zh")
-            .setRegion("CN")
-            .build()
-        val sLocale = LocaleOuterClass.LocaleIds.newBuilder()
-            .setLanguage("zh")
-            .setRegion("CN")
-            .build()
-
-        return LocaleOuterClass.Locale.newBuilder().apply {
-            this.cLocale = cLocale
-            this.sLocale = sLocale
-            timezone = ""
-        }.build().toByteArray()
-    }
-
+    // Q-4：这里原有本文件私有的 `buildLocaleProtobuf()`，与 TicketGenerator 里那份
+    // 逐字重复 —— 已收口到 BiliAuthPrimitives.buildLocaleProtobuf（同包顶层函数，
+    // 调用点 `buildLocaleProtobuf()` 不变）。
 }

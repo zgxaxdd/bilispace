@@ -543,7 +543,8 @@ private fun headerCount(count: Long): String {
 private const val INIT_SKELETON_COUNT = 4
 private const val LOAD_MORE_SKELETON_COUNT = 2
 private val COMMENT_FAB_SPACE = 88.dp
-private const val COMMENT_TAG = "CommentPanel"
+// K-7（2026-10-04 审查报告）：这里的 `COMMENT_TAG = "CommentPanel"` 全仓零引用
+// （本文件用 `Logger.<级别>(TAG)` 的上层封装，tag 由别处给），已删除。
 
 private fun CommentUser.toSpaceRoute(subject: CommentSubject?): SpaceRoute? {
     if (mid <= 0L && name.isBlank()) return null

@@ -1,13 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+  Android 12 以前的 Auto Backup 规则（S-1，2026-10-04）。
+
+  ## 为什么之前是错的
+  这份文件原样保留了 Android Studio 模板：`<full-backup-content>` 里只有被注释掉的示例，
+  **不含任何 `<exclude>`** —— 按 Android 语义等价于"全量备份"。而应用私有目录里躺着
+  `shared_prefs/auth.xml`：真机 `run-as com.naaammme.bbspace.debug cat shared_prefs/auth.xml`
+  实读 3966 字节，含 `access_token`、`refresh_token`、`cookies_json`（SESSDATA / bili_jct）
+  **全部明文**。也就是说登录态会被上传到用户云备份，并可在**另一台设备**上恢复出来。
+
+  ## 现在的口径
+  凭证与设备标识类 SharedPreferences 一律排除（`data_extraction_rules.xml` 必须同步改，
+  否则 Android 12+ 走的是那一份）。BiliPai 也是这么做的（`backup_rules.xml` 里显式排除
+  token 文件并留了同一句注释）；piliplus 更彻底（`allowBackup=false`）。
+
+  注：这里的 `path` 是 SharedPreferences 的**文件名（含 .xml）**。
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- 会话凭证绝不进 Auto Backup / 换机迁移 -->
+    <exclude domain="sharedpref" path="auth.xml" />
+    <!-- 设备指纹（buvid / hdid 等）：换机会导致同一凭证配到两台设备上 -->
+    <exclude domain="sharedpref" path="device_identity.xml" />
+    <exclude domain="sharedpref" path="device_info_cache.xml" />
+    <!-- 票据 / 访客 ID：与设备绑定，恢复过来也无意义 -->
+    <exclude domain="sharedpref" path="ticket_prefs.xml" />
+    <exclude domain="sharedpref" path="guest_info.xml" />
+    <!-- 应用标志位（含通知权限已问过等一次性状态） -->
+    <exclude domain="sharedpref" path="app_flags.xml" />
 </full-backup-content>

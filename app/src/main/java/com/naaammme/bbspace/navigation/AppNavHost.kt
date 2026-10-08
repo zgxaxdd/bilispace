@@ -99,6 +99,7 @@ import com.naaammme.bbspace.core.model.VideoTarget
 
 import com.naaammme.bbspace.core.model.VideoTargetTool
 import com.naaammme.bbspace.core.model.WebLinkTarget
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.feature.dynamic.DynamicScreen
 import com.naaammme.bbspace.feature.dynamic.navigation.dynamicDetailScreen
 import com.naaammme.bbspace.feature.dynamic.navigation.navigateToDynamicDetail
@@ -166,7 +167,7 @@ private val linkedDockScrollThreshold = 24.dp
 @Composable
 fun AppNavHost(
     themeConfig: ThemeConfig = ThemeConfig(),
-    appLink: WebLinkTarget? = null,
+    appLink: AppLinkRequest? = null,
     onAppLinkConsumed: () -> Unit = {}
 ) {
     val rootNavController = rememberNavController()
@@ -373,8 +374,10 @@ fun AppNavHost(
         )
     }
     // 诊断：这一版 NavHost 实际装配的过渡（真机反馈"退出动画调不动"时，先看这里）
+    // Q-3：原先是裸 `android.util.Log.i`（release 常开），已统一收口到 DiagnosticLog
+    // （由「设置 → 性能 → 现场诊断日志」控制；debug 包始终可见）。
     LaunchedEffect(themeConfig.transitionStyle, themeConfig.animationSpeed) {
-        android.util.Log.i(
+        DiagnosticLog.i(
             "NavTransitions",
             "installed style=${themeConfig.transitionStyle} speed=${themeConfig.animationSpeed}"
         )
@@ -415,7 +418,8 @@ fun AppNavHost(
     }
 
     LaunchedEffect(appLink) {
-        when (val target = appLink ?: return@LaunchedEffect) {
+        val request = appLink ?: return@LaunchedEffect
+        when (val target = request.target) {
             is WebLinkTarget.ToVideo -> openVideo(target.target)
             is WebLinkTarget.ToSpace -> rootNavController.navigateToSpace(
                 SpaceRoute(mid = target.mid)
@@ -423,7 +427,11 @@ fun AppNavHost(
             is WebLinkTarget.ToLive -> openLive(
                 LiveRoute(roomId = target.roomId)
             )
-            is WebLinkTarget.External,
+            // F-2：专栏 / 图文动态链接进原生内容页（复用 openArticle：播放继续 → 胶囊承接）
+            is WebLinkTarget.ToDynamic -> openArticle(target.opusId.toString(), target.opusType)
+            // L-1：本应用声明接管、但站内路由表达不出来的链接 —— 交回系统（排除自己），
+            // 不能再像修复前那样和 `Stay` 一起被丢掉（用户看到的是"应用装死"）。
+            is WebLinkTarget.External -> context.openExternalLink(request.url)
             is WebLinkTarget.Stay -> Unit
         }
         onAppLinkConsumed()
@@ -1091,7 +1099,8 @@ private fun TopLevelFloatingNavigation(
         // 一块空 View——表现为"缩回途中是黑的，然后内容闪一下、跳一下"。
         // 打开方向没这个问题，因为那时锚点被 SeamlessCardOpener 用封面位图装饰过。
         // 详情页是全屏不透明 Activity，小横条在其背后本来看不见，保持渲染零副作用。
-        nowPlayingVisible = true
+        nowPlayingVisible = true,
+                    nowPlayingDissolving = capsuleState.dissolving
     )
 }
 

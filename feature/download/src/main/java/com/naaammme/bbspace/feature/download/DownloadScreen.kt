@@ -44,6 +44,8 @@ import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
+import com.naaammme.bbspace.core.designsystem.motion.jiggleOnDissolve
 import com.naaammme.bbspace.core.model.VideoDownloadKind
 import com.naaammme.bbspace.core.model.VideoDownloadOption
 import com.naaammme.bbspace.core.model.VideoDownloadOptions
@@ -232,6 +234,9 @@ private fun QueueTab(
         compareBy<VideoDownloadTask>({ taskOrder(it) }, { it.id })
     )
     var pendingDelete by remember { mutableStateOf<VideoDownloadTask?>(null) }
+    // 正在播消散的任务（确认删除后才置）。真删发生在 onDissolveComplete 里 ——
+    // 与 BiliPai 同序：先起粒子，播完再删数据。
+    var dissolvingTaskId by remember { mutableStateOf<Long?>(null) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -252,17 +257,30 @@ private fun QueueTab(
                 items = tasks,
                 key = { it.id }
             ) { task ->
-                // A10：删除缓存任务时淡出+位移回弹收拢
+                // 删除时先播粒子消散（移植 BiliPai 的 GL Thanos 实现），播完再真删；
+                // 删除后列表回流仍交给 animateItem。
                 Box(modifier = Modifier.animateItem()) {
-                    TaskCard(
-                        task = task,
-                        onPauseTask = onPauseTask,
-                        onResumeTask = onResumeTask,
-                        onDeleteTask = { pendingDelete = task },
-                        onExportTask = onExportTask,
-                        export = state.export,
-                        onOpenPlayer = onOpenPlayer
-                    )
+                    MaybeDissolvableVideoCard(
+                        isDissolving = task.id == dissolvingTaskId,
+                        onDissolveComplete = { onDeleteTask(task.id) },
+                        cardId = "download-${task.id}",
+                        // 邻卡抖动：对齐 BiliPai 的调用点写法（`WatchLaterScreen.kt:1272`）。
+                        // 只有"别的卡正在消散"时才挂动画对象，空闲零成本。
+                        modifier = Modifier.jiggleOnDissolve(
+                            cardId = "download-${task.id}",
+                            isCurrentCardDissolving = task.id == dissolvingTaskId
+                        )
+                    ) {
+                        TaskCard(
+                            task = task,
+                            onPauseTask = onPauseTask,
+                            onResumeTask = onResumeTask,
+                            onDeleteTask = { pendingDelete = task },
+                            onExportTask = onExportTask,
+                            export = state.export,
+                            onOpenPlayer = onOpenPlayer
+                        )
+                    }
                 }
             }
         }
@@ -277,7 +295,8 @@ private fun QueueTab(
                 TextButton(
                     onClick = {
                         pendingDelete = null
-                        onDeleteTask(task.id)
+                        // 先起消散；onDeleteTask 在消散完成后才被调用
+                        dissolvingTaskId = task.id
                     }
                 ) {
                     Text("删除")

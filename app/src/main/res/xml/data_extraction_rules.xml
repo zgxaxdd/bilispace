@@ -1,19 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+  Android 12+ 的备份/迁移规则（S-1，2026-10-04）。
+
+  ## 为什么之前是错的
+  原文件是模板原样：cloud-backup 段里只有一行 "TODO: Use include and exclude ..." 的注释，
+  device-transfer 段整段被注释掉 —— 等价于云备份与**换机迁移**都全量带走
+  `shared_prefs/auth.xml`（真机实读：`access_token` / `refresh_token` / `cookies_json` 全明文）。
+  换机迁移的风险比云备份更直接：新设备开箱即是别人的登录态。
+
+  ## 现在的口径
+  与 `backup_rules.xml` 一致（那两个文件必须同步改，易漏的是 `<device-transfer>` 这一侧）。
+
+  注：`<device-transfer>` 在 Android 12+ **不能**用 `disableIfNoEncryptionCapabilities` 之外的
+  花招绕过；要"不迁移"就只能像这里一样逐项 exclude。
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- 会话凭证绝不进云备份 -->
+        <exclude domain="sharedpref" path="auth.xml" />
+        <!-- 设备指纹（buvid / hdid 等） -->
+        <exclude domain="sharedpref" path="device_identity.xml" />
+        <exclude domain="sharedpref" path="device_info_cache.xml" />
+        <!-- 票据 / 访客 ID -->
+        <exclude domain="sharedpref" path="ticket_prefs.xml" />
+        <exclude domain="sharedpref" path="guest_info.xml" />
+        <!-- 应用标志位 -->
+        <exclude domain="sharedpref" path="app_flags.xml" />
     </cloud-backup>
-    <!--
+
+    <!-- 换机迁移：同样不许带走凭证（修复前整段是注释掉的） -->
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="auth.xml" />
+        <exclude domain="sharedpref" path="device_identity.xml" />
+        <exclude domain="sharedpref" path="device_info_cache.xml" />
+        <exclude domain="sharedpref" path="ticket_prefs.xml" />
+        <exclude domain="sharedpref" path="guest_info.xml" />
+        <exclude domain="sharedpref" path="app_flags.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

@@ -20,6 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
+import com.naaammme.bbspace.core.designsystem.motion.DissolveAnimationPreset
+import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
 import com.naaammme.bbspace.core.designsystem.icon.AppIcons
 import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
@@ -43,6 +48,7 @@ import com.naaammme.bbspace.core.model.PlaybackState
 import com.naaammme.bbspace.core.model.StreamPlaybackSessionState
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import android.view.View
+import android.view.ViewGroup
 
 private val NowPlayingRadius = 28.dp
 
@@ -156,14 +162,51 @@ internal fun LinkedNowPlayingRow(
         if (!seamless) onOpen()
     }
 
+    // 小横条「× 关闭」的粒子消散（**直接移植 BiliPai 的 GL Thanos 实现**：
+    // `DissolvableSurface.kt` + `motion/gl/*` + `res/raw/thanos_*.glsl`）。
+    // 语义照源实现：`isDissolving=true` 起粒子，`onDissolveComplete` 里才真正停播并释放会话 ——
+    // 所以 dismissAndStop() 挪到了回调里，而不是点下去立刻执行。
+    var dissolving by remember { mutableStateOf(false) }
+    val dissolveCardId = "capsule-${sessionState.title.hashCode()}"
+
+    // 消散被取消（用户又打开了详情页等）时把锚点还原，避免壳一直不可见
+    LaunchedEffect(dissolving) {
+        if (!dissolving) { anchorState.anchor?.alpha = 1f; capsuleState.endDissolve() }
+    }
+
     // 外层 Box 只负责给锚点一个「与横条同边界」的宿主：`matchParentSize()` 是
     // BoxScope 限定修饰符，直接放进 Row 会把锚点当成一个真实的布局子项（撑开宽度、
     // 挤掉封面与标题）。锚点零绘制且不拦截事件，层级压在内容之下。
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(NowPlayingRadius))
+    //
+    // 消散宿主包在**最外层**：横条自身有 `clip(RoundedCornerShape(...))`，
+    // 而粒子要飞出横条边界（GL 宿主挂在 window 的 decorView 上，不受此裁剪影响）。
+    MaybeDissolvableVideoCard(
+        isDissolving = dissolving,
+        onDissolveComplete = { capsuleState.dismissAndStop() },
+        cardId = dissolveCardId,
+        modifier = modifier,
+        // 预设对齐 BiliPai 的调用点写法（`WatchLaterScreen.kt:1271` 用的是 TELEGRAM_FAST）
+        preset = DissolveAnimationPreset.TELEGRAM_FAST,
+        // 粒子首帧出现后，按**框架自己的方式**释放锚点：
+        // 正常路径（无粒子）之所以干净，是因为胶囊离开组合 → `SeamlessAnchor.onRelease`
+        // → 系统无缝覆盖层被拆除。而 `graphicsLayer { alpha = 0 }` 管不到
+        // AndroidView 与系统覆盖层，所以这里手动走同一条释放路径
+        // （把锚点从父容器移除并置空 state），但**保留组件在组合里** ——
+        // 组件一旦被卸载，粒子渲染会话会跟着销毁（粒子会被截断）。
+        onContentHidden = {
+            // 与 Dock 的玻璃壳同步：粒子接管的那一刻，模糊壳也撤
+            capsuleState.beginDissolve()
+            anchorState.anchor?.let { anchor ->
+                (anchor.parent as? ViewGroup)?.removeView(anchor)
+            }
+            anchorState.anchor = null
+        }
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(NowPlayingRadius))
+        ) {
         if (canSeamless) {
             SeamlessAnchor(anchorState, Modifier.matchParentSize())
         }
@@ -221,7 +264,12 @@ internal fun LinkedNowPlayingRow(
                 )
             }
             IconButton(
-                onClick = { capsuleState.dismissAndStop() },
+                onClick = {
+                    // 起粒子消散；真正的停播与释放会话在 onDissolveComplete 里
+                    //（BiliPai 同序：粒子首帧出现后隐藏本体，消散完成再暂停并关闭）。
+                    // 动效关闭 / 非 GLES3 / 抓图失败时它会立刻回调，不会卡住关闭。
+                    dissolving = true
+                },
                 enabled = !compact,
                 modifier = Modifier
                     .size(32.dp)
@@ -233,6 +281,7 @@ internal fun LinkedNowPlayingRow(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )
+            }
             }
         }
     }

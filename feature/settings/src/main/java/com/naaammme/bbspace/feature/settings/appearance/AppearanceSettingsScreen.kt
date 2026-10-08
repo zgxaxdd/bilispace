@@ -16,6 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.naaammme.bbspace.feature.settings.SettingsViewModel
@@ -355,9 +358,12 @@ private fun ColorPaletteSelector(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                PresetColors.forEach { (color, _) ->
+                // P1-6：颜色名**本来就在** `PresetColors` 里（"哔哩粉"/"蓝色"…），
+                // 这里此前用 `_` 把它丢掉了，于是色板块是个没有名字的按钮。
+                PresetColors.forEach { (color, name) ->
                     ColorItem(
                         color = color,
+                        name = name,
                         selected = color == selected,
                         onClick = { onSelect(color) }
                     )
@@ -370,6 +376,7 @@ private fun ColorPaletteSelector(
 @Composable
 private fun ColorItem(
     color: Color,
+    name: String,
     selected: Boolean,
     onClick: () -> Unit
 ) {
@@ -382,7 +389,13 @@ private fun ColorItem(
                 if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 else Modifier
             )
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            // P1-6（无障碍）：这块只有纯色 + 选中对勾，**没有任何文字**，
+            // 不给名字的话读屏用户听到的是一个无名按钮，分不清"哔哩粉"和"蓝色"。
+            .semantics {
+                contentDescription = name
+                this.selected = selected
+            },
         contentAlignment = Alignment.Center
     ) {
         if (selected) {

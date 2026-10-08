@@ -53,8 +53,18 @@ internal class BlockedUpMemory(
 ) {
 
     /** 本地先生效：幂等（同 mid 保留首条）；超出 [cap] 时淘汰最旧。 */
-    fun add(mid: Long, name: String?, nowMs: Long): BlockedUpMemory {
-        if (mid <= 0L || entries.any { it.mid == mid }) return this
+    fun add(mid: Long, name: String?, nowMs: Long): BlockedUpMemory =
+        addWithEviction(mid, name, nowMs).first
+
+    /**
+     * 同 [add]，但把"是否发生了淘汰"一并报出来（F-6）。
+     *
+     * 修复前淘汰是**静默**的：名单满 200 之后最早的记录被丢掉，界面上没有任何信号 ——
+     * 用户此后在「拉黑名单」页看不到它们（也就无法在应用内撤销），而它们会重新出现在
+     * 推荐流里且没有任何解释。
+     */
+    fun addWithEviction(mid: Long, name: String?, nowMs: Long): Pair<BlockedUpMemory, Boolean> {
+        if (mid <= 0L || entries.any { it.mid == mid }) return this to false
         // blank 名字退化为 null：列表页显示"UP <mid>"而不是空字符串
         val normalizedName = name?.takeIf(String::isNotBlank)
         val next = entries + BlockedUpEntry(
@@ -63,8 +73,9 @@ internal class BlockedUpMemory(
             blockedAtMs = nowMs,
             synced = false
         )
-        val trimmed = if (next.size > cap) next.subList(next.size - cap, next.size) else next
-        return BlockedUpMemory(trimmed, cap)
+        val evicted = next.size > cap
+        val trimmed = if (evicted) next.subList(next.size - cap, next.size) else next
+        return BlockedUpMemory(trimmed, cap) to evicted
     }
 
     /** gRPC 成功后标记已同步；未记录的 mid 忽略。 */
@@ -102,16 +113,22 @@ class BlockedUpStore @Inject constructor(
     private val mutex = Mutex()
     private var cache: BlockedUpMemory? = null
 
-    /** 本地先生效（幂等；同步状态见 [markSynced]）。 */
+    /**
+     * 本地先生效（幂等；同步状态见 [markSynced]）。
+     *
+     * @return 本次是否发生了**淘汰**（名单已满，最早的记录被移除）—— 调用方据此给用户
+     *   一个可见信号（F-6：此前淘汰完全静默）。
+     */
     suspend fun add(
         mid: Long,
         name: String? = null,
         nowMs: Long = System.currentTimeMillis()
-    ) = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(Dispatchers.IO) {
         mutex.withLock {
-            val updated = loadLocked().add(mid, name, nowMs)
+            val (updated, evicted) = loadLocked().addWithEviction(mid, name, nowMs)
             cache = updated
             persistLocked(updated)
+            evicted
         }
     }
 
@@ -156,10 +173,13 @@ class BlockedUpStore @Inject constructor(
         }
     }
 
-    private companion object {
-        val BLOCKED_UP_KEY = stringPreferencesKey("blocked_up_json")
+    companion object {
+        /** 本地名单上限（名单页「当前 N/CAP」与淘汰提示共用；F-6）。 */
+        const val CAP: Int = BlockedUpMemory.BLOCKED_UP_CAP
 
-        fun encode(entries: List<BlockedUpEntry>): String {
+        private val BLOCKED_UP_KEY = stringPreferencesKey("blocked_up_json")
+
+        private fun encode(entries: List<BlockedUpEntry>): String {
             val array = JSONArray()
             entries.forEach { entry ->
                 array.put(
@@ -173,7 +193,7 @@ class BlockedUpStore @Inject constructor(
             return array.toString()
         }
 
-        fun decode(text: String): BlockedUpMemory {
+        private fun decode(text: String): BlockedUpMemory {
             return runCatching {
                 val array = JSONArray(text)
                 val entries = (0 until array.length()).mapNotNull { i ->

@@ -111,9 +111,16 @@ class AppSettings @Inject constructor(
     private val teenagersAgeKey = intPreferencesKey("teenagers_age")
     private val autoCheckUpdateKey = booleanPreferencesKey("auto_check_update")
     private val useSystemDnsKey = booleanPreferencesKey("use_system_dns")
+
+    /**
+     * 现场诊断日志开关（Q-3，2026-10-04）。量产默认 **false**；
+     * debug 包由 `BiliApplication` 按 [`BuildConfig.DEBUG`] 置为始终可见。
+     */
+    private val diagnosticLogKey = booleanPreferencesKey("diagnostic_log_enabled")
     private val fixBottomBarKey = booleanPreferencesKey("fix_bottom_bar")
     private val topProgressiveFadeKey = booleanPreferencesKey("top_progressive_fade")
     private val playerControlsBlurKey = booleanPreferencesKey("player_controls_blur")
+    private val playerSurfaceViewKey = booleanPreferencesKey("player_surface_view")
     private val playerControlsMaterialKey = stringPreferencesKey("player_controls_material")
     private val feedApiTypeKey = intPreferencesKey("feed_api_type")
 
@@ -412,7 +419,33 @@ class AppSettings @Inject constructor(
     }
 
     val autoCheckUpdate: Flow<Boolean> = context.appSettingsDataStore.data.map { it[autoCheckUpdateKey] ?: true }
-    val useSystemDns: Flow<Boolean> = context.appSettingsDataStore.data.map { it[useSystemDnsKey] ?: false }
+
+    /**
+     * 使用系统 DNS（S-3，2026-10-04 定正）。
+     *
+     * 默认 **true**。修复前默认 false，而 false 的语义是"不使用系统 DNS" = 走
+     * [com.naaammme.bbspace.infra.network.dns.BiliDns] 的 HTTPDNS —— 那三个客户端
+     * （`BiliHttpDns` / `TencentHttpDns` / `AlibabaHttpDns`）的端点是硬编码 `http://`，
+     * 且响应里的 IP 会被**直接用来建连接**（明文 HTTP + 无签名校验 = 可被中间人篡改解析）。
+     * 也就是说"明文解析"此前是**默认路径**（性能页文案也是"关闭后使用 HTTPDNS"，
+     * 语义与代码一致、但默认值与"安全默认"相反）。
+     *
+     * 现在默认走系统 DNS（HTTPS 链路、由系统解析器负责）；要 HTTPDNS 加速的用户
+     * 可以在设置里显式打开，此时明文只对 `network_security_config.xml` 里
+     * 那几个探测端点放行（S-2）。
+     *
+     * 注意：该值在 `AppInitializer.initialize()` 启动时读取一次并交给 `BiliDns.start`，
+     * 所以 UI 文案里的"重启后生效"依然成立。
+     */
+    val useSystemDns: Flow<Boolean> = context.appSettingsDataStore.data.map { it[useSystemDnsKey] ?: true }
+
+    /**
+     * 现场诊断日志是否开启（Q-3）。见 `DiagnosticLog`：
+     * 29 处 release 取证日志（MERGED 合并计数、刷视频补货、无缝转场、弹幕窗口…）统一受它控制。
+     * 量产默认关；debug 包不看这个值（始终打开）。
+     */
+    val diagnosticLogEnabled: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[diagnosticLogKey] ?: false }
     val fixBottomBar: Flow<Boolean> = context.appSettingsDataStore.data.map { it[fixBottomBarKey] ?: true }
 
     /** 顶部渐进消隐（同步 BiliPai 上游）：内容滚入顶栏时按 Telegram 5 阶非线性融进底色。 */
@@ -433,6 +466,34 @@ class AppSettings @Inject constructor(
      */
     val playerControlsBlur: Flow<Boolean> =
         context.appSettingsDataStore.data.map { it[playerControlsBlurKey] ?: true }
+
+    /**
+     * **省电模式**：视频画面改用 `SurfaceView` 而不是 `TextureView`（默认**关**）。
+     *
+     * ## 为什么它能省（真机实测，2026-10-07）
+     *
+     * `TextureView` 的每一帧都要经**应用自己的渲染管线**合成一次 —— 线程级测量里
+     * `RenderThread` 占 **19.2%** 单核（播放全程 ≈82% 单核中最大的一块）。
+     * 换成 `SurfaceView`（系统显示管线直接合成）后实测：**105.5% → 75.2%（−28%）**，
+     * `RenderThread` 19.7% → 2.8%。
+     *
+     * ## 代价与**必须配套的约束**（第一版就栽在这里，别重蹈）
+     *
+     * SurfaceView 是**独立图层**，不能被放进带裁剪/变换的 Compose 图层里 —— 否则
+     * surface 被挖空：**画面全黑、声音与进度正常**。第一版只换了 `surface_type`，
+     * 内嵌播放（16dp 圆角裁剪）就全黑了，而全屏（RectangleShape，无裁剪）正常 ——
+     * 用户实测"点全屏能播"正是这个原因。
+     * 所以本模式生效时必须：①播放页内部**不套圆角裁剪**（四角变直角）；
+     * ②外层带 `graphicsLayer`/`clip` 的三处调用点传 `allowSurfaceView = false`
+     * （宽屏展开布局、形变布局、刷视频 Pager）；③控制条「真模糊」按关处理
+     * （画面不在应用图层里，玻璃采不到帧）。
+     *
+     * **默认开**（用户要求"全面使用 SurfaceView"）；生效时机：**重进播放页**
+     * （surface 类型在创建 PlayerView 时定死，运行期切换要重建视图并重接播放器，
+     * 会闪屏/断流）。
+     */
+    val playerSurfaceView: Flow<Boolean> =
+        context.appSettingsDataStore.data.map { it[playerSurfaceViewKey] ?: true }
 
     /**
      * 播放页控件用哪种玻璃材质（磨砂 / 液态），与全局 [ThemeConfig.glassMaterial] **独立**。
@@ -480,6 +541,11 @@ class AppSettings @Inject constructor(
         editSettingsMirrored { it[useSystemDnsKey] = enabled }
     }
 
+    /** 现场诊断日志开关（Q-3）。写入后由 `BiliApplication` 的收集器同步到 `DiagnosticLog.enabled`。 */
+    suspend fun updateDiagnosticLogEnabled(enabled: Boolean) {
+        editSettingsMirrored { it[diagnosticLogKey] = enabled }
+    }
+
     suspend fun updateFixBottomBar(enabled: Boolean) {
         editSettingsMirrored { it[fixBottomBarKey] = enabled }
     }
@@ -490,6 +556,11 @@ class AppSettings @Inject constructor(
 
     suspend fun updatePlayerControlsBlur(enabled: Boolean) {
         editSettingsMirrored { it[playerControlsBlurKey] = enabled }
+    }
+
+    /** 「省电模式」开关：见 [playerSurfaceView]。重进播放页生效。 */
+    suspend fun updatePlayerSurfaceView(enabled: Boolean) {
+        editSettingsMirrored { it[playerSurfaceViewKey] = enabled }
     }
 
     suspend fun updatePlayerControlsMaterial(material: GlassMaterial) {
@@ -637,6 +708,8 @@ class AppSettings @Inject constructor(
     private val bgPlayKey = booleanPreferencesKey("bg_play")
     private val seamlessTransitionKey = booleanPreferencesKey("seamless_transition")
     private val prefetchVideoKey = booleanPreferencesKey("prefetch_video")
+    private val cdnParallelDownloadKey = booleanPreferencesKey("cdn_parallel_download")
+    private val cdnAdaptivePrefetchKey = booleanPreferencesKey("cdn_adaptive_prefetch")
     private val swipeAutoAdvanceKey = booleanPreferencesKey("swipe_auto_advance")
     private val crossSessionDedupKey = booleanPreferencesKey("swipe_cross_session_dedup")
     private val burnInGuardKey = booleanPreferencesKey("swipe_burn_in_guard")
@@ -689,6 +762,10 @@ class AppSettings @Inject constructor(
                 videoCdnMode = prefs[videoCdnModeKey]
                     ?.let(VideoCdnMode::valueOf)
                     ?: defaultPlaybackPrefs.videoCdnMode,
+                cdnParallelDownload = prefs[cdnParallelDownloadKey]
+                    ?: defaultPlaybackPrefs.cdnParallelDownload,
+                cdnAdaptivePrefetch = prefs[cdnAdaptivePrefetchKey]
+                    ?: defaultPlaybackPrefs.cdnAdaptivePrefetch,
                 doubleTapLike = prefs[doubleTapLikeKey] ?: defaultPlaybackPrefs.doubleTapLike,
                 repeatMode = prefs[repeatModeKey]
                     ?.let(PlayerRepeatMode::valueOf)
@@ -760,6 +837,16 @@ class AppSettings @Inject constructor(
     /** 竖屏连播预加载开关（默认开）：见 `PlayerPlaybackPrefs.prefetchVideo`。 */
     suspend fun setPrefetchVideo(enabled: Boolean) {
         editSettingsMirrored { it[prefetchVideoKey] = enabled }
+    }
+
+    /** CDN 并行分片下载开关：见 `PlayerPlaybackPrefs.cdnParallelDownload`。 */
+    suspend fun setCdnParallelDownload(enabled: Boolean) {
+        editSettingsMirrored { it[cdnParallelDownloadKey] = enabled }
+    }
+
+    /** DASH 分段自适应预取开关：见 `PlayerPlaybackPrefs.cdnAdaptivePrefetch`。 */
+    suspend fun setCdnAdaptivePrefetch(enabled: Boolean) {
+        editSettingsMirrored { it[cdnAdaptivePrefetchKey] = enabled }
     }
 
     /** 竖屏连播「播完自动翻下一支」（默认开）：见 `PlayerPlaybackPrefs.swipeAutoAdvance`。 */

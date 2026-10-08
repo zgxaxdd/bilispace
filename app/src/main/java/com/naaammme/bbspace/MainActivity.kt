@@ -44,6 +44,8 @@ import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import com.naaammme.bbspace.core.model.WebLinkParser
 import com.naaammme.bbspace.core.model.WebLinkTarget
+import com.naaammme.bbspace.infra.network.ShortLinkResolver
+import com.naaammme.bbspace.navigation.AppLinkRequest
 import com.naaammme.bbspace.navigation.AppNavHost
 import com.naaammme.bbspace.playback.PlaybackHostState
 import dagger.hilt.android.AndroidEntryPoint
@@ -84,11 +86,15 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var hostState: PlaybackHostState
 
+    /** b23.tv 短链解析（B-2）：站内路由只能靠 302 目标拿到。 */
+    @Inject
+    lateinit var shortLinkResolver: ShortLinkResolver
+
     private var updateDialog by mutableStateOf<AppUpdateDialogState?>(null)
 
     private var cachedDisplayModes: Array<Display.Mode>? = null
 
-    private var pendingAppLink by mutableStateOf<WebLinkTarget?>(null)
+    private var pendingAppLink by mutableStateOf<AppLinkRequest?>(null)
 
     // Android 13+ 通知运行时权限：后台播放的媒体通知没有它会被系统静默丢弃。
     // 时序（重要）：播放开始只**记标记**，真正弹窗推迟到 MainActivity 回到前台、
@@ -210,7 +216,7 @@ class MainActivity : ComponentActivity() {
             // 争抢无预算的带宽），改为首帧后固定延迟再检查。见方法注释。
             scheduleUpdateCheckAfterFirstFrame()
         }
-        pendingAppLink = toAppLink(intent)
+        consumeAppLink(intent)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(
@@ -284,7 +290,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pendingAppLink = toAppLink(intent)
+        consumeAppLink(intent)
     }
 
     /**
@@ -418,15 +424,40 @@ class MainActivity : ComponentActivity() {
             ?.takeIf { abs(it.refreshRate - targetHz) < 5f }
     }
 
-    private fun toAppLink(intent: Intent?): WebLinkTarget? {
-        val url = intent?.dataString ?: return null
-        return when (val target = WebLinkParser.parse(url)) {
-            is WebLinkTarget.ToVideo,
-            is WebLinkTarget.ToSpace,
-            is WebLinkTarget.ToLive -> target
-            is WebLinkTarget.External,
-            is WebLinkTarget.Stay -> null
+    private fun toAppLink(intent: Intent?): AppLinkRequest? {
+        val url = intent?.dataString?.takeIf { it.isNotBlank() } ?: return null
+        val parsed = WebLinkParser.parseExternal(url)
+        if (parsed == WebLinkTarget.Stay) {
+            // L-1/L-3：这条链接是被**显式组件投递**进来的（绕过了 manifest 过滤器），
+            // 同样不该被吞掉 —— 一起回落系统处理，并留下痕迹。
+            Logger.w(TAG) { "外部深链不在接管范围（显式投递），回落系统：$url" }
+            return AppLinkRequest(WebLinkTarget.External, url)
         }
+        return AppLinkRequest(parsed, url)
+    }
+
+    /**
+     * 外部深链入口（L-1 / B-2）。
+     *
+     * 与 [toAppLink] 的分工：普通链接同步解析即可；`b23.tv` 短链的站内路由只能通过
+     * 302 目标得到，所以这里额外走一次 IO 解析，解析不出来时**回落系统浏览器**
+     * （`WebLinkTarget.External` 由 AppNavHost 消费）—— 而不是像修复前那样静默吞掉。
+     */
+    private fun consumeAppLink(intent: Intent?) {
+        val url = intent?.dataString?.takeIf { it.isNotBlank() } ?: return
+        if (WebLinkParser.isShortLink(url)) {
+            lifecycleScope.launch {
+                val resolved = shortLinkResolver.resolve(url)
+                val resolvedTarget = resolved
+                    ?.let(WebLinkParser::parseExternal)
+                    ?.takeIf { it != WebLinkTarget.Stay }
+                    ?: WebLinkTarget.External
+                Logger.w(TAG) { "b23.tv 短链 url=$url resolved=$resolved target=$resolvedTarget" }
+                pendingAppLink = AppLinkRequest(resolvedTarget, url)
+            }
+            return
+        }
+        pendingAppLink = toAppLink(intent)
     }
 
     @Composable

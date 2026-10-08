@@ -1,8 +1,10 @@
 package com.naaammme.bbspace.feature.settings.privacy
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -308,8 +310,23 @@ fun PrivacySettingsScreen(
                         onClick = {
                             val json = viewModel.exportAllAccounts()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("accounts", json))
-                            Toast.makeText(context, "已复制到剪切板", Toast.LENGTH_SHORT).show()
+                            // S-5：这串 JSON 含**全部已保存账号**的 access_token 与 cookies
+                            // （SESSDATA / bili_jct = 登录态）。必须标 EXTRA_IS_SENSITIVE
+                            // （API 33+，本项目 minSdk=33）：系统剪贴板预览浮层不再显示内容，
+                            // 输入法/剪贴板历史类应用也不会把它留存在自己的历史库里。
+                            // 更彻底的方案（分块 + Keystore 加密 + 扫码，不过剪贴板）见
+                            // `_ref/BiliPai` 的 BiliPaiTransfer*，属后续排期。
+                            val clip = ClipData.newPlainText("accounts", json).apply {
+                                description.extras = PersistableBundle().apply {
+                                    putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+                                }
+                            }
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(
+                                context,
+                                "已复制到剪贴板（含登录凭证，请勿转发）",
+                                Toast.LENGTH_LONG
+                            ).show()
                         },
                         modifier = Modifier.weight(1f)
                     ) {

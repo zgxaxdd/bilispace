@@ -1,7 +1,6 @@
 package com.naaammme.bbspace.infra.crypto
 
 import com.naaammme.bbspace.core.common.BiliConstants
-import java.security.MessageDigest
 
 /**
  * Bilibili 标准参数签名算法
@@ -60,15 +59,10 @@ object AppSigner {
             "${biliUrlEncode(key)}=${biliUrlEncode(value)}"
         }
 
-        // 追加 appsec 并 MD5
-        val sign = md5(encodedQueryString + appSec)
+        // 追加 appsec 并 MD5（Q-4：原实现是本文件私有的 `md5`，
+        // 与 WbiSigner 里那份逐字重复 —— 已收口到 BiliAuthPrimitives.md5Hex）
+        val sign = md5Hex(encodedQueryString + appSec)
 
         return "$encodedQueryString&sign=$sign"
-    }
-
-    private fun md5(input: String): String {
-        val md = MessageDigest.getInstance("MD5")
-        val digest = md.digest(input.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
     }
 }

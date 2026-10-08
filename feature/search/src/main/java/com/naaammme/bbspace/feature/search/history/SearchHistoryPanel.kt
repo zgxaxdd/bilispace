@@ -18,6 +18,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
 import com.naaammme.bbspace.core.model.SearchHistoryOrder
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -41,6 +44,9 @@ fun SearchHistoryPanel(
         histories.take(displayCap)
     }
     val hasMore = histories.size > displayCap
+
+    // 已经碎完、等数据刷新摘掉的词（见下方长按删除处的注释）。
+    val dissolved = remember { mutableStateListOf<String>() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -81,12 +87,38 @@ fun SearchHistoryPanel(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 visible.forEachIndexed { index, item ->
-                    SearchHistoryChip(
-                        text = item,
-                        featured = index == 0,
-                        onClick = { onSearch(item) },
-                        onLongClick = { onDelete(item) }
-                    )
+                    // 每个词一个独立的消散状态：`key(item)` 给它稳定身份 ——
+                    // 否则删掉中间一个词后，后面的 chip 会按位置继承前一个的状态
+                    //（Compose 的 remember 是位置槽），表现为"删了 A，B 突然自己碎掉"。
+                    //
+                    // 注意这里用 `if (!in)` 包裹而不是 `return@key`：`key` 是 inline 函数，
+                    // 非局部返回会让 Kotlin 生成 `$$$$$NON_LOCAL_RETURN$$$$$` 合成类，
+                    // 而 R8 9.4 **无法把它写成 dex**（实测报
+                    // `Method name '<anonymous>' in class '$$$$$NON_LOCAL_RETURN$$$$$'
+                    //  cannot be represented in dex format`，release 直接构建失败）。
+                    key(item) {
+                        if (item !in dissolved) {
+                            var chipDissolving by remember { mutableStateOf(false) }
+                            // 粒子消散（移植 BiliPai 的 GL Thanos 实现）：长按删除时
+                            // **先碎成粒子再真删**。`dissolved` 记"已经碎完但数据还没刷新掉"的词
+                            // —— 不记的话，回调到列表刷新之间那一帧会把 chip 重新画回来（闪一下）。
+                            MaybeDissolvableVideoCard(
+                                isDissolving = chipDissolving,
+                                onDissolveComplete = {
+                                    dissolved += item
+                                    onDelete(item)
+                                },
+                                cardId = "search-history-$item"
+                            ) {
+                                SearchHistoryChip(
+                                    text = item,
+                                    featured = index == 0,
+                                    onClick = { onSearch(item) },
+                                    onLongClick = { chipDissolving = true }
+                                )
+                            }
+                        }
+                    }
                 }
 
                 if (hasMore) {

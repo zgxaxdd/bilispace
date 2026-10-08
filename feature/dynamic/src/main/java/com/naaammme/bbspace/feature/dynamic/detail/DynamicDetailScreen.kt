@@ -466,4 +466,5 @@ private fun LazyListScope.detailContentItems(detail: DynamicDetail, onLike: (() 
     }
 }
 
-private const val DYNAMIC_DETAIL_TAG = "DynamicDetailScreen"
+// K-7（2026-10-04 审查报告）：这里原有 `DYNAMIC_DETAIL_TAG = "DynamicDetailScreen"`，
+// 全仓零引用（日志 tag 由调用层的 Logger 封装给），已删除。

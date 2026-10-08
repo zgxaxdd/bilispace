@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置（S-2，2026-10-04）。
+
+  ## 为什么需要它
+  修复前 manifest 是 `android:usesCleartextTraffic="true"` 且**没有** networkSecurityConfig：
+  为了 HTTPDNS 那条明文探测链路，把**整个应用**的明文限制放开了 —— 任何一次域名解析
+  异常或代码回退，主站请求都可能静默走 http。真机 `aapt2 dump xmltree` 已确认产物级
+  存在 `usesCleartextTraffic=true`。
+
+  ## 现在的口径
+  - 默认**禁止**明文（base-config），显式写出以免日后被误改（由
+      `SecurityConfigGuardTest.noGlobalCleartextTrafficAndConfigIsWired` 钉住）；
+      **媒体 CDN 走下面 domain-config 白名单放行**。
+  - **媒体 CDN 放行明文**：B 站下发的播放地址可能是 `http://`，禁掉就等于"所有视频放不了"
+    （2026-10-05 真机回归事故的根因，详见下面的 domain-config 注释）；
+  - 只对 HTTPDNS 的探测端点放行明文 —— 这三个客户端的 URL 是硬编码 `http://`：
+    `BiliHttpDns`（B 站，7 个 IP）、`TencentHttpDns`（`119.29.29.29`）、
+    `AlibabaHttpDns`（阿里，5 个 IP）。改 IP 列表时**必须同步这里**；
+  - debug 构建放行用户证书（Charles/Fiddler 抓包）。
+  - HTTPDNS 本身默认关闭（`AppSettings.useSystemDns` 默认 true = 走系统 DNS，S-3）：
+    下面那组 HTTPDNS 白名单只在用户显式开启"不使用系统 DNS"时才会被用到。
+
+  ## 与 DoH 的关系
+  `CloudflareDoh`（`https://1.1.1.1/dns-query`）是 HTTPS，不需要白名单。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- ── 媒体 CDN：**必须放行明文**（2026-10-05 真机回归事故）────────────────────
+         只把主站/接口收紧到 https 是不够的：B 站接口下发的**播放地址本身可能是
+         `http://`**（如 `http://upos-sz-mirrorali.bilivideo.com/...`）。全局禁止明文后，
+         Media3 直接失败：
+
+           E Media3Player: set source failed type=SingleFileDash msg=CLEARTEXT communication
+             to upos-sz-mirrorali.bilivideo.com not permitted by network security policy
+
+         表现就是"所有视频都放不了"（下载、直播走同一批地址，同样受影响）。
+         所以这里按**域名**给媒体 CDN 放行明文，主站（api/www/app.bilibili.com）仍要求 https。
+         注意：`includeSubdomains="true"` —— CDN 主机名是 `upos-sz-mirrorXX.bilivideo.com`
+         这类动态子域，逐个列举不现实。
+
+         由 `SecurityConfigGuardTest.mediaCdnCleartextMustStayAllowed` 钉住，
+         防止后人"顺手收紧"再造成一次同样的静默回归。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- 播放/下载（VOD）：upos-*.bilivideo.com、upos-*.akamaized.net、
+             upos-tf-*.bilivideo.com/.net、*.mcdn.bilivideo.{com,cn,net}（PCDN）
+             —— 域名枚举口径取自本仓既有的 CDN 正则（`PlaybackCdnSelector` 与
+             `PlaybackCacheGate` 的 `isCacheableUrl`）。 -->
+        <domain includeSubdomains="true">bilivideo.com</domain>
+        <domain includeSubdomains="true">bilivideo.cn</domain>
+        <domain includeSubdomains="true">bilivideo.net</domain>
+        <domain includeSubdomains="true">akamaized.net</domain>
+        <!-- 直播：*.live-play.acgvideo.com / *.live-bvc.acgvideo.com -->
+        <domain includeSubdomains="true">acgvideo.com</domain>
+        <!-- 图片/静态资源 CDN（公开内容、不含凭证）。绝大多数图片 URL 已被
+             `httpsImageUrl` / `normalizeWebUrl` 升级成 https，这里兜住少数旁路，
+             避免"图不显示"这种同样不会被单测发现的静默回归。 -->
+        <domain includeSubdomains="true">hdslb.com</domain>
+
+        <!--
+
+          PCDN 的**动态第三方域**：B 站会把 CDN 主机名导到 `*.yirujs.com` 这类域名
+
+          （2026-10-06 真机定位：请求 `upos-sz-mirrorhw.bilivideo.com`，实际连接
+
+           `zz12.yirujs.com` ⇒ 明文被拦 ⇒「单文件 dash 索引缺失」⇒ 部分视频打不开）。
+
+          这类域名与裸 IP（`182.40.59.133:8000`）都无法枚举 ⇒ 真正的兜底是
+
+          `base-config cleartextTrafficPermitted="true"`（与 BiliPai 同口径）。
+
+        -->
+
+        <domain includeSubdomains="true">yirujs.com</domain>
+    </domain-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- BiliHttpDns：DEFAULT / CT / CU / CM 四组服务器 -->
+        <domain includeSubdomains="false">116.63.10.135</domain>
+        <domain includeSubdomains="false">117.185.17.235</domain>
+        <domain includeSubdomains="false">122.9.13.79</domain>
+        <domain includeSubdomains="false">180.163.55.134</domain>
+        <domain includeSubdomains="false">116.63.10.31</domain>
+        <domain includeSubdomains="false">112.65.200.25</domain>
+        <domain includeSubdomains="false">117.185.18.212</domain>
+        <!-- TencentHttpDns -->
+        <domain includeSubdomains="false">119.29.29.29</domain>
+        <!-- AlibabaHttpDns -->
+        <domain includeSubdomains="false">203.119.206.8</domain>
+        <domain includeSubdomains="false">203.119.206.9</domain>
+        <domain includeSubdomains="false">203.119.204.80</domain>
+        <domain includeSubdomains="false">203.119.238.240</domain>
+        <domain includeSubdomains="false">203.119.238.194</domain>
+    </domain-config>
+
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

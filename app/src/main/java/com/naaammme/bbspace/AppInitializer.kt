@@ -2,8 +2,10 @@ package com.naaammme.bbspace
 
 import android.content.Context
 import android.content.Intent
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.settings.AppSettings
+import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.auth.CacheManager
 import com.naaammme.bbspace.core.playback.StreamPlaybackSession
 import com.naaammme.bbspace.infra.coldstart.ColdStartClient
@@ -43,6 +45,8 @@ class AppInitializer @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val gaiaReporter: GaiaReporter,
     private val appSettings: AppSettings,
+    /** S-1 第二步：明文凭据加密迁移（冷启 IO 里跑一次）。 */
+    private val authStore: AuthStore,
     private val cacheManager: CacheManager,
     private val playbackSession: StreamPlaybackSession,
     private val playerEngine: PlayerEngine
@@ -78,9 +82,28 @@ class AppInitializer @Inject constructor(
         }
     }
 
+    /**
+     * 现场诊断日志的统一开关（Q-3，2026-10-04）。
+     *
+     * 修复前：29 处直写 `android.util.Log`（12 个文件）在**量产包里一律常开**，既没有开关、
+     * 也没有收口。现在全部走 `DiagnosticLog`：
+     * - debug 包**始终打开**（与修复前行为一致，开发/取证不受影响）；
+     * - 量产包默认关闭，用户在「设置 → 性能 → 现场诊断日志」打开后立即生效（无需重启）。
+     */
+    private fun applyDiagnosticLogSwitch() {
+        initScope.launch {
+            runCatchingCancellable {
+                appSettings.diagnosticLogEnabled.collect { enabled ->
+                    DiagnosticLog.enabled = BuildConfig.DEBUG || enabled
+                }
+            }.onFailure { Logger.w(TAG) { "诊断日志开关订阅失败：${it.message}（保持默认关闭）" } }
+        }
+    }
+
     fun initialize() {
         observePlaybackService()
         reportPlayerBinderRetention()
+        applyDiagnosticLogSwitch()
 
         initScope.launch {
             // 一次性设置迁移：默认转场 缩放(SHARED_AXIS_Z) → 左右滑动(SHARED_AXIS_X)。
@@ -88,6 +111,16 @@ class AppInitializer @Inject constructor(
             launch {
                 runCatchingCancellable { appSettings.migrateTransitionStyleDefaultIfNeeded() }
                     .onFailure { Logger.w(TAG) { "转场默认值迁移失败：${it.message}" } }
+            }
+            // S-1 第二步（2026-10-05）：把历史版本留下的**明文**凭据加密回盘。
+            // 必须在 IO（首次会加载 AndroidKeyStore 密钥，低端机 10~50ms），且要在任何
+            // 网络请求之前完成 —— 否则请求可能拿着"还没解密"的会话以匿名身份发出去。
+            launch {
+                runCatchingCancellable { authStore.migratePlaintextSecrets() }
+                    .onSuccess { migrated ->
+                        if (migrated > 0) Logger.i(TAG) { "凭据静态加密迁移完成：$migrated 个值" }
+                    }
+                    .onFailure { Logger.w(TAG) { "凭据加密迁移失败：${it.message}" } }
             }
             val useSystemDns = appSettings.useSystemDns.first()
             biliDns.start(useSystemDns) {

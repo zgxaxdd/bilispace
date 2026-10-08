@@ -37,6 +37,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -217,7 +218,12 @@ private fun ImMessageBubble(
                         .size(32.dp)
                         .then(
                             if (item.showAvatar && onOpenSpace != null && message.senderUid > 0L) {
-                                Modifier.clickable { onOpenSpace(SpaceRoute(mid = message.senderUid)) }
+                                // F-5：头像即"进入空间"的按钮，补 Role 与动作说明
+                                //（子节点已有 contentDescription，缺的是角色语义）。
+                                Modifier.clickable(
+                                    role = Role.Button,
+                                    onClickLabel = "打开 TA 的空间"
+                                ) { onOpenSpace(SpaceRoute(mid = message.senderUid)) }
                             } else Modifier
                         )
                 ) {

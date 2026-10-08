@@ -4,6 +4,7 @@ import com.naaammme.bbspace.core.auth.AuthStore
 import com.naaammme.bbspace.core.common.BiliConstants
 import com.naaammme.bbspace.core.common.BiliWebHeaderTool
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.common.media.httpsImageUrl
 import com.naaammme.bbspace.core.model.DescButton
@@ -173,13 +174,18 @@ class FeedRepository @Inject constructor(
      * MERGED 档：双源并行取流后按 [FeedMergePolicy] 交错合并去重。
      * 单边失败返回存活边；两边都失败才抛错（方案 §4.5）。
      *
-     * ## 为什么这里直写 `android.util.Log.i`（SX-12）
+     * ## 为什么这条日志走 `DiagnosticLog`（SX-12；Q-3 收口）
      * 「MERGED 到底有没有真的把两路合起来」是 SX-12 的核心命题，而唯一能直接回答它的
      * 运行时证据就是这条计数日志。**`Logger.d` 是 debug 门控的**（`Logger.isDebug`），
      * 稳定版（release）根本打不出来 —— 上一会话之所以只能"在 debug 包上看"，
-     * 就是因为这条日志被门控了。故与 `PortraitSwipe` 同款：直写 `Log.i`，release 也可见
+     * 就是因为这条日志被门控了。故与 `PortraitSwipe` 同款：走 **release 也可见**的通道
      * （每档每次请求一行，含单边失败时的**异常类名**，供 L4-123「单边失败仍出内容」取证）。
      * 同一提交加结构守卫：这条日志不许退回 `Logger.d`。
+     *
+     * 2026-10-04（Q-3）：29 处同类直写已统一收口到
+     * [com.naaammme.bbspace.core.common.log.DiagnosticLog] —— 它默认关闭、由「设置 → 性能 →
+     * 现场诊断日志」打开（debug 包始终打开），于是"量产包不再常开刷 logcat"与
+     * "现场取证可见"两件事同时成立。守卫同步改为断言走 `DiagnosticLog`。
      */
     private suspend fun fetchMergedFeed(cursor: FeedCursor, pull: Boolean, flush: Int): FeedResult =
         coroutineScope {
@@ -195,12 +201,11 @@ class FeedRepository @Inject constructor(
                 throw (error as? Exception) ?: IllegalStateException("合并推荐流两侧都没有可用内容")
             }
             // SX-12：release 可见的计数证据（不只有条目数，还带单边失败时的异常类名）。
-            android.util.Log.i(
-                TAG,
+            DiagnosticLog.i(TAG) {
                 "MERGED 档：web=${webItems.size} mobile=${mobileItems.size} " +
                     "webErr=${webResult.exceptionOrNull()?.javaClass?.simpleName ?: "none"} " +
                     "mobileErr=${mobileResult.exceptionOrNull()?.javaClass?.simpleName ?: "none"}"
-            )
+            }
             FeedResult(
                 items = withContext(Dispatchers.Default) {
                     FeedMergePolicy.mergeFeeds(web = webItems, app = mobileItems)

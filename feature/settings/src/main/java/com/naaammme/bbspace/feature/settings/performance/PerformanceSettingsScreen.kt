@@ -52,6 +52,35 @@ fun PerformanceSettingsScreen(
                 )
             }
             item {
+                // Q-3：29 处"release 也要可见"的取证日志（MERGED 合并计数、刷视频补货游标、
+                // 无缝转场代数、弹幕窗口加载…）此前在量产包里一律常开。现在统一由
+                // `DiagnosticLog` 收口，默认关闭；需要现场取证时在这里打开（立即生效，无需重启）。
+                // debug 包不受本开关影响 —— 始终可见。
+                SettingSwitch(
+                    title = "现场诊断日志",
+                    subtitle = "打开后按 logcat 的 PortraitSwipe / FeedRepository 等标签取证；" +
+                        "量产包默认关闭，debug 包始终打开",
+                    checked = viewModel.diagnosticLogEnabled.collectAsStateWithLifecycle().value,
+                    onCheckedChange = viewModel::updateDiagnosticLogEnabled
+                )
+            }
+            item {
+                // 「省电模式」：视频画面从 TextureView 换 SurfaceView。
+                // 真机线程级实测（2026-10-07，`BV1vEa36rE4J`，45s 窗口）：播放全程 ≈82% 单核，
+                // 其中 RenderThread 19.2%（TextureView 每帧都要过一遍应用渲染管线合成）；
+                // 换 SurfaceView 后整机 105.5% → 75.2%（−28%）。
+                // 代价如实写进 subtitle：四角变直角（SurfaceView 不能被圆角裁剪层包含，否则画面全黑）、
+                // 控制条真模糊失效。**默认开**（与 AppSettings 的 `?: true` 一致），重进播放页生效。
+                SettingSwitch(
+                    title = "省电模式（视频用 SurfaceView）",
+                    // 数字必须与上面的实测记录一致（105.5% → 75.2% 是 −28%，不是 −40%）
+                    subtitle = "播放中少一次画面合成，明显降低 CPU/耗电（真机实测 −28%）。代价：控制条真模糊" +
+                        "失效（改用纯色兜底）、进全屏的淡入动效取消；刷视频页维持原样；重进播放页生效",
+                    checked = viewModel.playerSurfaceView.collectAsStateWithLifecycle().value,
+                    onCheckedChange = viewModel::updatePlayerSurfaceView
+                )
+            }
+            item {
                 FrameRateSelector(
                     selected = config.preferredFrameRate,
                     onSelect = viewModel::updateFrameRateMode

@@ -1,12 +1,14 @@
 package com.naaammme.bbspace.core.auth
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.naaammme.bbspace.core.common.account.PerAccountDataCleaner
 import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.model.Cookie
 import com.naaammme.bbspace.core.model.LoginCredential
 import com.naaammme.bbspace.core.model.User
+import com.naaammme.bbspace.infra.crypto.AuthCipher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +35,9 @@ class AuthStore @Inject constructor(
         private const val TAG = "AuthStore"
         private const val KEY_HD_KEY_PREFIX = "hd_key_"
         private const val KEY_HD_EXP_PREFIX = "hd_exp_"
+
+        /** 明文缓存条目上限：正常只有"当前会话 + 少量历史账号"，超了直接清空（重建成本很低）。 */
+        private const val SECRET_CACHE_MAX = 64
     }
 
     /**
@@ -44,6 +49,72 @@ class AuthStore @Inject constructor(
 
     private val prefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE)
 
+    // ── S-1 第二步：敏感值的静态加密（2026-10-05）──────────────────────────────
+    //
+    // 敏感键：access_token / refresh_token / cookies_json（SESSDATA、bili_jct）/
+    // account_<mid>（多账号凭据 JSON，里面是同样的 token + cookies）/ hd_key_<mid>。
+    // 非敏感的 mid / expires_in / login_time / guest_mode / web_buvid3 / uinfo_<mid>
+    // 保持明文 —— 迁移面越小越安全，且它们是展示与逻辑所需、不含登录凭据。
+    //
+    // 解密结果按**磁盘原值**缓存：密文是每次加密都不同的随机 IV，所以"原值 → 明文"是一一映射，
+    // 换个键名也不会串味；store 变化时缓存自然失配（不会读到旧会话）。
+    private val secretCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** 读敏感值（旧明文也读得出来 —— 升级兼容，见 [migratePlaintextSecrets]）。 */
+    private fun secret(key: String, default: String = ""): String {
+        val stored = prefs.getString(key, null)
+        if (stored.isNullOrEmpty()) return default
+        secretCache[stored]?.let { return it }
+        val plain = AuthCipher.decrypt(stored)
+        if (secretCache.size >= SECRET_CACHE_MAX) secretCache.clear()
+        secretCache[stored] = plain
+        return plain
+    }
+
+    /**
+     * 写敏感值：**只写密文**。Keystore 不可用时不落盘（照 BiliPai 的取舍：宁可本次不落盘，
+     * 也不把凭证退回明文），只留一条日志。
+     */
+    private fun SharedPreferences.Editor.putSecret(key: String, value: String) {
+        val encrypted = AuthCipher.encrypt(value)
+        if (encrypted == null) {
+            Logger.w(TAG) { "凭据加密不可用，本次不落盘 key=$key（内存会话不受影响）" }
+            return
+        }
+        putString(key, encrypted)
+        if (secretCache.size >= SECRET_CACHE_MAX) secretCache.clear()
+        // 回填缓存：刚写入的会话立即可读，且不必再走一次 Keystore 解密
+        secretCache[encrypted] = value
+    }
+
+    /**
+     * 一次性迁移：把历史版本留下的**明文**敏感值加密回盘（S-1 第二步）。
+     *
+     * 必须在 IO 线程调用（首次会加载 AndroidKeyStore 密钥，低端机 10~50ms）。
+     * 幂等：已加密/空值跳过，所以正常启动一次之后每次都是空转。
+     *
+     * @return 本次实际加密了几个值（0 表示无需迁移）
+     */
+    fun migratePlaintextSecrets(): Int {
+        val sensitiveKeys = buildList {
+            addAll(listOf("access_token", "refresh_token", "cookies_json"))
+            addAll(prefs.all.keys.filter { it.startsWith("account_") || it.startsWith(KEY_HD_KEY_PREFIX) })
+        }
+        var migrated = 0
+        prefs.edit {
+            sensitiveKeys.forEach { key ->
+                val stored = prefs.getString(key, null)
+                if (stored.isNullOrEmpty() || AuthCipher.isEncrypted(stored)) return@forEach
+                putSecret(key, stored)
+                migrated++
+            }
+        }
+        if (migrated > 0) {
+            Logger.w(TAG) { "S-1 迁移：$migrated 个明文凭据值已加密回盘" }
+        }
+        return migrated
+    }
+
     // 当前凭证
 
     var guestMode: Boolean
@@ -51,8 +122,8 @@ class AuthStore @Inject constructor(
         set(value) = prefs.edit { putBoolean("guest_mode", value) }
 
     val mid: Long get() = if (guestMode) 0L else prefs.getLong("mid", 0)
-    val accessToken: String get() = if (guestMode) "" else prefs.getString("access_token", "") ?: ""
-    val refreshToken: String get() = if (guestMode) "" else prefs.getString("refresh_token", "") ?: ""
+    val accessToken: String get() = if (guestMode) "" else secret("access_token")
+    val refreshToken: String get() = if (guestMode) "" else secret("refresh_token")
 
     /**
      * 当前账号的 Cookie 请求头（SESSDATA 等），供 Web 端交互接口使用
@@ -64,7 +135,7 @@ class AuthStore @Inject constructor(
         // Web 请求更容易被风控拒绝（-352 一类），表现为排行等 Web 页"暂无内容"。
         // 未登录/游客同样携带——游客最缺这层风险缓冲。
         val buvid3 = "buvid3=$webBuvid3"
-        val loginCookies = if (guestMode) "" else cookiesFromJson(prefs.getString("cookies_json", null))
+        val loginCookies = if (guestMode) "" else cookiesFromJson(secret("cookies_json"))
             .joinToString("; ") { "${it.name}=${it.value}" }
         return if (loginCookies.isEmpty()) buvid3 else "$buvid3; $loginCookies"
     }
@@ -87,7 +158,7 @@ class AuthStore @Inject constructor(
      */
     fun csrfToken(): String {
         if (guestMode) return ""
-        return cookiesFromJson(prefs.getString("cookies_json", null))
+        return cookiesFromJson(secret("cookies_json"))
             .firstOrNull { it.name == "bili_jct" }?.value.orEmpty()
     }
 
@@ -100,13 +171,13 @@ class AuthStore @Inject constructor(
      * 真正的凭证是登录 cookie（SESSDATA）与 csrf（bili_jct）。
      */
     fun hasWebCredential(): Boolean =
-        !guestMode && csrfToken().isNotEmpty() && cookiesFromJson(prefs.getString("cookies_json", null)).isNotEmpty()
+        !guestMode && csrfToken().isNotEmpty() && cookiesFromJson(secret("cookies_json")).isNotEmpty()
 
     fun saveHdAccessKey(mid: Long, key: String, expiresIn: Long) {
         if (mid == 0L || key.isEmpty()) return
         val expiresAt = System.currentTimeMillis() + expiresIn * 1000
         prefs.edit {
-            putString(hdKeyKey(mid), key)
+            putSecret(hdKeyKey(mid), key)
             putLong(hdExpKey(mid), expiresAt)
         }
     }
@@ -115,7 +186,7 @@ class AuthStore @Inject constructor(
         if (guestMode) return ""
         val currentMid = mid
         if (currentMid == 0L) return ""
-        val key = prefs.getString(hdKeyKey(currentMid), "") ?: ""
+        val key = secret(hdKeyKey(currentMid))
         if (key.isEmpty()) return ""
         val expiresAt = prefs.getLong(hdExpKey(currentMid), 0)
         if (expiresAt > 0 && System.currentTimeMillis() >= expiresAt) {
@@ -141,11 +212,11 @@ class AuthStore @Inject constructor(
     fun saveCredential(credential: LoginCredential) {
         prefs.edit {
             putLong("mid", credential.mid)
-            putString("access_token", credential.accessToken)
-            putString("refresh_token", credential.refreshToken)
+            putSecret("access_token", credential.accessToken)
+            putSecret("refresh_token", credential.refreshToken)
             putLong("expires_in", credential.expiresIn)
             putLong("login_time", System.currentTimeMillis())
-            putString("cookies_json", cookiesToJson(credential.cookies))
+            putSecret("cookies_json", cookiesToJson(credential.cookies))
         }
         saveToAccountList(credential)
     }
@@ -156,10 +227,10 @@ class AuthStore @Inject constructor(
         if (mid == 0L) return null
         return LoginCredential(
             mid = mid,
-            accessToken = prefs.getString("access_token", "") ?: "",
-            refreshToken = prefs.getString("refresh_token", "") ?: "",
+            accessToken = secret("access_token"),
+            refreshToken = secret("refresh_token"),
             expiresIn = prefs.getLong("expires_in", 0),
-            cookies = cookiesFromJson(prefs.getString("cookies_json", null))
+            cookies = cookiesFromJson(secret("cookies_json"))
         )
     }
 
@@ -178,19 +249,23 @@ class AuthStore @Inject constructor(
 
     private fun saveToAccountList(credential: LoginCredential) {
         prefs.edit {
-            putString("account_${credential.mid}", credentialToJson(credential))
+            putSecret("account_${credential.mid}", credentialToJson(credential))
         }
     }
 
     fun getAllAccounts(): List<LoginCredential> {
         return prefs.all.entries
             .filter { it.key.startsWith("account_") }
-            .mapNotNull { credentialFromJson(it.value as? String) }
+            .mapNotNull { entry ->
+                // S-1：account_<mid> 里存的是完整凭据 JSON（token + cookies），同样只存密文
+                val stored = entry.value as? String ?: return@mapNotNull null
+                credentialFromJson(AuthCipher.decrypt(stored))
+            }
     }
 
     fun switchAccount(mid: Long): LoginCredential? {
-        val json = prefs.getString("account_$mid", null) ?: return null
-        val credential = credentialFromJson(json) ?: return null
+        val stored = prefs.getString("account_$mid", null) ?: return null
+        val credential = credentialFromJson(AuthCipher.decrypt(stored)) ?: return null
         saveCredential(credential)
         return credential
     }

@@ -169,6 +169,8 @@ internal fun LinkedBottomDock(
      * 交叉淡出（实测 `view not attach to window or error, do alpha anim`）。
      */
     nowPlayingVisible: Boolean = true,
+      /** 小横条是否正被粒子消散接管：true 时本槽位的玻璃壳一起淡掉（与粒子同步消失）。 */
+      nowPlayingDissolving: Boolean = false,
 ) {
     val hasAudio = nowPlayingContent != null
     val anim = LocalAnimations.current
@@ -265,7 +267,7 @@ internal fun LinkedBottomDock(
             // 2 小横条：全程保持组合，靠几何插值在行间移动。外壳由 Dock 统一绘制，
             // 与导航/合并格/搜索位共用同一套玻璃材质，避免四块表面各自为政。
             Box {
-                DockGlassSurface(shape = dockShape, isScrolling = isScrolling, modifier = Modifier.fillMaxSize())
+                DockGlassSurface(shape = dockShape, isScrolling = isScrolling, modifier = Modifier.graphicsLayer { alpha = if (nowPlayingDissolving) 0f else 1f }.fillMaxSize())
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

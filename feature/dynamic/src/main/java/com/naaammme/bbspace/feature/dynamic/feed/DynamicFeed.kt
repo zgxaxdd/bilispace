@@ -43,11 +43,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.UpListRow
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.DynamicBody
 import com.naaammme.bbspace.core.model.DynamicImage
 import com.naaammme.bbspace.core.model.DynamicItem
@@ -238,7 +240,7 @@ private fun DynamicCardContent(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        animationSpec = tween(durationMillis = 150),
+                        animationSpec = tween(durationMillis = LocalAnimations.current.short),
                         label = "dynamicLikeTint"
                     )
                     val likeScale = remember { Animatable(1f) }
@@ -343,7 +345,11 @@ private fun DynamicHeader(
                 modifier = if (route == null) {
                     Modifier
                 } else {
-                    Modifier.clickable { onOpenSpace(route) }
+                    // F-5：作者名是"打开空间"的可点文本，补 Role 与动作说明。
+                    Modifier.clickable(
+                        role = Role.Button,
+                        onClickLabel = "打开 UP 主空间"
+                    ) { onOpenSpace(route) }
                 },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

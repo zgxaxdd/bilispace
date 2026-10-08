@@ -29,15 +29,20 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
+import com.naaammme.bbspace.core.designsystem.motion.jiggleOnDissolve
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.settings.blocked.BlockedUpEntry
+import com.naaammme.bbspace.core.settings.blocked.BlockedUpStore
 
 /**
  * NX-08「拉黑名单」：把 PT-06 建立的**本地名单**做成可见、可撤销。
@@ -132,7 +137,10 @@ fun BlockedUpScreen(
                 ) {
                     item {
                         Text(
-                            "拉黑对 B 站账号实际生效；撤销会先在本机名单移除，再同步到服务端。",
+                            // F-6：上限是 200，且满了会淘汰最旧的一条 —— 修复前文案完全没提，
+                            // 用户只会在"名单里怎么少了几个"里发现。
+                            "当前 ${state.entries.size}/${BlockedUpStore.CAP} 条（满额后最早的记录会被移除）。" +
+                                "拉黑对 B 站账号实际生效；撤销会先在本机名单移除，再同步到服务端。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -154,7 +162,20 @@ private fun BlockedUpRow(
     entry: BlockedUpEntry,
     onUnblock: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    // 粒子消散（移植 BiliPai 的 GL Thanos 实现，对应它的 blocked-list 调用点）：
+    // 撤销时整行碎成粒子再真移除。列表用 `key = { it.mid }`，状态跟着条目走。
+    var dissolving by remember { mutableStateOf(false) }
+    MaybeDissolvableVideoCard(
+        isDissolving = dissolving,
+        onDissolveComplete = { onUnblock() },
+        cardId = "blocked-${entry.mid}",
+        // 邻卡抖动：对齐 BiliPai 的调用点写法（`BlockedListScreen.kt:285` 同一套）
+        modifier = Modifier.jiggleOnDissolve(
+            cardId = "blocked-${entry.mid}",
+            isCurrentCardDissolving = dissolving
+        )
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -183,8 +204,9 @@ private fun BlockedUpRow(
                     }
                 )
             }
-            TextButton(onClick = onUnblock) {
+            TextButton(onClick = { dissolving = true }) {
                 Text("撤销")
+            }
             }
         }
     }

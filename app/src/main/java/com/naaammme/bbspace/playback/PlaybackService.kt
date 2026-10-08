@@ -181,15 +181,9 @@ class PlaybackService : Service() {
         override fun createCurrentContentIntent(player: Player) = createContentIntent()
 
         override fun getCurrentContentText(player: Player): CharSequence? {
-            if (isLivePlayback()) {
-                val subtitle = playbackSession.sessionState.value.subtitle
-                subtitle?.takeIf(String::isNotBlank)?.let { return it }
-                return player.currentMediaItem
-                    ?.mediaMetadata
-                    ?.artist
-                    ?.toString()
-                    ?.takeIf(String::isNotBlank)
-            }
+            // C-2（2026-10-04 审查报告）：这里原本是 `if (isLivePlayback()) { … }` 两个
+            // **逐字相同**的分支（直播与点播取的都是"会话 subtitle → 媒体 artist"），
+            // 已合并；行为完全一致。
             val subtitle = playbackSession.sessionState.value.subtitle
             subtitle?.takeIf(String::isNotBlank)?.let { return it }
             return player.currentMediaItem

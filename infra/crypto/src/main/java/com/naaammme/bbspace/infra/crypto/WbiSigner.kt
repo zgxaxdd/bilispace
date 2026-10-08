@@ -1,7 +1,5 @@
 package com.naaammme.bbspace.infra.crypto
 
-import java.security.MessageDigest
-
 /**
  * Wbi 签名计算器
  * 用于 B 站 Web 接口的签名验证
@@ -35,7 +33,9 @@ object WbiSigner {
             .apply { put("wts", wts.toString()) }
             .toSortedMap()
         val query = encodeQuery(signParams)
-        val wbiSign = md5(query + mixinKey)
+        // Q-4：原实现是本文件私有的 `md5`（与 AppSigner 里那份逐字重复），
+        // 已收口到 BiliAuthPrimitives.md5Hex。
+        val wbiSign = md5Hex(query + mixinKey)
 
         return params.toMutableMap().apply {
             put("wts", wts.toString())
@@ -54,12 +54,6 @@ object WbiSigner {
             .mapNotNull { index -> orig.getOrNull(index) }
             .joinToString("")
             .take(32)
-    }
-
-    private fun md5(input: String): String {
-        val md = MessageDigest.getInstance("MD5")
-        val digest = md.digest(input.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun encodeComponent(value: String): String {

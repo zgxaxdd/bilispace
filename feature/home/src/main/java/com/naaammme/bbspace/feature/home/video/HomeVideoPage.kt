@@ -55,6 +55,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -67,6 +68,7 @@ import com.naaammme.bbspace.core.common.log.Logger
 import com.naaammme.bbspace.core.designsystem.color.LocalHomeCardDynamicTintEnabled
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAdaptiveContentColors
+import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.core.designsystem.color.resolveVideoCardAmbientDrawSpec
 import com.naaammme.bbspace.core.designsystem.component.IOSActionSheet
 import com.naaammme.bbspace.core.designsystem.component.IOSActionSheetAction
@@ -94,6 +96,7 @@ import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
 import com.naaammme.bbspace.core.designsystem.glass.liquid.lens
@@ -412,10 +415,11 @@ private fun FeedCard(
             if (activeCoverTintKey == coverTintKey) coverTint = color
         }
     }
-    // 取色结果渐变入场：直接跳变会让整张卡片"啪"地换色，350ms 过渡读起来是"光渗进来"
+    // 取色结果渐变入场：直接跳变会让整张卡片"啪"地换色，过渡读起来是"光渗进来"。
+    // 时长走 token（此前硬编码 350ms）：动效速度档位与 reduceMotion 必须能作用到它。
     val animatedCoverTint by animateColorAsState(
         targetValue = coverTint ?: Color.Transparent,
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = LocalAnimations.current.long),
         label = "videoCardCoverTint"
     )
     val tintSource = if (animatedCoverTint.alpha > 0f) animatedCoverTint else null
@@ -733,7 +737,8 @@ private fun FeedCard(
                                 // 出问题时（卡片没上色/颜色不对）这条是唯一的直接证据。
                                 // 本模块未开启 buildConfig 生成，故用 Logger.isDebug 门控。
                                 if (Logger.isDebug) {
-                                    android.util.Log.i(
+                                    // Q-3：收口到 DiagnosticLog（原为裸 android.util.Log.i）
+                                    DiagnosticLog.i(
                                         "BbDynamicTint",
                                         "extracted coverTint=#${Integer.toHexString(extracted.toArgb())} " +
                                             "key=${coverTintKey.takeLast(28)} dark=$darkTheme"
@@ -825,7 +830,12 @@ private fun FeedCard(
                             modifier = if (spaceRoute == null || isDisliked) {
                                 Modifier
                             } else {
-                                Modifier.clickable { onOpenSpace(spaceRoute) }
+                                // F-5：UP 名是"打开空间"的可点文本，补 Role 与动作说明，
+                                // 否则 TalkBack 只知道"可点"，不知道点下去会发生什么。
+                                Modifier.clickable(
+                                    role = Role.Button,
+                                    onClickLabel = "打开 UP 主空间"
+                                ) { onOpenSpace(spaceRoute) }
                             }
                         )
                     }

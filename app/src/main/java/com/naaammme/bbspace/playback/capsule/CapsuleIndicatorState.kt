@@ -77,14 +77,32 @@ class CapsuleIndicatorState @Inject constructor(
         return true
     }
 
+    /**
+     * 小横条**正被粒子消散接管**。
+     *
+     * 小横条的视觉由两层组成：Dock 统一绘制的玻璃壳（DockGlassSurface）与胶囊自身的
+     * Compose 内容。消散组件只能藏掉后者 —— `graphicsLayer { alpha = 0 }` 管不到 Dock 那一层，
+     * 也管不到 AndroidView 锚点与系统无缝覆盖层，于是"粒子散了、模糊壳还在"（用户实测）。
+     * 由胶囊在**粒子首帧出现时**置位，Dock 据此同步淡掉玻璃壳，两边同一时刻消失。
+     */
+    private val _dissolving = mutableStateOf(false)
+    val dissolving: Boolean
+        get() = _dissolving.value
+
+    fun beginDissolve() { _dissolving.value = true }
+
+    fun endDissolve() { _dissolving.value = false }
+
     /** 进入新视频详情时隐藏（新详情接管播放展示）。 */
     fun deactivate() {
         _active.value = false
+        _dissolving.value = false
     }
 
     /** × 关闭 / 滑动移除 / 自然结束：立即停播并释放会话。 */
     fun dismissAndStop() {
         _active.value = false
+        _dissolving.value = false
         playbackSession.close()
     }
 }

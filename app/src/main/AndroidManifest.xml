@@ -10,6 +10,20 @@
          通知栏没有播放控制卡片。在 MainActivity 首次开始播放时请求一次。 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Android 11+ 包可见性（L-1）：深链回落（`Context.openExternalLink`）要查"这条
+         http(s) 链接还能交给谁打开"，不声明就查不到浏览器，会被误判成"没有其它应用"。
+         同时只声明 http/https 的 VIEW —— 不放大对其它包的可见范围。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:name=".BiliApplication"
         android:alwaysRetainTaskState="true"
@@ -22,7 +36,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Bbspace"
         android:enableOnBackInvokedCallback="true"
-        android:usesCleartextTraffic="true">
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -56,6 +70,24 @@
                 <data android:scheme="https" android:host="www.bilibili.com" android:pathPrefix="/bangumi/play/" />
             </intent-filter>
 
+            <!-- F-2（2026-10-05）：专栏 / 图文动态。
+                 这两类链接此前点开只会落到浏览器（真机 query-activities 实证"无本应用"）；
+                 现在解析出 opusId 后进原生内容页（AppNavHost → openArticle）。
+                 注意 **不注册 t.bilibili.com**：那是动态 id，本仓动态详情走 OpusDetailReq，
+                 接管了也只会显示失败页 —— 宁可不接管。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.bilibili.com" android:pathPrefix="/opus/" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.bilibili.com" android:pathPrefix="/read/" />
+            </intent-filter>
+
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -68,6 +100,22 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="live.bilibili.com" />
+            </intent-filter>
+
+            <!-- B-2：b23.tv 短链是 B 站分享出来的最常见形态（真机实测此前没有接管）。
+                 目标地址只能靠 302 拿到，解析在 MainActivity.consumeAppLink →
+                 ShortLinkResolver（IO）里做；解析不出来就回落浏览器（L-1）。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="b23.tv" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" android:host="b23.tv" />
             </intent-filter>
         </activity>
 

@@ -57,13 +57,14 @@ class HomeViewModel @Inject constructor(
         private const val MAX_STAGNANT_LOADS = 2
 
         /**
-         * 列表条数上限（只在 [refresh] 的合并处截断）。
+         * **刷新合并**的条数上限（F-7：只在 [refresh] 的合并处截断，`loadMore` 不受此限）。
          *
          * `refresh()` 是「新内容插到前面、旧内容全保留」的合并语义，反复下拉刷新会让
          * items 无限增长（每条 FeedItem 含若干字符串与图片 URL），既占内存也让每次
          * 合并的 distinctBy 越来越贵。500 条约十几屏，远超一次会话的回看需求；
          * 截断按"最新在前"保序丢弃尾部（最旧）。
          * loadMore 不截断：分页拉到哪算哪，截断会让刚取回的一页立刻被丢掉。
+         * （原 KDoc 首句写的是"列表条数上限"，会被误读成"列表有硬上界"，已改正。）
          */
         private const val MAX_FEED_ITEMS = 500
     }
@@ -95,6 +96,9 @@ class HomeViewModel @Inject constructor(
     /**
      * 当前取流游标（来源自持，方案 §4.4）。app 游标与 web 页序号分开持有，
      * MERGED 档下两者独立推进；切换来源时整体重置。
+     *
+     * WEB 档下 **app 游标同样跟随列表末项**（B-3/L-2）：取流只看 `webPage`，
+     * 但 WBI 密钥失败回退 MOBILE 时用的是 `appIdx` —— 归零会让"加载更多"原地踏步。
      */
     private var feedCursor = FeedCursor.Initial
 

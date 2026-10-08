@@ -134,6 +134,12 @@ fun WebViewScreen(
                     currentOnOpenExternal(requestUrl)
                     true
                 }
+
+                // F-2（2026-10-05）：专栏 / 图文动态**留在 WebView 里继续浏览**。
+                // 应用内 WebView 的定位是"就地浏览"（用户已在这条浏览链路里），
+                // 而**外部入口**（Manifest 接管 / 显式投递）由 `AppNavHost` 走原生内容页。
+                // 两者共用一个 [WebLinkParser]，但消费方各自决定"就地"还是"跳原生"。
+                is WebLinkTarget.ToDynamic -> false
             }
         }
 
