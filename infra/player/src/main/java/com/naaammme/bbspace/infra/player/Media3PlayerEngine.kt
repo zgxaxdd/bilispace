@@ -227,6 +227,25 @@ class Media3PlayerEngine @Inject constructor(
     /** 超时计数器（只增不减）：会话层按增量记 `CdnHealthPolicy.Event.FirstFrameTimeout`。 */
     private var firstFrameTimeoutSeq = 0L
 
+    // ---- N4：首帧解剖（t0 建源 → t1 交源 → t2 解码器 init → t3 surface → t4 出帧）----
+    /**
+     * 本次起播的阶段时间线（每次 [setSource] 归零），出帧或超时时打成一行 `FirstFrame` 诊断。
+     *
+     * 为什么放在引擎而不是会话层：这五个点只有 `AnalyticsListener` 与 `setSource` 能同时看到，
+     * 会话层拿到的是聚合后的 StateFlow —— 那里已经分不出"慢在索引还是慢在解码器"。
+     */
+    private val firstFrameTimeline = FirstFrameTimeline(android.os.SystemClock::elapsedRealtime)
+
+    /**
+     * 本次建源时 DASH 索引**是否真的走了网络**（由 [buildMediaSource] 写入，非 DASH 为 null）。
+     *
+     * 之所以是一个字段而不是返回值：[buildMediaSource] 的返回类型是 `MediaSource`，
+     * 而"这一支视频是不是没命中字节缓存"这件事与 `cdnDashPrefetchPlan` 同属"本次建源的副产物"，
+     * 沿用同一条通道（字段）而不是为诊断改签名。
+     */
+    @Volatile
+    private var dashIndexFromNetwork: Boolean? = null
+
     private fun newPlayerListener(boundGen: Long): Player.Listener = object : Player.Listener {
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
@@ -321,6 +340,11 @@ class Media3PlayerEngine @Inject constructor(
         override fun onRenderedFirstFrame() {
             if (boundGen != rebuildGen) return
             firstFrameSeq += 1L
+            // N4：t4 出帧 —— 到这里五个点齐了，打完整解剖行（一次开播只出一行）。
+            firstFrameTimeline.firstFrameRendered()
+            firstFrameTimeline.completeLine()?.let { line ->
+                DiagnosticLog.i(FIRST_FRAME_TAG) { line }
+            }
             // **出帧只是"恢复候选"**，不是"恢复成功"：缓存里的一帧同样会触发本回调。
             // 真机实测（2026-10-06 断网）：在这里直接 `rebuildThrottle.reset()` 会让
             // "每 3 秒重建一次"的活锁永远刹不住。改为记下出帧时刻，
@@ -358,7 +382,20 @@ class Media3PlayerEngine @Inject constructor(
             initializationDurationMs: Long
         ) {
             videoDecoderName = decoderName
+            // N4：t2。`initializationDurationMs` 是 Media3 直接给出的"解码器初始化花了多久"，
+            // 之前这个参数在这里被接收后**直接丢弃**（刷视频切页到底有没有重新起解码器，
+            // 只能靠这条日志回答）。连续同编码的视频之间若不再回调本方法 = 解码器被复用。
+            firstFrameTimeline.decoderInitialized(decoderName, initializationDurationMs)
             updatePlaybackState()
+        }
+
+        override fun onSurfaceSizeChanged(
+            eventTime: AnalyticsListener.EventTime,
+            width: Int,
+            height: Int
+        ) {
+            // N4：t3（代理指标 —— Media3 没有"surface 就绪"回调，尺寸确定是最接近的）。
+            firstFrameTimeline.surfaceReady(width, height)
         }
 
         override fun onAudioDecoderInitialized(
@@ -447,8 +484,13 @@ class Media3PlayerEngine @Inject constructor(
             // 与"用户点开视频"同一时刻，而不是等第一帧回调。
             playbackStartAtMs = android.os.SystemClock.elapsedRealtime()
             firstFrameTimeoutReported = false
+            // N4：t0 —— 新的开播把解剖时间线归零（重建/换页都走这条路，不会串页）。
+            firstFrameTimeline.begin(source::class.simpleName.orEmpty())
             val mediaSource = buildMediaSource(source, itemMetadata)
             player.setMediaSource(mediaSource)
+            // N4：t1 —— 媒体源建好并交给播放器（这一段含 playurl 之后的 DASH 索引读取、
+            // 多线路重试，是"冷缓存起播慢"的主要落点）。
+            firstFrameTimeline.sourceReady(dashIndexFromNetwork)
             if (startPositionMs != null && startPositionMs > 0) {
                 // PB-02：续播/恢复**必须精确**（吸附后的粗值会被写回历史记录）。
                 // 这里显式断言 DEFAULT，而不是"假设上一步没设过 CLOSEST_SYNC"。
@@ -744,6 +786,8 @@ class Media3PlayerEngine @Inject constructor(
         // 预取计划只属于"本次建源"：换源时先清空，避免拿上一支视频的 sidx 去预取。
         cdnDashPrefetchPlan = null
         cdnPrefetchFrontierMs = -1L
+        // N4：索引的网络证据同样只属于"本次建源"，非 DASH 源保持 null（= 这行里写 `-`）。
+        dashIndexFromNetwork = null
         return when (source) {
             is EngineSource.LiveFlv -> {
                 val mediaSourceFactory = buildProgressiveMediaSourceFactory(source)
@@ -778,6 +822,8 @@ class Media3PlayerEngine @Inject constructor(
                 // 此时会话层记 BUFFERING 才算到线上（索引命中缓存 ⇒ 不种这个信号）。
                 // 见 `CdnHealthPolicy.shouldRecordSessionEvent` 与会话层 `recordCdnHealth`。
                 if (build.indexFromNetwork) markNetworkActivity()
+                // N4：把"索引这次是不是走了网络"留给解剖行的 t1 标记。
+                dashIndexFromNetwork = build.indexFromNetwork
                 build.mediaSource
             }
 
@@ -1036,6 +1082,11 @@ class Media3PlayerEngine @Inject constructor(
             "first frame timeout after ${now - playbackStartAtMs}ms " +
                 "state=${player.playbackState} host=${currentServingHost().orEmpty()}"
         }
+        // N4：超时这一刻的**残缺解剖** —— 回答"卡在哪一段"（没到 t1 = 还在建源/取索引；
+        // 到了 t1 却没 t2 = 解码器还没起来）。出帧之后仍会再补一条完整行，两条互不替代。
+        firstFrameTimeline.partialLine("timeout")?.let { line ->
+            DiagnosticLog.w(FIRST_FRAME_TAG) { line }
+        }
         updatePlaybackState()
     }
 
@@ -1125,6 +1176,15 @@ class Media3PlayerEngine @Inject constructor(
 
     private companion object {
         const val TAG = "Media3Player"
+
+        /**
+         * 首帧解剖行的 tag（N4）。
+         *
+         * 单独一个 tag 而不是混在 [TAG] 里：这行的用途是**被脚本解析**
+         * （`adb logcat -s FirstFrame` → 每次开播一行 `t1/t2/t3/t4`），
+         * 与 [TAG] 下那些人类可读的状态日志混在一起就没法直接喂给统计。
+         */
+        const val FIRST_FRAME_TAG = "FirstFrame"
 
         /** 与源（BiliPai `maxRetries = 3`）一致：网络类错误最多重试 3 次。 */
         const val MAX_NETWORK_RETRIES = 3
