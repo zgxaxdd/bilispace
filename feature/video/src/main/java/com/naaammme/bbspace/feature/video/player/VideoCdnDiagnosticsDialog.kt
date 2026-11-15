@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.infra.player.cdn.CdnNodeTransfer
 import com.naaammme.bbspace.infra.player.cdn.CdnTransferRuntime
@@ -98,10 +99,60 @@ internal fun VideoCdnDiagnosticsDialog(onDismiss: () -> Unit) {
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        // ---- W4（2026-10-18）：属地/自定义线路插件 ----
+                        // 显示的必须是**真正下发给引擎的候选表**（会话在开播时发布到
+                        // `CdnTransferRuntime.state`），而不是本面板按设置重算的预测顺序
+                        // —— 后者会说谎，比没有更糟。
+                        //
+                        // 这一栏**始终存在**（含插件关闭/已开但没有改写两种空态）：
+                        // 只有"有数据"才显示时，用户看不到入口，也就不知道去哪打开。
+                        Text(
+                            text = "选线来源：" + when {
+                                !snapshot.regionEnabled -> "插件未启用（候选按服务端原序）"
+                                snapshot.regionHosts.isEmpty() ->
+                                    "插件已启用，本次无改写（未配置 host/规则，或未命中）"
+                                else -> "插件已启用　下发 " + snapshot.regionHosts.size + " 条"
+                            },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        // 逐行「序号 host —— 来源」而不是 `host(来源) → host(来源)` 拼成一行：
+                        // 对话框很窄，host 名又长（upos-…bilivideo.com），拼一行会折成
+                        // 两三行且来源标签与下一个 host 混在一起，读不出"哪个是哪一类"。
+                        if (snapshot.regionHosts.isNotEmpty()) {
+                            snapshot.regionHosts.forEachIndexed { index, host ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = (index + 1).toString() + ". " + host,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    // 来源标签与候选一一对应（下标对齐由会话侧保证）；
+                                    // 首条 = 主线路，用主色标出，其余保持次级文字色。
+                                    val source = snapshot.regionSources.getOrNull(index).orEmpty()
+                                    if (source.isNotEmpty()) {
+                                        Text(
+                                            text = source,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (index == 0) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         if (snapshot.preferredHost != null) {
                             TextButton(
                                 onClick = { CdnTransferRuntime.restoreRoutes() },
-                                modifier = Modifier.align(Alignment.End)
+                                modifier = Modifier.align(Alignment.End).appElasticPress()
                             ) {
                                 Text("恢复自动")
                             }
@@ -135,7 +186,10 @@ internal fun VideoCdnDiagnosticsDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("关闭")
             }
         }
@@ -173,10 +227,18 @@ private fun CdnNodeRow(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onCooldown, enabled = node.cooldownUntilMs <= now) {
+            TextButton(
+                onClick = onCooldown,
+                enabled = node.cooldownUntilMs <= now,
+                modifier = Modifier.appElasticPress(enabled = node.cooldownUntilMs <= now)
+            ) {
                 Text(if (node.cooldownUntilMs > now) "冷却中" else "冷却 60s")
             }
-            TextButton(onClick = onPin, enabled = !pinned) {
+            TextButton(
+                onClick = onPin,
+                enabled = !pinned,
+                modifier = Modifier.appElasticPress(enabled = !pinned)
+            ) {
                 Text(if (pinned) "使用中" else "钉住")
             }
         }

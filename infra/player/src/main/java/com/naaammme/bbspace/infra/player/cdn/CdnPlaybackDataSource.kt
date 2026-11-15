@@ -70,6 +70,12 @@ class CdnPlaybackDataSource(
     private var delegateOpen = false
     private var started = false
     private var parallel = false
+    /** 一次 open 内不变的"有资格并行"判据；降级后重升只复用这一份（见 [maybeRestoreParallel]）。 */
+    private var parallelEligible = false
+    /** 降级成单连接的时刻（单调毫秒）；0 = 没降级过。 */
+    private var parallelDisabledAtMs = 0L
+    /** 本次 open 内已发生的"降级 → 重升"次数（上限见 [MAX_PARALLEL_RESTORES]）。 */
+    private var parallelRestoreCount = 0
     private var monitored = false
     private var delegateHost = ""
     /**
@@ -100,10 +106,13 @@ class CdnPlaybackDataSource(
         val observedMedia = CdnTransferRuntime.observeMediaUrl(dataSpec.uri.toString())
         monitored = candidates.isNotEmpty() || observedMedia
         val wifi = isWifi()
-        parallel = candidates.isNotEmpty() && CdnTransferRuntime.parallelEnabled && wifi &&
+        parallelEligible = candidates.isNotEmpty() && CdnTransferRuntime.parallelEnabled && wifi &&
             dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET && dataSpec.httpBody == null &&
             dataSpec.length >= CDN_MIN_PARALLEL_BYTES &&
             dataSpec.position >= 0 && dataSpec.length - 1 <= Long.MAX_VALUE - dataSpec.position
+        parallel = parallelEligible
+        parallelDisabledAtMs = 0L
+        CdnTransferRuntime.noteParallelSession(parallel)
         // **可证伪证据（2026-10-06）**：没有这行日志就等于"并行没跑" ✗ —— 我不再靠"应该会跑"交差。
         com.naaammme.bbspace.core.common.log.DiagnosticLog.i("CdnParallel") {
             "enabled=${CdnTransferRuntime.enabled} monitored=$monitored parallel=$parallel " +
@@ -126,10 +135,13 @@ class CdnPlaybackDataSource(
             try {
                 count = upstream.read(buffer, offset, length)
             } catch (error: IOException) {
+                CdnTransferRuntime.noteWindowError(error.message ?: error::class.simpleName)
                 if (monitored) finishDelegate(false, closed)
                 throw error
             }
             if (count > 0 && monitored) recordDelegateBytes(count)
+            // 降级不可逆是"卡在 5 秒"的直接成因：单连接稳定跑够冷却、缓冲回到 10s 以上时重试并行。
+            if (count > 0) maybeRestoreParallel()
         } else {
             if (windowOffset == window.size) {
                 try {
@@ -141,11 +153,15 @@ class CdnPlaybackDataSource(
                     val size = minOf(startupWindow, current.length - consumed)
                     window = downloadWindow(current, current.position + consumed, size)
                     windowOffset = 0
+                    CdnTransferRuntime.noteWindowResult("ok bytes=$size")
                 } catch (error: IOException) {
                     cancelCalls()
+                    CdnTransferRuntime.noteWindowError(error.message ?: error::class.simpleName)
                     if (closed || Thread.currentThread().isInterrupted || background) throw error
                     CdnTransferRuntime.fallback()
                     parallel = false
+                    parallelDisabledAtMs = nowMs()
+                    CdnTransferRuntime.noteParallelSession(false)
                     // Resume at delivered position, never restart or expose a partial window.
                     openDelegate(current.subrange(consumed))
                     return read(buffer, offset, length)
@@ -260,11 +276,40 @@ class CdnPlaybackDataSource(
         val pieces = splitCdnRange(start, length, count)
         val total = AtomicLong(-1)
         if (background && CdnTransferRuntime.permits.availablePermits() <= 1) throw IOException("CDN prefetch yields its slot")
-        if (!CdnTransferRuntime.permits.tryAcquire(count)) throw IOException("CDN connection budget exhausted")
-        val attempts = pieces.mapIndexed { index, range ->
-            val selected = if (CdnTransferRuntime.state.value.preferredHost != null) urls.first() else urls[index % urls.size]
-            launchAttempt(dataSpec, range, selected, total, reserved = true)
-                ?: throw IOException("CDN connection budget exhausted")
+        // 空切分（非法区间）不能拿一个全零窗口当数据交付：**先判**，否则下面
+        // `tryAcquire(0)` 会抛 IllegalArgumentException（permit 数为 0 非法）。
+        if (pieces.isEmpty()) throw IOException("CDN empty range")
+        // 槽位异常：先等一个有界时间让上一窗口的 OkHttp 回调把槽位还回来，再判失败。
+        // 修复前直接 tryAcquire ⇒ 瞬时失败即落进 read() 的 catch ⇒ **本会话永久单连接**，
+        // 而并发策略的救援分支（缓冲 <5s → 3 连接）从此不可达。
+        // ⚠️ 槽位数必须取**实际片数** `pieces.size`，不能取 `count`：`splitCdnRange` 会被
+        // 区间长度夹小（尾窗只剩 1~3 字节时 count=3 而 pieces.size=1），按 count 占位
+        // 就会在成功路径上永久漏掉 `count − pieces.size` 个 permit（进程级 Semaphore(4)，
+        // 漏几次之后并行静默降档，且是单向泄漏）。评审 A5。
+        if (!CdnTransferRuntime.permits.tryAcquire(
+                pieces.size,
+                CdnConnectionPolicy.WINDOW_SLOT_WAIT_MS,
+                TimeUnit.MILLISECONDS
+            )
+        ) {
+            throw IOException("CDN connection budget exhausted")
+        }
+        if (pieces.isEmpty()) {
+            throw IOException("CDN empty range")
+        }
+        // 异常路径必须归还"已领取但没交给任何 attempt"的槽位（attempt 自己的槽位由回调归还）。
+        var launched = 0
+        val attempts = try {
+            pieces.mapIndexed { index, range ->
+                val selected = if (CdnTransferRuntime.state.value.preferredHost != null) urls.first() else urls[index % urls.size]
+                val attempt = launchAttempt(dataSpec, range, selected, total, reserved = true)
+                    ?: throw IOException("CDN connection budget exhausted")
+                launched += 1
+                attempt
+            }
+        } catch (error: Throwable) {
+            repeat((pieces.size - launched).coerceAtLeast(0)) { CdnTransferRuntime.permits.release() }
+            throw error
         }
         val output = ByteArray(length.toInt())
         var outputOffset = 0
@@ -429,7 +474,49 @@ class CdnPlaybackDataSource(
 
     private fun cancelCalls() { calls.forEach { it.cancel() } }
 
+    /**
+     * 降级后的**有界恢复**：满足 [CdnConnectionPolicy.shouldRestoreParallel] 时把并行打开。
+     *
+     * 只在单连接读到字节之后才检查（即"单连接确实在工作"这一手证据），不是每个 read 都查。
+     * 重升时先关掉内层 delegate、归还它的记账，下一个 read 会按并行窗口从 `consumed` 继续。
+     */
+    private fun maybeRestoreParallel() {
+        if (parallel || !parallelEligible || closed) return
+        // **重升次数上限**（评审 A3）：只有 15s 冷却时，"重升 → 窗口 12s 超时 → 再降级"
+        // 在弱网下会无界 churn（每 ~27s 一段"零字节交付"），比一直单连接还差。
+        // 一个 open 内最多重升 2 次：够覆盖"一次抖动"，又不会变成周期性卡顿源。
+        if (parallelRestoreCount >= MAX_PARALLEL_RESTORES) return
+        val bufferMs = CdnTransferRuntime.state.value.bufferMs
+        if (!CdnConnectionPolicy.shouldRestoreParallel(
+                nowMs = nowMs(),
+                disabledAtMs = parallelDisabledAtMs,
+                bufferMs = bufferMs,
+                parallelAllowed = CdnTransferRuntime.parallelEnabled,
+                wifi = isWifi()
+            )
+        ) {
+            return
+        }
+        runCatching { if (delegateOpen) upstream.close() }
+        delegateOpen = false
+        // **这不叫"成功"**（评审 A7）：delegate 是在正常供数中被我们主动掐断的，
+        // 记成功会给线路健康度白加分、甚至掩盖坏线路。按"取消"记账。
+        finishDelegate(success = false, canceled = true)
+        parallel = true
+        parallelDisabledAtMs = 0L
+        parallelRestoreCount += 1
+        CdnTransferRuntime.noteParallelSession(true)
+        CdnTransferRuntime.noteWindowResult("parallel-restored($parallelRestoreCount) buf=${bufferMs}ms")
+        com.naaammme.bbspace.core.common.log.DiagnosticLog.i("CdnParallel") {
+            "restored parallel after fallback (#$parallelRestoreCount) buf=${bufferMs}ms pos=$consumed"
+        }
+    }
+
+    private fun nowMs(): Long = System.nanoTime() / 1_000_000
+
     companion object {
+        /** 一个数据源实例（≈一次 open）内允许的"降级 → 重升"次数上限（评审 A3）。 */
+        private const val MAX_PARALLEL_RESTORES = 2
         // A shared dispatcher and connection pool; no per-player executor or hidden scope.
     }
 }

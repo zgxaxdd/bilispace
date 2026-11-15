@@ -21,11 +21,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,7 +42,11 @@ import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.sponsorblock.SbCategory
 import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixSwitch
 import com.naaammme.bbspace.feature.settings.SettingsViewModel
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,7 +71,7 @@ fun SponsorBlockSettingsScreen(
             TopAppBar(
                 title = { Text("空降助手") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
@@ -81,27 +83,27 @@ fun SponsorBlockSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("启用空降助手", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(BiliSpacing.xs))
                             Text(
                                 "播放时自动或手动跳过恰饭 片头片尾等片段",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
+                        AppMiuixSwitch(
                             checked = enabled,
                             onCheckedChange = { next ->
                                 if (next && !enabled) {
@@ -117,9 +119,9 @@ fun SponsorBlockSettingsScreen(
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(BiliSpacing.lg)) {
                         Text("数据说明", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(BiliSpacing.xs))
                         Text(
                             "片段数据来自小电视空降助手（BilibiliSponsorBlock）社区的公开标注。" +
                                 "开启后，播放 UGC 视频时会向社区服务器查询该视频的片段信息。" +
@@ -136,7 +138,7 @@ fun SponsorBlockSettingsScreen(
                     "分类管理",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    modifier = Modifier.padding(start = BiliSpacing.xs, top = BiliSpacing.xs)
                 )
             }
 
@@ -146,12 +148,12 @@ fun SponsorBlockSettingsScreen(
                 Card(
                     onClick = { editCategory = category },
                     enabled = enabled,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().appElasticPress()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
@@ -159,7 +161,7 @@ fun SponsorBlockSettingsScreen(
                                 .size(12.dp)
                                 .background(Color(category.colorArgb), CircleShape)
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(BiliSpacing.md))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(category.title, style = MaterialTheme.typography.bodyLarge)
                             Text(
@@ -183,7 +185,7 @@ fun SponsorBlockSettingsScreen(
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(BiliSpacing.lg)) {
                         SettingSwitchRow(
                             title = "跳过提示",
                             subtitle = "跳过后显示提示信息",
@@ -191,7 +193,7 @@ fun SponsorBlockSettingsScreen(
                             checked = toastEnabled,
                             onCheckedChange = viewModel::updateSponsorBlockToast
                         )
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(BiliSpacing.md))
                         SettingSwitchRow(
                             title = "进度条标记",
                             subtitle = "在进度条上以颜色标注片段区间",
@@ -205,20 +207,20 @@ fun SponsorBlockSettingsScreen(
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(BiliSpacing.lg)) {
                         Text("服务器", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(BiliSpacing.xs))
                         Text(
                             serverUrl.ifBlank { SponsorBlockClient.DEFAULT_SERVER },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = { showServerEditor = true }, enabled = enabled) {
+                        Spacer(Modifier.height(BiliSpacing.sm))
+                        Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
+                            TextButton(modifier = Modifier.appElasticPress(), onClick = { showServerEditor = true }, enabled = enabled) {
                                 Text("修改地址")
                             }
-                            TextButton(
+                            TextButton(modifier = Modifier.appElasticPress(),
                                 onClick = viewModel::testSponsorBlockServer,
                                 enabled = enabled
                             ) {
@@ -239,9 +241,9 @@ fun SponsorBlockSettingsScreen(
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(BiliSpacing.lg)) {
                         Text("我的身份", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(BiliSpacing.xs))
                         Text(
                             userId?.let { "已生成（${it.take(8)}…）" } ?: "尚未生成，开启功能后自动创建",
                             style = MaterialTheme.typography.bodySmall,
@@ -252,8 +254,8 @@ fun SponsorBlockSettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(
+                        Spacer(Modifier.height(BiliSpacing.sm))
+                        TextButton(modifier = Modifier.appElasticPress(),
                             onClick = { showRegenerateConfirm = true },
                             enabled = userId != null
                         ) {
@@ -275,13 +277,13 @@ fun SponsorBlockSettingsScreen(
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = {
                         viewModel.updateSponsorBlockEnabled(true)
                         showEnableConfirm = false
                     }) { Text("开启") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showEnableConfirm = false }) { Text("取消") }
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = { showEnableConfirm = false }) { Text("取消") }
                 }
             )
         }
@@ -311,7 +313,7 @@ fun SponsorBlockSettingsScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { editCategory = null }) { Text("取消") }
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = { editCategory = null }) { Text("取消") }
                 }
             )
         }
@@ -332,13 +334,13 @@ fun SponsorBlockSettingsScreen(
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = {
                         viewModel.updateSponsorBlockServerUrl(draft)
                         showServerEditor = false
                     }) { Text("保存") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showServerEditor = false }) { Text("取消") }
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = { showServerEditor = false }) { Text("取消") }
                 }
             )
         }
@@ -351,13 +353,13 @@ fun SponsorBlockSettingsScreen(
                     Text("重置后将生成新的身份 ID，旧的社区贡献记录将无法关联。确定继续？")
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = {
                         viewModel.regenerateSponsorBlockUserId()
                         showRegenerateConfirm = false
                     }) { Text("确定") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showRegenerateConfirm = false }) { Text("取消") }
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = { showRegenerateConfirm = false }) { Text("取消") }
                 }
             )
         }
@@ -386,13 +388,13 @@ private fun SettingSwitchRow(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(BiliSpacing.xs))
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Switch(checked = checked && enabled, enabled = enabled, onCheckedChange = onCheckedChange)
+        AppMiuixSwitch(checked = checked && enabled, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }

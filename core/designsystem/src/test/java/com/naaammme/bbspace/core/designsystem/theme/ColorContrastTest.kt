@@ -35,38 +35,18 @@ import org.junit.Test
 class ColorContrastTest {
 
     // ── WCAG 计算 ──────────────────────────────────────────────────────────
+    //
+    // 2026-10-16：公式已抽到 [ContrastMath]（同包，调用点保持不变）。
+    // 抽出的理由是"只留一份实现" —— 同一天里同一组公式被两套算法各算了一遍
+    // （4.76:1 vs 2.10:1，后者漏了"合成后再线性化"），把数学收到一处可以从结构上
+    // 避免那种争议重现。本类的 8 条断言、阈值、棘轮值**一律未动**。
 
-    /** 拆出 0–255 的整型通道（[Color] 的通道是 0–1 Float，这里统一成 0–255 便于读）。 */
-    private fun chan(c: Color): DoubleArray =
-        doubleArrayOf(c.red * 255.0, c.green * 255.0, c.blue * 255.0)
+    private fun chan(c: Color): DoubleArray = ContrastMath.chan(c)
 
-    private fun alpha(c: Color): Double = c.alpha.toDouble()
-
-    /** SrcOver 合成：前景按自身 alpha 叠到不透明背景上。 */
-    private fun composeOver(fg: Color, bg: Color): DoubleArray {
-        val a = alpha(fg)
-        val f = chan(fg)
-        val b = chan(bg)
-        return DoubleArray(3) { i -> a * f[i] + (1.0 - a) * b[i] }
-    }
-
-    /** WCAG 2.x 相对亮度（sRGB 反伽马后按 0.2126/0.7152/0.0722 加权）。 */
-    private fun relativeLuminance(rgb: DoubleArray): Double {
-        fun lin(v: Double): Double {
-            val s = v / 255.0
-            return if (s <= 0.03928) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2])
-    }
-
-    private fun contrast(a: DoubleArray, b: DoubleArray): Double {
-        val la = relativeLuminance(a)
-        val lb = relativeLuminance(b)
-        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
-    }
+    private fun contrast(a: DoubleArray, b: DoubleArray): Double = ContrastMath.contrast(a, b)
 
     /** 前景（可能半透明）落在背景上的对比度。 */
-    private fun ratioOn(fg: Color, bg: Color): Double = contrast(composeOver(fg, bg), chan(bg))
+    private fun ratioOn(fg: Color, bg: Color): Double = ContrastMath.ratioOn(fg, bg)
 
     // ── 被测色板 ───────────────────────────────────────────────────────────
     //

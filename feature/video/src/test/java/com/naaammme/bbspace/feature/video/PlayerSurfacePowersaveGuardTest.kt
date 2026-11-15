@@ -35,8 +35,9 @@ import org.junit.Test
  *    （真机 dump：`PlayerView 1272×856` = 716 + 141）⇒ 16:9 画面被 FIT 居中、
  *    上下各一条 71px 黑边，且播放页越过播放带底边 141px 压到简介区。
  * 3. 播放带底边 = `statusTop + videoMorphPx`（= 画面底边）；
- * 4. 视频与简介之间的间距由**简介内容自己的 padding**给（`contentTopPad`），
- *    不能用 offset 拉开 —— 那样中间会露出没有背景的黑段。
+ * 4. 视频与简介之间的间距由**简介内容自己的 padding**给，且取值来自设计常量
+ *    `BiliDetailLayout.INTRO_TOP_GAP`（骨架屏在 designsystem、看不到系统 inset，
+ *    两侧必须共用同一个常量，否则详情到达时会跳版）；
  */
 class PlayerSurfacePowersaveGuardTest {
 
@@ -156,8 +157,16 @@ class PlayerSurfacePowersaveGuardTest {
             screen.contains("(statusTopPx + videoMorphPx()).coerceAtMost(maxHeightPx)")
         )
         assertTrue(
-            "视频与简介的间距必须由简介内容自身 padding 给（contentTopPad），不能用 offset 拉开",
-            screen.contains("contentTopPad = statusTop") && !screen.contains("detailTopGapPx")
+            "视频与简介的间距必须由简介内容自身 padding 给，不能用 offset 拉开" +
+                "（那样中间会露出没有背景的黑段）。" +
+                "**2026-10-12**：取值从 `statusTop`（状态栏高度）改为设计常量 " +
+                "`BiliDetailLayout.INTRO_TOP_GAP` —— 用户第二次反馈「标题与视频相隔很远，" +
+                "给人很空的感觉」。旧写法有两个结构性问题：① 间距由系统 inset 决定，" +
+                "换机型就变；② 骨架屏 `VideoDetailInfoSkeleton` 在 designsystem、看不到 " +
+                "statusTop，两侧永远差 ≈40dp，详情到达时整块内容向下跳一格。",
+            screen.contains("introTopGap = BiliDetailLayout.INTRO_TOP_GAP") &&
+                !screen.contains("contentTopPad = statusTop") &&
+                !screen.contains("detailTopGapPx")
         )
         assertTrue(
             "根层必须铺主题背景色：铺黑或留空都会在播放区域的角上露出直角黑边",
@@ -223,8 +232,13 @@ class PlayerSurfacePowersaveGuardTest {
                 sourceOf("VideoScreen.kt").contains("viewModel.playerSurfaceView.collectAsStateWithLifecycle()")
         )
         assertTrue(
-            "单次创建护栏：设置未读出前不建 PlayerView（否则会创建两次 ⇒ 首次进入黑屏）",
-            sourceOf("VideoPlayerPane.kt").contains("val surfaceSetting = surfacePowersave ?: if (surfaceSettingTimedOut) false else null") &&
+            "单次创建护栏：设置未读出前不建 PlayerView（否则会创建两次 ⇒ 首次进入黑屏）。" +
+                "兜底值必须是 **true**（与 `AppSettings` 的出厂默认 `?: true` 同向）——" +
+                "原先取 false 会让慢 DataStore 路径先建 TextureView 版、真值到达后再由 " +
+                "`key(useSurfaceView)` 重建为 SurfaceView 版，恰好落回这条要防的「建两次」" +
+                "（2026-10-11 审查，真机可复现黑帧）。",
+            sourceOf("VideoPlayerPane.kt")
+                .contains("val surfaceSetting = surfacePowersave ?: if (surfaceSettingTimedOut) true else null") &&
                 sourceOf("VideoViewModel.kt").contains("StateFlow<Boolean?>")
         )
     }

@@ -23,9 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -42,11 +40,16 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixActionTone
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixButton
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixSwitch
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,7 +82,7 @@ fun PrivacySettingsScreen(
             TopAppBar(
                 title = { Text("隐私安全") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
@@ -91,8 +94,8 @@ fun PrivacySettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             // Gaia 风控上报
             item {
@@ -103,7 +106,7 @@ fun PrivacySettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -111,7 +114,7 @@ fun PrivacySettingsScreen(
                             Text("禁止 Gaia 上报", style = MaterialTheme.typography.bodyLarge)
                             Text("阻止应用列表风控数据上报", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(checked = blockGaia, onCheckedChange = { viewModel.setBlockGaia(it) })
+                        AppMiuixSwitch(checked = blockGaia, onCheckedChange = { viewModel.setBlockGaia(it) })
                     }
                 }
             }
@@ -124,7 +127,7 @@ fun PrivacySettingsScreen(
             item {
                 Card(
                     onClick = onNavigateToBlockedUp,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().appElasticPress()
                 ) {
                     Row(
                         modifier = Modifier
@@ -231,18 +234,23 @@ fun PrivacySettingsScreen(
                         Spacer(Modifier.height(BiliSpacing.sm))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                         ) {
-                            OutlinedButton(
+                            // 设置页批 3：缓存清理三个动作改用 Miuix 动作按钮原语。
+                            // 语义/回调/Toast 文案逐字未变：OutlinedButton→Secondary、
+                            // Button→Primary 仅换渲染层；Danger 档在此无自然落点（清缓存
+                            // 不是用户数据破坏），故不硬套。
+                            AppMiuixButton(
+                                text = "清除图片缓存",
                                 onClick = {
                                     viewModel.clearImageCache()
                                     Toast.makeText(context, "已清除图片缓存", Toast.LENGTH_SHORT).show()
                                 },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("清除图片缓存")
-                            }
-                            Button(
+                                modifier = Modifier.weight(1f),
+                                tone = AppMiuixActionTone.Secondary
+                            )
+                            AppMiuixButton(
+                                text = "清除所有缓存",
                                 onClick = {
                                     viewModel.clearAllCache()
                                     // PB-03：措辞必须准确 —— 播放缓存有独立按钮且播放中拒绝清理，
@@ -250,18 +258,17 @@ fun PrivacySettingsScreen(
                                     Toast.makeText(context, "已清除应用缓存（播放缓存除外）", Toast.LENGTH_SHORT)
                                         .show()
                                 },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("清除所有缓存")
-                            }
+                                modifier = Modifier.weight(1f),
+                                tone = AppMiuixActionTone.Primary
+                            )
                         }
                         Spacer(Modifier.height(BiliSpacing.sm))
-                        OutlinedButton(
+                        AppMiuixButton(
+                            text = "清除播放缓存",
                             onClick = { viewModel.clearPlaybackCache() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("清除播放缓存")
-                        }
+                            modifier = Modifier.fillMaxWidth(),
+                            tone = AppMiuixActionTone.Secondary
+                        )
                     }
                 }
             }
@@ -304,7 +311,7 @@ fun PrivacySettingsScreen(
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     Button(
                         onClick = {
@@ -328,7 +335,7 @@ fun PrivacySettingsScreen(
                                 Toast.LENGTH_LONG
                             ).show()
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text("导出到剪切板")
                     }
@@ -343,7 +350,7 @@ fun PrivacySettingsScreen(
                                 viewModel.importAccounts(text)
                             }
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text("从剪切板导入")
                     }
@@ -351,7 +358,7 @@ fun PrivacySettingsScreen(
             }
 
             // 底部留白
-            item { Spacer(modifier = Modifier.height(16.dp)) }
+            item { Spacer(modifier = Modifier.height(BiliSpacing.lg)) }
         }
     }
 }
@@ -369,7 +376,7 @@ private fun SectionTitle(title: String) {
 @Composable
 private fun InfoCard(entries: List<Pair<String, String>>) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.md)) {
             entries.forEach { (key, value) ->
                 InfoRow(key, value)
             }
@@ -382,6 +389,7 @@ private fun InfoRow(key: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // 微间距 2dp：BiliSpacing 最小是 xs=4dp，硬套 token 会改变布局，故保留字面量。
             .padding(vertical = 2.dp)
     ) {
         Text(

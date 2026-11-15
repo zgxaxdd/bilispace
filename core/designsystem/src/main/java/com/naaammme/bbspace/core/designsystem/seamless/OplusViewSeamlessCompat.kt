@@ -4,6 +4,8 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.oplus.animation.OplusViewSeamless
@@ -149,6 +151,21 @@ object OplusViewSeamlessCompat {
     /**
      * 无缝动画进度回调。[onProgress] 的 progress 可用于判断当前是否处于回弹状态；
      * onStart/onEnd 的 [isOpen] 区分打开与返回动画。
+     *
+     * ## 线程契约（2026-10-12 审查补）
+     *
+     * 回调的**投递线程由系统决定**，官方文档未作任何承诺。而本仓的实现里这些回调会：
+     * ① 写 Compose `mutableStateOf`（[SeamlessTransitionState] 的 openRunning /
+     * returnRunning / progress）—— 该对象自己的 KDoc 明写"**只能在主线程写**"；
+     * ② 直接操作 `View.foreground` / `background`（`SeamlessCardOpener.Callback.onEnd`）
+     * —— View 体系本身就不是线程安全的。
+     *
+     * 此前这两件事都发生在系统回调的原始线程上，全靠"系统恰好回在主线程"这一未经验证的
+     * 假设。这里在**转发层**统一收口：已在主线程则直接调用（零开销，正常路径不受影响），
+     * 否则 `post` 到主线程。放在这一层而不是各回调实现里，是因为所有回调（卡片、小横条、
+     * 刷视频入口）都经由本类的 `delegate`，一处收口即可覆盖全部调用点。
+     *
+     * `post` 保证 FIFO，progress/onStart/onEnd 的相对顺序不会被打乱。
      */
     abstract class AnimationCallback {
         abstract fun onProgress(progress: Float)
@@ -159,10 +176,30 @@ object OplusViewSeamlessCompat {
         // OplusViewSeamless.AnimationCallback 抛出 NoClassDefFoundError
         internal val delegate: OplusViewSeamless.AnimationCallback by lazy {
             object : OplusViewSeamless.AnimationCallback() {
-                override fun animationProgress(progress: Float) = onProgress(progress)
-                override fun onAnimationStart(isOpen: Boolean) = onStart(isOpen)
-                override fun onAnimationEnd(isOpen: Boolean) = onEnd(isOpen)
+                override fun animationProgress(progress: Float) =
+                    onMainThread { onProgress(progress) }
+
+                override fun onAnimationStart(isOpen: Boolean) =
+                    onMainThread { onStart(isOpen) }
+
+                override fun onAnimationEnd(isOpen: Boolean) =
+                    onMainThread { onEnd(isOpen) }
             }
         }
     }
+
+    /**
+     * 在主线程执行 [block]：已在主线程时**直接调用**（不引入一帧延迟），
+     * 否则投递到主线程队列。见 [AnimationCallback] 的线程契约。
+     */
+    private fun onMainThread(block: () -> Unit) {
+        if (Looper.myLooper() === Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
+
+    /** 进程级复用，避免每个回调实例各建一个 Handler。 */
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 }

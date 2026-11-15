@@ -14,7 +14,6 @@ import java.net.InetAddress
 import java.net.Inet6Address
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 /**
  * B站 HTTPDNS 加速
@@ -83,9 +82,13 @@ class BiliDns(
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
     private val refreshing = ConcurrentHashMap.newKeySet<String>()
-    private val refreshExecutor: ExecutorService = Executors.newFixedThreadPool(3) { r ->
-        Thread(r, "bili-dns-refresh").apply { isDaemon = true }
-    }
+    /**
+     * W8：不再自建线程池 —— 与 HTTPDNS 探测共用 [DnsIo.executor] 这**一个**命名有界池
+     * （修复前这里是 `newFixedThreadPool(3, "bili-dns-refresh")`，与 `http-dns-probe`
+     * 是两份互不知情的池：线程数 3+3=6，抓栈时分不清是探测还是刷新）。
+     * 并发语义不变（仍最多 3 个 DNS IO 任务同时跑），但全仓只剩一处 DNS 线程来源。
+     */
+    private val refreshExecutor: ExecutorService = DnsIo.executor
     private val appContext = context.applicationContext
     private val connectivityManager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {

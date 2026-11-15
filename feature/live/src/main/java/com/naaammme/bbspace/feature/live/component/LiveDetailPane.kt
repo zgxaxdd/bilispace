@@ -50,11 +50,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.LivePlaybackViewState
 import com.naaammme.bbspace.core.model.LiveRoomMessage
 import com.naaammme.bbspace.core.model.LiveRoomSessionState
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.feature.live.toUiMessage
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.CancellationException
@@ -78,13 +80,13 @@ internal fun LiveDetailPane(
     onSendDanmaku: suspend (String) -> Unit,
     showHeader: Boolean,
     modifier: Modifier = Modifier,
-    horizontalPad: Dp = 16.dp
+    horizontalPad: Dp = BiliSpacing.lg
 ) {
     Column(
         modifier = modifier
             .navigationBarsPadding()
             .padding(horizontal = horizontalPad, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         LiveDetailMessageList(
             route = route,
@@ -141,12 +143,12 @@ private fun LiveMetaSection(
         )
     }
     Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         if (tags.isNotEmpty()) {
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tags.forEach { text ->
@@ -206,8 +208,8 @@ private fun LiveMessageCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(horizontal = 14.dp, vertical = BiliSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -246,7 +248,7 @@ private fun MetaTag(text: String) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.xsPlus)
         )
     }
 }
@@ -297,7 +299,7 @@ private fun LiveDetailMessageList(
     LazyColumn(
         state = listState,
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         if (showHeader) {
             item("title") {
@@ -397,12 +399,12 @@ private fun LiveDanmakuInputBar(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 shape = LivePanelShape
             )
-            .padding(horizontal = 10.dp, vertical = 0.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(horizontal = BiliSpacing.smPlus, vertical = 0.dp),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             SearchCapsuleField(
                 value = input,
@@ -421,7 +423,11 @@ private fun LiveDanmakuInputBar(
             )
             IconButton(
                 onClick = ::send,
-                enabled = enabled && !sending && input.isNotBlank()
+                enabled = enabled && !sending && input.isNotBlank(),
+                // 全局拖拽反馈（第 34 轮 T2）：弹幕输入行尾的"发送"图标钮。
+                // 本文件是**聊天列表 + 输入条**，不含 PlayerView（播放器在
+                // LivePlayerPane，另一个文件），所以不在视频画面祖先链上。
+                modifier = Modifier.appElasticPress()
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,

@@ -50,6 +50,7 @@ import com.naaammme.bbspace.core.designsystem.icon.AppIcons
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 @Stable
 class VideoGestureState {
@@ -86,6 +87,29 @@ class VideoGestureState {
 }
 
 enum class DragType { None, Seek, Brightness, Volume }
+
+/**
+ * C1f：亮度手势 HUD 的强调色（**固定暖黄，不随主题**）。
+ *
+ * 为什么亮度不跟主题、音量跟主题：亮度是**设备物理量**（屏幕背光），它和 app 配色
+ * 没有任何语义关系 —— 跟主题走会让"同一块屏幕在不同主题下亮度反馈色不同"，没有道理；
+ * 音量是**内容相关的媒体状态**，跟主题主色走是合理的。
+ *
+ * 上游对应：BiliPai `bbf0587f9` 把亮度色从"按风格硬编码的黄"改成 `brightnessColor`
+ * **必填参数**并配 `player_brightness_accent` 资源，测试也从
+ * `md3Colors_followThemeForBothLevels` 改名为 `md3Colors_keepBrightnessIndependentOfTheme`
+ * 并断言这个**分歧**。
+ *
+ * ⚠️ 本仓**不引入 `values/colors.xml` 资源色**：`core/designsystem/src/main/res/` 下
+ * 只有 `font/` 与 `raw/`，全仓 `colorResource`/`R.color.` **0 命中**，配色方向是
+ * **跟随主题**（`theme/BiliColorRoles.kt` + 三条颜色棘轮）。引入并行资源色有踩
+ * `ColorRoleAdoptionRatchetTest` / `DesignTokenLintTest` / `ColorContrastTest` 的风险
+ * ⇒ 用与 `VideoPlayerPane.FavStarColor` 同一套的"语义色常量"做法。
+ *
+ * 取值 `0xFFFFD54D` 与 `FavStarColor` 同色：两者不会同屏（手势 HUD 只在拖动时出现，
+ * 星标在常驻互动栏），且都属于"暖黄 = 一个明确的数值状态"这套既有语言。
+ */
+internal val BrightnessAccentColor = Color(0xFFFFD54D)
 
 enum class DoubleTapHint {
     Play,
@@ -212,11 +236,18 @@ fun Modifier.videoGestures(
                                         curOnDoubleTapLike(second.position)
                                         state.showDoubleTap(DoubleTapHint.Like)
                                     } else {
-                                        // 默认：双击任意位置 = 暂停/播放
+                                        // 默认：双击任意位置 = 暂停/播放。
+                                        //
+                                        // **反馈图标必须按「动作发生前」的状态判**（2026-10-11 真机实测缺陷）：
+                                        // `curTogglePlay()` 只把意图交给会话（`pause()`/`play()` 是异步落地的），
+                                        // 紧接着读 `curIsPlaying()` 拿到的**仍是旧值** —— 于是
+                                        // 「正在播 → 双击暂停」提示的却是 ▶（Play），用户看到的反馈与刚发生的
+                                        // 动作**正好相反**（真机复现：双击后底栏已显示「播放」，中央提示仍是 ▶）。
+                                        // 判据改为"刚才在播吗"：在播 ⇒ 本次动作是暂停 ⇒ 给 ⏸。
+                                        val wasPlaying = curIsPlaying()
                                         curTogglePlay()
                                         state.showDoubleTap(
-                                            if (curIsPlaying()) DoubleTapHint.Play
-                                            else DoubleTapHint.Pause
+                                            if (wasPlaying) DoubleTapHint.Pause else DoubleTapHint.Play
                                         )
                                     }
                                     waitForAllUp()
@@ -342,21 +373,35 @@ fun VideoGestureFeedback(
         if (state.dragType == DragType.Brightness || state.dragType == DragType.Volume) {
             val isBrightness = state.dragType == DragType.Brightness
             val label = if (isBrightness) "亮度" else "音量"
+            // C1f（2026-10-13，上游 v0.3.6 同步）：**亮度与音量必须能一眼分开**。
+            //
+            // 缺陷：两者此前共用 `Color.White` —— 同样的黑底、同样的白字、同样的白色
+            // 填充条，只有一行"亮度/音量"文字不同。左侧滑（亮度）与右侧滑（音量）是
+            // 两块**肌肉记忆区**，配色一致时用户没法靠余光确认自己滑的是哪一个。
+            //
+            // 修法对齐上游 `bbf0587f9` 的思路：亮度用**固定暖黄**（与主题解耦 —— 亮度
+            // 是设备物理量，不该随 app 主题变色），音量继续走主题主色（它是内容相关的
+            // 媒体状态）。与 `FavStarColor` 同一套"语义色不跟主题"的既有做法。
+            //
+            // ⚠️ 与本仓 `VideoPlayerPane` 的 `FavStarColor` 同为暖黄：两者不会同屏
+            // （手势 HUD 只在拖动时出现、互动栏星标在常驻栏），且都是"暖黄 = 一个明确
+            // 的数值状态"这一套语言，不冲突。
+            val accent = if (isBrightness) BrightnessAccentColor else MaterialTheme.colorScheme.primary
 
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(MaterialTheme.shapes.large)
                     .background(Color.Black.copy(alpha = 0.78f))
-                    .padding(16.dp)
+                    .padding(BiliSpacing.lg)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)
                 ) {
                     Text(
                         text = label,
-                        color = Color.White,
+                        color = accent,
                         style = MaterialTheme.typography.titleMedium
                     )
                     Box(
@@ -364,7 +409,7 @@ fun VideoGestureFeedback(
                             .width(6.dp)
                             .height(100.dp)
                             .clip(MaterialTheme.shapes.extraSmall)
-                            .background(Color.White.copy(alpha = 0.24f))
+                            .background(accent.copy(alpha = 0.24f))
                     ) {
                         // U2：填充条在**绘制期**读 dragFraction。
                         // 原来是 `Modifier.height((100 * barH).dp)` —— 拖动期间每帧一次布局，
@@ -376,7 +421,7 @@ fun VideoGestureFeedback(
                             if (fraction <= 0f) return@Canvas
                             val fillHeight = size.height * fraction
                             drawRoundRect(
-                                color = Color.White,
+                                color = accent,
                                 topLeft = Offset(0f, size.height - fillHeight),
                                 size = Size(size.width, fillHeight),
                                 // 半径取半宽：这条只有 6dp 宽，extraSmall（约 3dp）在这里
@@ -398,7 +443,7 @@ fun VideoGestureFeedback(
                     .align(Alignment.Center)
                     .clip(MaterialTheme.shapes.small)
                     .background(Color.Black.copy(alpha = 0.75f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.sm)
             )
         }
 
@@ -420,7 +465,7 @@ fun VideoGestureFeedback(
                             .align(Alignment.Center)
                             .clip(CircleShape)
                             .background(Color.Black.copy(alpha = 0.55f))
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -444,7 +489,7 @@ fun VideoGestureFeedback(
                     .padding(top = SpeedBadgeTopPadding)
                     .clip(MaterialTheme.shapes.small)
                     .background(Color.Black.copy(alpha = 0.75f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.xsPlus)
             )
         }
     }

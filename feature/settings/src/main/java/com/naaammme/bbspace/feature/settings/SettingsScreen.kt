@@ -21,7 +21,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,12 +34,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.naaammme.bbspace.core.designsystem.component.CapsuleGroup
 import com.naaammme.bbspace.core.designsystem.component.CapsuleListItem
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixActionTone
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixButton
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
 import com.naaammme.bbspace.feature.settings.components.SettingCategory
 import com.naaammme.bbspace.feature.settings.navigation.APPEARANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.AUDIO_VIDEO_ROUTE
@@ -50,6 +51,10 @@ import com.naaammme.bbspace.feature.settings.navigation.PERFORMANCE_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.PRIVACY_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.SPONSOR_BLOCK_ROUTE
 import com.naaammme.bbspace.feature.settings.navigation.SWIPE_QOE_ROUTE
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,7 +74,6 @@ fun SettingsScreen(
 ) {
     var query by remember { mutableStateOf("") }
     var showResetDialog by remember { mutableStateOf(false) }
-    val shapes = MaterialTheme.shapes
 
     val routeNav = mapOf(
         APPEARANCE_ROUTE to onNavigateToAppearance,
@@ -158,8 +162,8 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
         ) {
             item {
                 SearchCapsuleField(
@@ -176,7 +180,7 @@ fun SettingsScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 32.dp),
+                                .padding(vertical = BiliSpacing.xxxl),
                             contentAlignment = Alignment.Center
                         ) {
                             Text("没有匹配结果", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -207,13 +211,13 @@ fun SettingsScreen(
                 item {
                     Card(
                         onClick = { showResetDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = shapes.large
+                        modifier = Modifier.fillMaxWidth().appElasticPress(),
+                        shape = SettingsSearchShape
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp)
+                                .padding(BiliSpacing.lg)
                         ) {
                             Column {
                                 Text(
@@ -257,17 +261,21 @@ fun SettingsScreen(
                         Text("这会把当前各项设置恢复到默认值 不会退出登录")
                     },
                     confirmButton = {
-                        TextButton(
+                        // 破坏性确认：iOS 分支早已用 `IOSAlertDialog(destructive = true)` 标红，
+                        // Material 分支此前是普通 TextButton —— 两档语义不一致。改用 Danger 档
+                        // 动作按钮后两档统一下来；onClick 体（resetAllSettings + 关弹窗）逐字未动，
+                        // 二次确认弹窗本身保留。
+                        AppMiuixButton(
+                            text = "确定",
                             onClick = {
                                 viewModel.resetAllSettings()
                                 showResetDialog = false
-                            }
-                        ) {
-                            Text("确定")
-                        }
+                            },
+                            tone = AppMiuixActionTone.Danger
+                        )
                     },
                     dismissButton = {
-                        TextButton(onClick = { showResetDialog = false }) {
+                        TextButton(modifier = Modifier.appElasticPress(), onClick = { showResetDialog = false }) {
                             Text("取消")
                         }
                     }
@@ -296,7 +304,7 @@ fun SettingsScreen(
                 TopAppBar(
                     title = { Text("设置") },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        AppMiuixIconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                         }
                     },
@@ -351,3 +359,7 @@ private fun SearchResultGroup(
         )
     }
 }
+
+// 设置页搜索框圆角：此前 `MaterialTheme.shapes.large` 随 CornerStyle 漂移。
+// 提成文件级常量（不在调用点内联 `RoundedCornerShape(...)`，避免每次重组新建 Shape）。
+private val SettingsSearchShape = RoundedCornerShape(BiliRadius.searchPill)

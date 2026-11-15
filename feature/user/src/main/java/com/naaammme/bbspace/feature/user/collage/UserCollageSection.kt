@@ -88,6 +88,10 @@ internal fun UserCollageSection(
         modifier = modifier.fillMaxSize()
     ) {
         val base = minOf(maxWidth, maxHeight)
+        // 圆角**刻意保留** `MaterialTheme.shapes.extraLarge`：本文件没有 `isIOS` 分支，
+        // 该档位承载的是用户选的 CornerStyle（SQUARE / STANDARD / ROUNDED / CIRCULAR
+        // 分别是 0 / 28 / 32 / 36dp）。这里若换成固定 BiliRadius，等于把"关注/离线缓存/
+        // bb空间"三块瓦片的圆角从用户偏好里摘出来 —— 那是功能回退，不是 token 收口。
         val extraLarge = MaterialTheme.shapes.extraLarge
 
         @Composable

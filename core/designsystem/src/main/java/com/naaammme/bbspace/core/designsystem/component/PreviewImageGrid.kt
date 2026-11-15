@@ -2,7 +2,6 @@ package com.naaammme.bbspace.core.designsystem.component
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +50,16 @@ import com.naaammme.bbspace.core.common.log.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import kotlinx.coroutines.Job
 
 @Immutable
 data class PreviewImage(
@@ -72,12 +81,12 @@ fun PreviewImageGrid(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         rows.forEach { rowImages ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 rowImages.forEach { item ->
                     PreviewGridItem(
@@ -129,6 +138,12 @@ private fun PreviewGridItem(
         modifier = modifier
             .aspectRatio(ratio)
             .clip(MaterialTheme.shapes.large)
+            // 全局拖拽反馈（第 34 轮 T2）：九宫格缩略图是**独立小件**（点开大图），
+            // 不参与任何无缝过渡（这里没有 SeamlessAnchor，预览走 Dialog 而非共享元素），
+            // 因此可以安全挂形变。
+            // `highlightShape` 与上面 `clip(shapes.large)` 同源：光斑裁在缩略图圆角内，
+            // 默认 50% 会把方形缩略图裁成椭圆。
+            .appElasticPress(highlightShape = MaterialTheme.shapes.large)
             .clickable(onClick = onClick),
         contentScale = ContentScale.Crop,
         variant = BiliImageVariant.PreviewThumb
@@ -181,11 +196,14 @@ fun PreviewImageDialog(
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.sm)
                 ) {
                     TextButton(
                         onClick = onDismiss,
-                        modifier = Modifier.align(Alignment.CenterStart)
+                        // 全局拖拽反馈：全屏预览的浮层动作（关闭/保存），不参与过渡。
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .appElasticPress()
                     ) {
                         Text(
                             text = "关闭",
@@ -215,7 +233,10 @@ fun PreviewImageDialog(
                                 }
                             }
                         },
-                        modifier = Modifier.align(Alignment.CenterEnd)
+                        // 全局拖拽反馈：与"关闭"同一条判据（浮层动作、不参与过渡）。
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .appElasticPress()
                     ) {
                         Text(
                             text = "保存",
@@ -237,11 +258,21 @@ private fun PreviewImagePage(
     onScaleChange: (Float) -> Unit
 ) {
     val density = LocalDensity.current
+    val animations = LocalAnimations.current
+    val scope = rememberCoroutineScope()
     var scale by remember(image.url) { mutableFloatStateOf(1f) }
     var offset by remember(image.url) { mutableStateOf(Offset.Zero) }
+    // 容器尺寸（双击缩放的锚点与平移上限都要它）。用 `onSizeChanged` 而不是
+    // `BoxWithConstraints` 的 maxWidth/maxHeight：后者是**约束**，在有 padding 的
+    // 链路里与指针坐标不在同一坐标系，锚点会偏。
+    var containerSize by remember(image.url) { mutableStateOf(IntSize.Zero) }
+    // 双击缩放动画的任务句柄：连点两次时先取消上一次，避免两个 animate 同时写 scale。
+    var zoomJob by remember(image.url) { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(active) {
         if (!active) {
+            zoomJob?.cancel()
+            zoomJob = null
             scale = 1f
             offset = Offset.Zero
         }
@@ -249,6 +280,46 @@ private fun PreviewImagePage(
     LaunchedEffect(scale, active) {
         if (active) {
             onScaleChange(scale)
+        }
+    }
+
+    /**
+     * 以 [tap]（相对容器左上角的点击位置）为锚点，把缩放动画到 [targetScale]。
+     *
+     * `tap == Offset.Zero` 表示"没有锚点"（复位）：此时锚点系数为 0，平移只会被
+     * `clampPan` 收拢到 0，不会把图甩到一边。
+     */
+    fun animateZoomTo(targetScale: Float, tap: Offset) {
+        val fromScale = scale
+        if (!targetScale.isFinite() || kotlin.math.abs(targetScale - fromScale) < PreviewZoomPolicy.RESET_EPSILON) return
+        val center = Offset(containerSize.width / 2f, containerSize.height / 2f)
+        val anchor = if (tap == Offset.Zero) Offset.Zero else tap - center
+        val fromOffset = offset
+        zoomJob?.cancel()
+        zoomJob = scope.launch {
+            animate(
+                initialValue = fromScale,
+                targetValue = targetScale,
+                animationSpec = tween(
+                    durationMillis = animations.morph,
+                    easing = animations.morphEasing
+                )
+            ) { value, _ ->
+                scale = value
+                offset = PreviewZoomPolicy.clampPan(
+                    offset = PreviewZoomPolicy.anchoredOffset(
+                        currentOffset = fromOffset,
+                        tapFromCenter = anchor,
+                        fromScale = fromScale,
+                        toScale = value
+                    ),
+                    maxPan = PreviewZoomPolicy.maxPan(
+                        containerWidthPx = containerSize.width.toFloat(),
+                        containerHeightPx = containerSize.height.toFloat(),
+                        scale = value
+                    )
+                )
+            }
         }
     }
 
@@ -260,15 +331,16 @@ private fun PreviewImagePage(
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
         val tfState = rememberTransformableState { _, zoomChange, panChange, _ ->
-            val nextScale = (scale * zoomChange).coerceIn(1f, 5f)
+            // 手势接管：停掉进行中的双击缩放，否则两个源会同时写 scale。
+            zoomJob?.cancel()
+            val nextScale = (scale * zoomChange).coerceIn(1f, PreviewZoomPolicy.MAX_SCALE)
             scale = nextScale
             offset = if (nextScale <= 1f) {
                 Offset.Zero
             } else {
-                clampOffset(
+                PreviewZoomPolicy.clampPan(
                     offset = offset + panChange,
-                    maxX = widthPx * (nextScale - 1f) / 2f,
-                    maxY = heightPx * (nextScale - 1f) / 2f
+                    maxPan = PreviewZoomPolicy.maxPan(widthPx, heightPx, nextScale)
                 )
             }
         }
@@ -278,20 +350,35 @@ private fun PreviewImagePage(
             contentDescription = "图片预览",
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp)
+                .padding(BiliSpacing.xxl)
+                .onSizeChanged { containerSize = it }
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
                     translationX = offset.x
                     translationY = offset.y
                 }
-                .clickable {
-                    if (scale > 1f) {
-                        scale = 1f
-                        offset = Offset.Zero
-                    } else {
-                        onDismiss()
-                    }
+                // 单击：已放大 → 复位；未放大 → 关闭预览。
+                // 双击：1x ⇄ 2.5x（**以点击点为锚点**，放大时手指下的那一点不动）。
+                // 用 `detectTapGestures` 而不是 `clickable`：`clickable` 无法区分双击，
+                // 结果是"双击 ≈ 两次单击" —— 第一次就把预览关掉了（真实 bug）。
+                // 代价是单击要等双击超时（约 300ms）才生效，这是双击语义的固有成本。
+                .pointerInput(image.url) {
+                    detectTapGestures(
+                        onTap = {
+                            if (scale > 1f + PreviewZoomPolicy.RESET_EPSILON) {
+                                animateZoomTo(targetScale = 1f, tap = Offset.Zero)
+                            } else {
+                                onDismiss()
+                            }
+                        },
+                        onDoubleTap = { tap ->
+                            animateZoomTo(
+                                targetScale = PreviewZoomPolicy.nextScale(scale),
+                                tap = tap
+                            )
+                        }
+                    )
                 }
                 .transformable(
                     state = tfState,
@@ -301,17 +388,6 @@ private fun PreviewImagePage(
             variant = BiliImageVariant.PreviewThumb
         )
     }
-}
-
-private fun clampOffset(
-    offset: Offset,
-    maxX: Float,
-    maxY: Float
-): Offset {
-    return Offset(
-        x = offset.x.coerceIn(-maxX, maxX),
-        y = offset.y.coerceIn(-maxY, maxY)
-    )
 }
 
 private fun previewGridColumns(count: Int): Int {

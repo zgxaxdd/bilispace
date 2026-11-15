@@ -23,6 +23,8 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sqrt
 import kotlin.math.sin
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 
 @Composable
 internal fun UserCollageTile(
@@ -36,6 +38,19 @@ internal fun UserCollageTile(
         Box(
             modifier = modifier
                 .clip(shape)
+                // 全局拖拽反馈（第 34 轮 T2）：拼图方块是可点件（点开对应入口）。
+                // 用 **0.6 克制档**：拼图是紧密相邻的马赛克小格，满强度按下时
+                // 相邻格会互相"挤"，读作整块布局在抖。
+                .then(
+                    if (onClick != null) {
+                        Modifier.appElasticPress(
+                            state = rememberAppElasticPressState(feedbackStrength = 0.6f),
+                            highlightShape = shape
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
             content = { content() }
         )
@@ -49,7 +64,12 @@ internal fun UserCollageTile(
     } else {
         Surface(
             onClick = onClick,
-            modifier = modifier,
+            modifier = modifier
+                // 同上：可点分支才挂，`highlightShape` 与 `shape` 同源。
+                .appElasticPress(
+                    state = rememberAppElasticPressState(feedbackStrength = 0.6f),
+                    highlightShape = shape
+                ),
             shape = shape,
             color = color,
             content = content

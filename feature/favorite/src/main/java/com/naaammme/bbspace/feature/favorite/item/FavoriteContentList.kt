@@ -39,6 +39,8 @@ import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonBreath
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.rememberSkeletonBreathOrNull
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.FavoriteContentItem
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -100,8 +102,11 @@ fun FavoriteContentList(
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(
+            horizontal = BiliSpacing.md,
+            vertical = BiliSpacing.md
+        ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         items(
             items = items,
@@ -176,8 +181,18 @@ private fun FavoriteContentCard(
         target != null -> Modifier.clickable { onOpenContent(target) }
         else -> Modifier
     }
+    // 全局拖拽反馈：**只有"普通点击打开"这一支**挂跟手形变。
+    // - 选择模式：整卡是单选目标，跟手位移会让多选读起来像拖拽（且与 Checkbox 抢焦点）；
+    // - 长按模式：`dragEnabled = false` 只保留按压；
+    // - 无 target：不可点，不挂。
+    val elasticModifier = when {
+        selectionMode && onToggleSelect != null -> Modifier.appElasticPress(dragEnabled = false)
+        onItemLongPress != null -> Modifier.appElasticPress(dragEnabled = false)
+        target != null -> Modifier.appElasticPress()
+        else -> Modifier
+    }
     Card(
-        modifier = cardModifier.then(clickModifier),
+        modifier = cardModifier.then(elasticModifier).then(clickModifier),
         colors = colors
     ) {
         FavoriteContent(
@@ -198,8 +213,8 @@ private fun FavoriteContent(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(BiliSpacing.smPlus),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         CoverImage(
             url = item.cover,
@@ -213,9 +228,9 @@ private fun FavoriteContent(
                     text = text,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(6.dp)
+                        .padding(BiliSpacing.xsPlus)
                         .background(Color.Black.copy(alpha = 0.56f), MaterialTheme.shapes.extraSmall)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White,
                     maxLines = 1
@@ -225,7 +240,7 @@ private fun FavoriteContent(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Text(
                 text = item.title,

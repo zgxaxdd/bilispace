@@ -61,6 +61,30 @@ class FrameBudgetLintTest {
     private val maxOffscreenCompositing = 0
 
     /**
+     * `runBlocking`：**总量 ≤ 2**（第二道闸，与 Lint 的"形态检查"并存）。
+     *
+     * ## 为什么数量上限仍留在测试里，而不是 Lint（2026-10-18 债务偿还）
+     * A2 把原 `runBlocking_isFrozen`（数文本，上限 2）迁成了 `BbspaceUnboundedRunBlocking`
+     * 检测器（判"必须带 withTimeoutOrNull/withTimeout/runCatching"）。审计确认：**形态
+     * 检查无法表达数量**——第 3 处**带超时**的 runBlocking 在迁移后会被放行，这是净放宽。
+     *
+     * 为什么不给检测器加计数（审计给出的 A 方案）：
+     * 1. Lint 检测器是**逐文件**扫描（`UastScanner`），跨文件累计总数需要 Project 级
+     *    service / after-analysis 钩子，属改检测器架构；
+     * 2. 就算做了，"存量豁免"只能落在 `<lint.xml>` 的 `<ignore path=...>`（**文件粒度**），
+     *    无法表达"mainSources 里总数恰好 2"；把两个调用点所在文件各自豁免，等于允许
+     *    同文件里再添一处 —— 与它想守的"总数"不是一回事。
+     *
+     * ⇒ 选择第二道闸：本测试用**仓库级** `mainSources` 直接数 `runBlocking` 代码行，
+     * 与 Lint 的形态检查**互补**（一个管"几处"、一个管"每处有没有界"）。两者都红才放行
+     * 新调用点，任一失守都会立刻红。
+     *
+     * ⚠️ 这是一条**新增的**守卫，不是恢复旧断言的放宽版：旧断言在 A2 里被删除，
+     * 本条只保留"只减不增"的语义（`<= 2`），不改任何现有断言的值。
+     */
+    private val maxRunBlocking = 2
+
+    /**
      * `rememberInfiniteTransition`：常驻无限动画，每个都会持续驱动重组/重绘。
      *
      * **上限 2 → 1 的变更记录（2026-10-02，AP-01）**：全仓 main 源码实测**仅 1 处**
@@ -89,8 +113,11 @@ class FrameBudgetLintTest {
      * **勘误**：本注释此前写"与 MainActivity 的两处同源同目的"，与代码不符
      * （MainActivity 实为 1 处）—— 交接数字未复核就以讹传讹（W4），本次按本仓扫描器
      * 实测口径（W24）改正，上限 3 → 2 收紧到真值。
+     *
+     * **A2 迁移（2026-10-13 第 13 轮）：本字段与对应断言已删除**，改由 Lint 检测器
+     * `BbspaceUnboundedRunBlocking` 执行。上面的实测口径与勘误**原样保留** ——
+     * 它是这 2 处的来历（为什么允许存在、为什么必须带超时），删了就只剩一个数字。
      */
-    private val maxRunBlocking = 2
 
     /**
      * `animate*AsState`：值在**组合期**读取 → 动画每帧重组宿主 composable。
@@ -139,8 +166,12 @@ class FrameBudgetLintTest {
      * 消散完成后把卡片高度收到 0，让列表回流）。它是 BiliPai 粒子消散的收尾动作，
      * 用户要求 1:1 移植，故保留其原写法。**触发时机极窄**：只有被解散的那一块在
      * 消散结束后跑一次（约 240ms），不在滚动路径上、也不随列表长度增长。
+     *
+     * **A2 迁移（2026-10-13 第 10 轮）：本字段与对应断言已删除**，改由 Lint 检测器
+     * `BbspaceAnimateAsState` 执行。上面的历史记录（1 → 10 的每一次上调及理由）
+     * 原样保留 —— 它是这批调用点的来历，删了就没人知道它们为什么在这儿。
+     * 现存 10 处的清单在各模块 `lint.xml` 的 `<ignore path=...>` 里，一行一处。
      */
-    private val maxAnimateAsState = 10
 
     /**
      * **真实模糊入口**（`hazeBlur(` + `drawBackdrop(`）：不比较半径就重建 = 每帧重编着色器。
@@ -200,28 +231,57 @@ class FrameBudgetLintTest {
         )
     }
 
+    // A2 迁移（2026-10-13 第 13 轮）：`runBlocking_isFrozen` 的**形态**判据已迁到 Lint
+    // 检测器 `BbspaceUnboundedRunBlocking`（ci-lint/RunBlockingNeedsBoundDetector.java）：
+    // runBlocking 的 lambda 体内必须出现 withTimeoutOrNull / withTimeout / runCatching 之一。
+    // 本仓现存 2 处（MainActivity.preloadThemeConfig 与 VideoDetailActivity.preloadThemeConfig）
+    // 都套了 withTimeoutOrNull ⇒ 检测器报告 0，**零基线**。
+    //
+    // 为什么这是真升级：棘轮自己留着一处勘误（"本注释此前写'与 MainActivity 的两处
+    // 同源同目的'，与代码不符……交接数字未复核就以讹传讹"）—— 计数棘轮只知道有几处、
+    // 不知道那几处长什么样。"数量对但漏了超时"这种情形，现在第一次变得可判。
+    //
+    // ⚠️ 迁移时踩的坑：Kotlin 的**尾随 lambda 不在 `getValueArguments()` 里**，
+    // 第一版按实参表递归 ⇒ 现存两处**全被误报**。改用 `accept(AbstractUastVisitor)`
+    // 深度遍历后归零。见执行报告 §1.14。
+    //
+    // ⚠️ 2026-10-18 审计补记：上面的"升级"只换了判据**维度**，**数量上限丢了** ——
+    // 第 3 处带超时的 runBlocking 会同时通过检测器与旧报告。故在下方补回
+    // `runBlocking_countStaysAtTwo()`（仓库级源码计数）作为第二道闸；
+    // 为什么不再回 Lint 见 [maxRunBlocking] 的 KDoc。
+
+    /**
+     * 第二道闸：`runBlocking` 在**全仓 main 源码**里的总数不得超过 2。
+     *
+     * 与 Lint 检测器互补：检测器管"每一处有没有界"，本条管"一共几处"。
+     * 判据与旧 `runBlocking_isFrozen` 相同（`\brunBlocking\b`，跳过注释/import 行），
+     * 只减不增；新增调用点必须**同时**过这两道闸。
+     */
     @Test
-    fun runBlocking_isFrozen() {
+    fun runBlocking_countStaysAtTwo() {
         assertRatchet(
             actual = countInSources("""\brunBlocking\b"""),
             limit = maxRunBlocking,
-            what = "runBlocking",
-            why = "阻塞当前线程。主线程上会直接掉帧；启动路径上会拖慢冷启。" +
-                "冷启同步预读这类场景应带超时（withTimeoutOrNull）并限制在极短预算内。"
+            what = "runBlocking（全仓 main 源码）",
+            why = "阻塞当前线程：主线程上直接掉帧、启动路径上拖慢冷启。" +
+                "存量 2 处（MainActivity / VideoDetailActivity 的首帧主题预读）已带" +
+                "withTimeoutOrNull 上限（Lint 检测器 BbspaceUnboundedRunBlocking 管形态），" +
+                "本条管总量：新增第 3 处必须同时过形态与数量两道闸，且要写明理由。"
         )
     }
 
-    @Test
-    fun animateAsState_isFrozen() {
-        assertRatchet(
-            actual = countInSources("""animate[A-Za-z]*AsState\("""),
-            limit = maxAnimateAsState,
-            what = "animate*AsState",
-            why = "它的值在**组合期**读取，动画每帧都会重组宿主 composable。" +
-                "正确做法是 Animatable + 在 graphicsLayer{} / drawBehind{} 块内读 value，" +
-                "让每帧只更新图层属性或重绘，不触发重组。"
-        )
-    }
+    // A2 迁移（2026-10-13 第 10 轮）：本断言已删除，改由 Lint 检测器
+    // `BbspaceAnimateAsState`（ci-lint/AnimateAsStateDetector.java）执行。
+    //
+    // 为什么可以删：切换前做过**等价性证明** —— 检测器在 :app / :core:designsystem /
+    // :feature:dynamic / :feature:home / :feature:video 五个模块里报出的正是同样那 10 处，
+    // 行号逐一相同。已存在的 10 处按上游形态打进各模块 lint.xml 的 <ignore path=...>。
+    //
+    // 为什么更该删：棘轮只给"当前 10 处、上限 10 处"，加第 11 处时你得自己找在哪；
+    // 检测器直接给文件:行，且靠**类型解析**（只认 androidx.compose.animation.* 下的
+    // animate*AsState）排除同名自定义函数 —— 数文本的正则分不清，只能误报或漏报。
+    //
+    // ⚠️ 若日后要恢复本条，先读 docs/2026-10-13-上游同步落地-执行报告.md §1.11。
 
     @Test
     fun realBlurEntries_areFrozen() {

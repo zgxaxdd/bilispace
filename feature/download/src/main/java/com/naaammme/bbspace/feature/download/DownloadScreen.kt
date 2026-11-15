@@ -38,12 +38,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
 import com.naaammme.bbspace.core.designsystem.motion.jiggleOnDissolve
 import com.naaammme.bbspace.core.model.VideoDownloadKind
@@ -54,6 +57,7 @@ import com.naaammme.bbspace.core.model.VideoDownloadTask
 import com.naaammme.bbspace.core.model.VideoDownloadTaskStatus
 import com.naaammme.bbspace.core.model.summaryLabel
 import java.util.Locale
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,7 +73,7 @@ fun DownloadScreen(
             TopAppBar(
                 title = { Text("离线缓存") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -166,8 +170,11 @@ private fun ConfigTab(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(
+            horizontal = BiliSpacing.lg,
+            vertical = BiliSpacing.xsPlus
+        ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         item("input") {
             InputCard(
@@ -240,8 +247,11 @@ private fun QueueTab(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(
+            horizontal = BiliSpacing.lg,
+            vertical = BiliSpacing.xsPlus
+        ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         state.export.message?.takeIf(String::isNotBlank)?.let { message ->
             item("export_message") {
@@ -292,7 +302,7 @@ private fun QueueTab(
             title = { Text("删除缓存") },
             text = { Text("确认删除 ${task.title} 吗？") },
             confirmButton = {
-                TextButton(
+                TextButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         pendingDelete = null
                         // 先起消散；onDeleteTask 在消散完成后才被调用
@@ -303,7 +313,7 @@ private fun QueueTab(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = { pendingDelete = null }) {
                     Text("取消")
                 }
             }
@@ -324,8 +334,8 @@ private fun InputCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             Text("缓存目标", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
@@ -333,18 +343,18 @@ private fun InputCard(
                 onValueChange = onInputChange,
                 enabled = enabled,
                 singleLine = true,
-                shape = MaterialTheme.shapes.medium,
+                shape = DownloadFieldShape,
                 label = { Text("链接、av号或BV号") },
                 modifier = Modifier.fillMaxWidth()
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 Button(
                     onClick = onStart,
                     enabled = enabled && input.isNotBlank(),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).appElasticPress()
                 ) {
                     Text("解析目标")
                 }
@@ -352,7 +362,7 @@ private fun InputCard(
                     Button(
                         onClick = onDownload,
                         enabled = canDownload,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text("加入队列")
                     }
@@ -360,7 +370,7 @@ private fun InputCard(
                     OutlinedButton(
                         onClick = onClear,
                         enabled = enabled && input.isNotBlank(),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text("清空输入")
                     }
@@ -377,17 +387,17 @@ private fun KindCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             Text("缓存内容", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
+            Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
+                FilterChip(modifier = Modifier.appElasticPress(),
                     selected = selected == VideoDownloadKind.VIDEO,
                     onClick = { onSelect(VideoDownloadKind.VIDEO) },
                     label = { Text("缓存视频") }
                 )
-                FilterChip(
+                FilterChip(modifier = Modifier.appElasticPress(),
                     selected = selected == VideoDownloadKind.AUDIO,
                     onClick = { onSelect(VideoDownloadKind.AUDIO) },
                     label = { Text("缓存音频") }
@@ -407,17 +417,17 @@ private fun QualityCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 options.forEach { option ->
-                    FilterChip(
+                    FilterChip(modifier = Modifier.appElasticPress(),
                         selected = option.value == selected,
                         onClick = { onSelect(option.value) },
                         label = {
@@ -455,7 +465,7 @@ private fun TaskCard(
     fun DeleteButton(modifier: Modifier) {
         OutlinedButton(
             onClick = { onDeleteTask(task.id) },
-            modifier = modifier
+            modifier = modifier.appElasticPress()
         ) {
             Text("删除")
         }
@@ -464,15 +474,15 @@ private fun TaskCard(
     Card(
         onClick = { onOpenPlayer(task.id) },
         enabled = task.isPlayable,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().appElasticPress()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)
             ) {
                 CoverImage(
                     url = task.cover,
@@ -484,7 +494,7 @@ private fun TaskCard(
                 }
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
                 ) {
                     Text(
                         text = task.title,
@@ -535,19 +545,19 @@ private fun TaskCard(
             if (canToggle) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     if (task.status == VideoDownloadTaskStatus.PAUSED) {
                         Button(
                             onClick = { onResumeTask(task.id) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).appElasticPress()
                         ) {
                             Text("继续")
                         }
                     } else {
                         OutlinedButton(
                             onClick = { onPauseTask(task.id) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).appElasticPress()
                         ) {
                             Text("暂停")
                         }
@@ -557,12 +567,12 @@ private fun TaskCard(
             } else if (task.status == VideoDownloadTaskStatus.DONE && task.isPlayable) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     Button(
                         onClick = { onExportTask(task) },
                         enabled = exportEnabled,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text(
                             if (exporting) {
@@ -650,3 +660,6 @@ private fun formatBytes(value: Long): String {
         else -> "$value B"
     }
 }
+
+/** 缓存目标输入框圆角：分组 token（16dp），不再取随 CornerStyle 漂移的 shapes.medium。 */
+private val DownloadFieldShape = RoundedCornerShape(BiliRadius.groupedList)

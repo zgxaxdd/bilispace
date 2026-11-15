@@ -35,6 +35,21 @@ class BlockedUpWiringTest {
         !(t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") || t.startsWith("import "))
     }
 
+    /**
+     * 刷视频会话的**全部源码**（第 34 轮拆分后，拉黑入口/确认框落在两个文件里）。
+     *
+     * `PortraitSwipePager.kt` = 动作清单与确认框的**调用点**；
+     * `SwipeMoreSheet.kt` = `SwipeBlockUpConfirmDialog` 与 `SwipeMoreSheetContent` 的**定义**。
+     * 只读主文件会让"二次确认存在"这类断言变成假红（源码是对的，只是搬了家）。
+     */
+    private fun swipeSessionCode(): List<String> =
+        listOf(
+            "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/PortraitSwipePager.kt",
+            "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/SwipeSessionChrome.kt",
+            "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/SwipeSessionLeaves.kt",
+            "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/SwipeMoreSheet.kt",
+        ).flatMap { codeOf(it) }
+
     @Test
     fun blacklistGoesThroughExistingGrpcDelegate() {
         val delegate = codeOf("core/space/src/main/java/com/naaammme/bbspace/core/space/SpaceUpBlocker.kt")
@@ -104,14 +119,14 @@ class BlockedUpWiringTest {
 
     @Test
     fun doubleConfirmDialogIsPresent() {
-        val pager = codeOf("feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/PortraitSwipePager.kt")
+        val pager = swipeSessionCode()
         assertTrue(
             "拉黑必须过**二次确认**（AlertDialog；拉黑对账号实际生效，PT-06 要点⑤）",
-            pager.any { it.contains("AlertDialog(") && it.contains("pendingBlockUpMid") } ||
+            pager.any { it.contains("IOSAlertDialog(") && it.contains("pendingBlockUp") } ||
                 (
-                    pager.any { it.contains("AlertDialog(") } &&
-                        pager.any { it.contains("pendingBlockUpMid") } &&
-                        pager.count { it.contains("pendingBlockUpMid") } >= 3
+                    pager.any { it.contains("IOSAlertDialog(") } &&
+                        pager.any { it.contains("pendingBlockUp") } &&
+                        pager.count { it.contains("pendingBlockUp") } >= 3
                     )
         )
         assertTrue(
@@ -130,26 +145,33 @@ class BlockedUpWiringTest {
      */
     @Test
     fun blockEntryOnlyAppearsForPositiveOwnerMid() {
-        val pager = codeLines(
-            codeOf("feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/PortraitSwipePager.kt")
-        )
+        val pager = swipeSessionCode()
         assertTrue(
-            "调用点必须传 `canBlockUp = (currentEntry?.ownerMid ?: 0L) > 0L`" +
+            "调用点必须用 `(currentEntry?.ownerMid ?: 0L) > 0L` 门控「拉黑该 UP 主」" +
                 "（缺 mid 的来源不做假入口）。",
-            pager.any { it.contains("canBlockUp = (currentEntry?.ownerMid ?: 0L) > 0L") }
+            pager.any { it.contains("if ((currentEntry?.ownerMid ?: 0L) > 0L) {") }
         )
         assertTrue(
             "确认后取 mid 也必须过 `takeIf { it > 0L }`（同一判据的第二道，防止 0 传下去）。",
-            pager.any { it.contains("pendingBlockUpMid = currentEntry?.ownerMid?.takeIf { it > 0L }") }
+            pager.any { it.contains("takeIf { it > 0L }") } &&
+                pager.any { it.contains("pendingBlockUp = ") }
         )
+        // ⚠️ **形态更新 · 第 34 轮接手**：动作清单不再是 `SwipeMoreSheetContent` 的
+        // `canBlockUp: Boolean = false` 具名形参（那个 composable 是本轮删掉的死代码，
+        // 它接不进 `IOSActionSheet`，见 SwipeMoreSheet.kt 的 KDoc）。现在清单在 pager 里
+        // 用 `buildList { add(IOSActionSheetAction(...)) }` 内联构造，
+        // 门控形态变为「`if ((currentEntry?.ownerMid ?: 0L) > 0L) { add(...) }`」——
+        // 上面第一条断言钉的就是它。
+        //
+        // 实质约束**不变**：入口自身必须有门控，不能只依赖调用方；
+        // 「拉黑该 UP 主」这一项必须在条件块**内部**，不能被提到外层无条件展示。
         assertTrue(
-            "`canBlockUp` 的参数默认值必须是 false（默认不显示，而不是默认显示）",
-            pager.any { it.contains("canBlockUp: Boolean = false") }
-        )
-        val rowAt = pager.indexOfFirst { it.trimStart().startsWith("if (canBlockUp) {") }
-        assertTrue(
-            "「拉黑该 UP 主」那一行必须被 `if (canBlockUp)` 包住（入口自身也要门控，不只靠调用方）。",
-            rowAt >= 0 && pager.drop(rowAt).take(4).any { it.contains("拉黑该 UP 主") }
+            "「拉黑该 UP 主」这一项必须落在 `if ((currentEntry?.ownerMid ?: 0L) > 0L)` 的**块内**" +
+                "（入口自身也要门控，不只靠调用方）；不许无条件 add。",
+            run {
+                val gateAt = pager.indexOfFirst { it.trimStart().startsWith("if ((currentEntry?.ownerMid ?: 0L) > 0L) {") }
+                gateAt >= 0 && pager.drop(gateAt).take(8).any { it.contains("拉黑该 UP 主") }
+            }
         )
     }
 

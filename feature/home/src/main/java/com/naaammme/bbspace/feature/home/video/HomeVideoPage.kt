@@ -56,11 +56,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
@@ -80,6 +78,7 @@ import com.naaammme.bbspace.core.designsystem.component.feedCoverVariant
 import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonShimmer
 import com.naaammme.bbspace.core.designsystem.component.SkeletonBlock
 import com.naaammme.bbspace.core.designsystem.component.rememberAdaptiveGridColumnCount
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.seamless.CoverExpandOrigin
 import com.naaammme.bbspace.core.designsystem.seamless.LocalBottomNavOcclusionRatio
 import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
@@ -97,16 +96,8 @@ import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
-import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
-import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
-import com.naaammme.bbspace.core.designsystem.glass.liquid.lens
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
-import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.drawBackdrop
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.naaammme.bbspace.core.model.FeedItem
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -205,9 +196,19 @@ fun HomeVideoPage(
     // 官方推荐：返回无缝动画进行中用户开始滑动列表时立即结束动画（让 leash 跟随
     // 列表滚动而非停留在旧位置）。只在返回阶段放行——打开动画期间手指带出的轻微
     // 滚动若触发中断，会把刚启动的打开动画杀掉（系统退回默认窗口动画）。
+    //
+    // **2026-10-12 审查修正：必须读 `isReturnRunning` 而不是裸 `returnRunning`。**
+    // 裸值会永久停在 true：清它的只有 `endReturn()`（= 系统的 onEnd 回调，实测在本机
+    // 固件上**从不送达**）与 `awaitReturnEnd()`（只在 `closeAfterReturnAnimation` 里调用，
+    // 而"胶囊接管返回"那条路径走不到那里 —— 见 VideoDetailActivity 的收起分支）。
+    // 于是只要用户有过一次"返回后由胶囊接管播放"，此后在首页的**每一次**列表滚动都会
+    // 调 `finishCurrentAnimation()` —— 正是本段注释自己警告的那个后果：
+    // 把刚启动的**打开**动画杀掉、系统退回默认窗口动画，表现为"无缝动画时有时无"。
+    // `isReturnRunning` 带 `returnDeadline` 自愈（超时即视为已结束），正是为这种
+    // "回调丢失"场景准备的读取口径。
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.isScrollInProgress }.collect { scrolling ->
-            if (scrolling && SeamlessTransitionState.returnRunning) {
+            if (scrolling && SeamlessTransitionState.isReturnRunning) {
                 OplusViewSeamlessCompat.finishCurrentAnimation()
             }
         }
@@ -366,9 +367,8 @@ private fun FeedCard(
 ) {
     val isDisliked = dislikedReason != null
     val isDynamic = item.cardGoto == "dynamic"
-    // 角标玻璃：iOS 风格 + LIQUID 档时，封面时长/播放量角标走真模糊
-    val badgeGlassOn = LocalUiStyle.current == UiStyle.IOS &&
-        LocalGlassConfig.current.material == GlassMaterial.LIQUID
+    // 角标不再走玻璃（2026-10-18 Alt-1）：每卡一份封面离屏录制是首页滚动帧的最大头，
+    // 角标面积最小、信息量最少 ⇒ 改回不透明底（见 CoverBadge），与 MATERIAL 档同款。
     val canOpen = !isDisliked && (item.target != null || item.liveRoute != null || isDynamic)
     var showMoreMenu by remember(item) { mutableStateOf(false) }
     // ── 封面动态取色（移植自 BiliPai 上游「卡片动态取色」）────────────────────────
@@ -519,18 +519,13 @@ private fun FeedCard(
     // 信息区自身**不再铺底色**（底色已由整卡容器承担），只叠渐变与描边：
     // 再铺一层会让接缝处出现"双层色"的色阶断层。
     //
-    // 标题样式：`TextStyle` 是重对象（约 20 个字段，含 fontSize/lineHeight/fontFamily/
-    // 各种 SpanStyle 等）。原先直接写在 Text 的 `style =` 上是 `typography.bodyLarge.copy(...)`，
-    // 于是**每张卡片每次重组**都要新建一份 TextStyle —— 而 copy 的结果只由主题排版决定，
-    // 全站只有一份。以 `bodyLarge` 为 key remember：主题不变时零分配，换主题时正确重建。
-    val baseTitleStyle = MaterialTheme.typography.bodyLarge
-    val titleStyle = remember(baseTitleStyle) {
-        baseTitleStyle.copy(
-            fontSize = 14.sp,
-            lineHeight = 18.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
+    // 标题：iOSTypography.titleSmall（14 SemiBold + 等宽数字）。
+    // 此前是 bodyLarge + 14sp/Medium：与下一行 UP 名 bodySmall（13 Light）只差一档，
+    // 字号也几乎与 meta 同大 —— 一屏卡片读下来就是用户说的「文字摆在上面太单调」。
+    // 保留 remembered 出口：`feedCardTitleStyleIsMemoized` 闸门要求本文件存在
+    // `val titleStyle = remember(`（贴纸标题的样式必须来自一个记忆化出口）。
+    val baseTitleStyle = MaterialTheme.typography.titleSmall
+    val titleStyle = remember(baseTitleStyle) { baseTitleStyle }
     // `drawWithCache` 而不是 `drawBehind`：brush 的 3 个 Color、stops 数组与 Brush 对象
     // 本身都要在缓存块外重建的话，等于**每次重绘**分配一份。滚动列表里重绘频率远高于
     // 取色变化频率，所以把 brush 挪进 cache 块。在缓存块内读取状态是 Compose 认可的
@@ -612,9 +607,14 @@ private fun FeedCard(
             // 时序：官方要求 `setSeamlessView` 在 `startActivity(intent, bundle)` 之前。
             // 截屏回调里两者仍是先后紧邻执行的，契约成立；截取耗时毫秒级。
             val anchorView = anchorState.anchor
-            if (target != null && canSeamless && anchorView != null) {
-                val opener = seamlessOpener ?: return@BiliCardSurface
-                opener.captureCardBitmap(anchorView) { captured ->
+            // 把 seamlessOpener 的判空提到条件里（而不是 `canSeamless && …` 之后再
+            // Elvis）：Kotlin 不会因为布尔变量为真就做智能转换，那样写 Elvis 会被
+            // 判为恒真（实测 warning: always returns the left operand）。
+            val opener = seamlessOpener
+            if (target != null && anchorView != null && opener != null &&
+                OplusViewSeamlessCompat.isVersionSupported()
+            ) {
+                opener.captureCardBitmap(anchorView, anchorState) { captured ->
                     val opened = opener.tryOpen(
                         anchor = anchorView,
                         target = target,
@@ -628,7 +628,10 @@ private fun FeedCard(
                         // 官方 BUNDLE_COLOR：view 之外区域的填充色。不传则由框架取色，
                         // 取错时表现为打开/返回瞬间闪一下白（实测踩过）。
                         fallbackColor = seamlessSpec.fallbackColor,
-                        keepAnchorVisible = true
+                        keepAnchorVisible = true,
+                        // 真实显示矩形（含全局拖拽反馈的形变）作为 BUNDLE_RECT，
+                        // 避免按住卡片时按未变形矩形起飞 —— OPPO 动画错位的修法。
+                        anchorState = anchorState
                     )
                     if (!opened) {
                         // 注册失败：释放截图并走普通跳转
@@ -679,7 +682,12 @@ private fun FeedCard(
             { SeamlessAnchor(anchorState, Modifier.matchParentSize()) }
         } else {
             null
-        }
+        },
+        // 锚点真组合时**整卡形变必须让位**：`appElasticPress` 是绘制期 graphicsLayer，
+        // 而 OPPO 框架按布局期 `getLocationInWindow` 取锚点矩形 ⇒ 按住卡片（卡片正被
+        // 放大/拖偏）点开视频时，动画会从"屏幕上已不存在的矩形"起飞。
+        // 详见 `BiliCardSurface.elasticPressEnabled` 的 KDoc。
+        elasticPressEnabled = !canSeamless
     ) {
         // 无缝动画锚点：与封面同边界的零绘制透明 View，起飞矩形即封面自身。
         // 必须放在封面内容**之前**（z 序在下）：锚点的过渡位图画在自身
@@ -704,16 +712,10 @@ private fun FeedCard(
             // 整卡**——表现为"点击后预览图先盖住简介区，再开始动画"（返回方向同理）。
             // 不装饰时框架会去捕获锚点所在区域的**真实像素**，即整卡（封面+简介），
             // 这正是官方 B 站的效果。
-            // 角标玻璃（LIQUID 档）：封面内容录进专用背板供角标采样。封面是静态
-            // 内容（只在图片加载时重绘），录制一次即可，无逐帧开销。角标作为
-            // 兄弟节点画在录制子树之外，避免采样到自身（反馈回路）。
-            //
-            // **必须条件化**：`rememberLayerBackdrop()` 内部默认参数会调
-            // `rememberGraphicsLayer()`，即持有一个 RenderNode 级离屏层。无条件创建
-            // 时，默认配置（GlassConfig 默认 FROSTED、badgeGlassOn=false）下每张可见
-            // 卡片都会白创建一个离屏层，且随滚动不断创建/释放。
-            // 条件调用 composable 是合法的（分支稳定，不会破坏槽位顺序）。
-            val coverBackdrop = if (badgeGlassOn) rememberLayerBackdrop() else null
+            // 每卡封面背板已删除（Alt-1）：它曾在 iOS+LIQUID 档为两个角标提供模糊底，
+            // 代价是**每张可见卡片一份封面离屏录制**（单列默认 ≈0.9 Mpx/卡/帧），
+            // 且新卡进视口时要首建 backdrop + blur 缓存（worst=132ms 尖峰的嫌疑来源）。
+            // 角标改用不透明黑底（面积 ~28×18dp，白字可读性不变），见 CoverBadge。
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
@@ -750,9 +752,7 @@ private fun FeedCard(
                 } else {
                     null
                 },
-                modifier = Modifier
-                    .matchParentSize()
-                    .then(coverBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier)
+                modifier = Modifier.matchParentSize()
             )
             // 封面左下：时长/竖屏等标记；右下：播放量（保留官方角标风格）
             if (dislikedReason != null) {
@@ -765,7 +765,6 @@ private fun FeedCard(
                 item.coverLeftText1?.let { text ->
                     CoverBadge(
                         text = text,
-                        backdrop = coverBackdrop,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .padding(BiliSpacing.sm)
@@ -774,7 +773,6 @@ private fun FeedCard(
                 item.coverRightText?.let { text ->
                     CoverBadge(
                         text = text,
-                        backdrop = coverBackdrop,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(BiliSpacing.sm)
@@ -810,7 +808,8 @@ private fun FeedCard(
                 style = titleStyle
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            // 标题 → meta 的间距走卡片密度口径（与排行页同源，4dp）
+            Spacer(modifier = Modifier.height(BiliCardDensity.titleToMeta))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -892,17 +891,14 @@ private fun FeedCard(
 @Composable
 private fun CoverBadge(
     text: String,
-    backdrop: LayerBackdrop? = null,
     modifier: Modifier = Modifier
 ) {
-    val shape = CoverBadgeShape
-    val glass = backdrop != null
+    // Alt-1：角标取消玻璃采样，统一走不透明黑底 —— 这就是**原本 MATERIAL 档**的分支，
+    // 本次只是把 iOS+LIQUID 档也收口到它，没有新造第三种样式（0.62 黑 + 白字，可读性不变）。
     Surface(
-        modifier = modifier.then(
-            if (backdrop != null) Modifier.glassBadgeSurface(backdrop, shape) else Modifier
-        ),
-        shape = shape,
-        color = if (glass) Color.Transparent else Color.Black.copy(alpha = 0.62f)
+        modifier = modifier,
+        shape = CoverBadgeShape,
+        color = Color.Black.copy(alpha = 0.62f)
     ) {
         Text(
             text = text,
@@ -913,38 +909,6 @@ private fun CoverBadge(
     }
 }
 
-/**
- * 角标玻璃：采样所在卡片封面的背板，blur + 轻折射 + 深色染色（白字可读）。
- * 角标小、封面内容静态，采样成本低。
- *
- * **必须 remember 住整条链**：miuix 的 `DrawBackdropElement.equals` 对 shape/effects/
- * onDrawSurface 做**引用比较**（已反编译 miuix-blur 0.9.4-rc01 核实），`update(node)`
- * 末尾又**无条件 `invalidateDrawCache()`** —— 每次重组新建 lambda 都会让角标玻璃的
- * blur/lens 缓存整体作废重建。卡片取色 350ms 渐变期 FeedCard 每帧重组，不 remember
- * 就等于每帧重算每张卡两个角标的玻璃。`liquidGlassSurface` 早已因此 remember 整条链
- * （见 LiquidBackdrop.kt），这里补上同一处理。
- */
-@Composable
-private fun Modifier.glassBadgeSurface(backdrop: LayerBackdrop, shape: RoundedCornerShape): Modifier {
-    val chain = remember(backdrop, shape) {
-        Modifier.drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                blur(4.dp.toPx(), 4.dp.toPx())
-                lens(
-                    refractionHeight = 4.dp.toPx(),
-                    refractionAmount = 3.dp.toPx(),
-                    chromaticAberration = 0f
-                )
-            },
-            onDrawSurface = {
-                drawRect(Color.Black.copy(alpha = 0.45f))
-            }
-        )
-    }
-    return this.then(chain)
-}
 
 @Composable
 private fun FeedCardSkeleton(singleColumn: Boolean = false) {
@@ -959,25 +923,26 @@ private fun FeedCardSkeleton(singleColumn: Boolean = false) {
                 .aspectRatio(if (singleColumn) 16f / 9f else 4f / 3f),
             shape = FeedCardShape
         )
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        // 骨架信息区必须**与真实卡片同高**（真实卡只有两行：标题 + UP 名），
+        // 否则数据到达时整块缩一次 —— 这正是三态里"骨架→内容跳版"的来源。
+        // 此前是 12/10 内边距 + 三行占位（比真实内容高约 24dp）。
+        Column(
+            modifier = Modifier.padding(
+                horizontal = BiliCardDensity.infoHorizontal,
+                vertical = BiliCardDensity.infoVertical
+            )
+        ) {
             SkeletonBlock(
                 modifier = Modifier
                     .fillMaxWidth(0.95f)
                     .height(18.dp),
                 shape = MaterialTheme.shapes.extraSmall
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(BiliCardDensity.titleToMeta))
             SkeletonBlock(
                 modifier = Modifier
                     .fillMaxWidth(0.7f)
                     .height(16.dp),
-                shape = MaterialTheme.shapes.extraSmall
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            SkeletonBlock(
-                modifier = Modifier
-                    .fillMaxWidth(0.35f)
-                    .height(14.dp),
                 shape = MaterialTheme.shapes.extraSmall
             )
         }
@@ -995,15 +960,18 @@ private fun MoreMenuDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) { Text("取消") }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 items.forEachIndexed { index, menuItem ->
-                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(vertical = BiliSpacing.xs))
                     TextButton(
                         onClick = onDismiss,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().appElasticPress()
                     ) {
                         Text(menuItem.title, style = MaterialTheme.typography.bodyLarge)
                     }
@@ -1017,7 +985,7 @@ private fun MoreMenuDialog(
                                             onDismiss()
                                             onDislike(item, reason)
                                         },
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.weight(1f).appElasticPress()
                                     ) {
                                         Text(
                                             reason.name,
@@ -1044,7 +1012,7 @@ private fun DislikedOverlay(
     Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 12.dp, vertical = 16.dp),
+            .padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.lg),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1055,8 +1023,11 @@ private fun DislikedOverlay(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            TextButton(onClick = onUndo) {
+            Spacer(modifier = Modifier.height(BiliSpacing.smPlus))
+            TextButton(
+                onClick = onUndo,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("撤回")
             }
         }

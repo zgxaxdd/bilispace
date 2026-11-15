@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
@@ -35,7 +36,10 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.withTextColor
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 internal fun ImConversationComposer(
@@ -65,12 +69,15 @@ internal fun ImConversationComposer(
         color = MaterialTheme.colorScheme.surface
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(
+                horizontal = BiliSpacing.md,
+                vertical = BiliSpacing.xsPlus
+            ),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
                 verticalAlignment = Alignment.Bottom
             ) {
                 Box(
@@ -79,7 +86,7 @@ internal fun ImConversationComposer(
                         .height(44.dp)
                         .background(
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            shape = MaterialTheme.shapes.large
+                            shape = ComposerFieldShape
                         )
                 ) {
                     BasicTextField(
@@ -92,7 +99,10 @@ internal fun ImConversationComposer(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
-                            .padding(start = 12.dp, end = 10.dp)
+                            .padding(
+                                start = BiliSpacing.md,
+                                end = BiliSpacing.smPlus
+                            )
                             .onFocusChanged { isFocused = it.isFocused },
                         singleLine = true,
                         minLines = 1,
@@ -140,7 +150,9 @@ internal fun ImConversationComposer(
                             localError = null
                             focusManager.clearFocus(force = true)
                         }
-                    }
+                    },
+                    // 全局拖拽反馈（第 34 轮 T2）：输入行尾"发送"图标钮。
+                    modifier = Modifier.appElasticPress()
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
@@ -159,3 +171,6 @@ internal fun ImConversationComposer(
         }
     }
 }
+
+/** 输入框底盘圆角：分组圆角 token（16dp），不再随 CornerStyle 漂移。 */
+private val ComposerFieldShape = RoundedCornerShape(BiliRadius.groupedList)

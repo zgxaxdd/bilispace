@@ -39,6 +39,11 @@ dependencyResolutionManagement {
 rootProject.name = "bbspace"
 include(":app")
 
+// 源码级 Lint 检测器（A2）：把「扫源码 + 钉行号/钉调用次数」的 JVM 守卫逐步换成
+// 有语义解析的 Lint 诊断。当前只放 1 条规则（NoPrintln，零基线）作为**机制证明**，
+// 既有守卫一条都没动 —— 见 docs/2026-10-13-上游同步落地-执行报告.md §1.10。
+include(":ci-lint")
+
 // Infra 层
 include(":infra:protobuf")
 include(":infra:crypto")

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -57,10 +58,22 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/** 已选图片缩略图圆角：badge token（8dp），不再取随 CornerStyle 漂移的 shapes.small。 */
+private val EditorThumbShape = RoundedCornerShape(BiliRadius.badge)
+
+/** 输入框圆角：分组 token（16dp）。 */
+private val EditorFieldShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 发送按钮圆角：控件 token（17dp，与全站动作按钮同一圆端语言）。 */
+private val EditorSendShape = RoundedCornerShape(BiliRadius.playerControl)
 
 @Composable
 internal fun CommentEditorFab(
@@ -70,7 +83,8 @@ internal fun CommentEditorFab(
 ) {
     FloatingActionButton(
         onClick = onClick,
-        modifier = modifier.navigationBarsPadding(),
+        // 全局拖拽反馈（第 34 轮 T2）：编辑器"发送"FAB。
+        modifier = modifier.navigationBarsPadding().appElasticPress(),
         containerColor = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         elevation = FloatingActionButtonDefaults.elevation(
@@ -129,8 +143,11 @@ internal fun CommentEditorSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(
+                    horizontal = BiliSpacing.lg,
+                    vertical = BiliSpacing.md
+                ),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -139,7 +156,7 @@ internal fun CommentEditorSheet(
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
                 ) {
                     Text(
                         text = if (state.target.isReply) "回复评论" else "发表评论",
@@ -155,7 +172,10 @@ internal fun CommentEditorSheet(
                 }
                 IconButton(
                     onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                    enabled = !busy && state.selectedImageUris.size < COMMENT_EDITOR_MAX_IMAGE_COUNT
+                    enabled = !busy && state.selectedImageUris.size < COMMENT_EDITOR_MAX_IMAGE_COUNT,
+                    // 全局拖拽反馈（第 34 轮 T2）：编辑器工具条上的"添加图片"图标钮
+                    //（弹层内独立小件，不参与过渡）。
+                    modifier = Modifier.appElasticPress()
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Add,
@@ -170,7 +190,7 @@ internal fun CommentEditorSheet(
             }
             if (state.selectedImageUris.isNotEmpty()) {
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     itemsIndexed(
                         items = state.selectedImageUris,
@@ -180,7 +200,7 @@ internal fun CommentEditorSheet(
                             modifier = Modifier
                                 .width(72.dp)
                                 .height(72.dp)
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(EditorThumbShape)
                         ) {
                             StaticPreviewImage(
                                 uri = uri,
@@ -190,9 +210,13 @@ internal fun CommentEditorSheet(
                             if (!busy) {
                                 IconButton(
                                     onClick = { onRemoveImage(index) },
+                                    // 全局拖拽反馈：缩略图角上的"移除"钮。
+                                    // 这里**不传 visualSize**：可见圆底由内部 Icon(tint) 撑出，
+                                    // 命中区就是外层 20dp 方块 —— 形变围绕它鼓，与按下感知一致。
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .size(20.dp)
+                                        .appElasticPress()
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
@@ -217,7 +241,7 @@ internal fun CommentEditorSheet(
                     onValueChange = onValueChange,
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
-                    shape = MaterialTheme.shapes.large,
+                    shape = EditorFieldShape,
                     minLines = 4,
                     maxLines = 8,
                     placeholder = {
@@ -243,10 +267,17 @@ internal fun CommentEditorSheet(
                 Button(
                     onClick = onSubmit,
                     enabled = !busy && state.input.isNotBlank(),
+                    // 全局拖拽反馈（第 34 轮 T2）：编辑器"发送"主按钮（弹层内独立小件）。
+                    // `enabled` 透传：输入为空时按钮是灰的，形变也应同步关掉。
+                    // `highlightShape` 传 `EditorSendShape`，光斑裁在按钮自己的圆角内。
                     modifier = Modifier
-                        .padding(start = 8.dp)
-                        .fillMaxHeight(),
-                    shape = MaterialTheme.shapes.extraLarge,
+                        .padding(start = BiliSpacing.sm)
+                        .fillMaxHeight()
+                        .appElasticPress(
+                            enabled = !busy && state.input.isNotBlank(),
+                            highlightShape = EditorSendShape
+                        ),
+                    shape = EditorSendShape,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer

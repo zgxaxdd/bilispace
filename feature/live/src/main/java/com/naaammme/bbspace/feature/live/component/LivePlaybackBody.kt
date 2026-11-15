@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.LivePlaybackViewState
 import com.naaammme.bbspace.core.model.LiveRoomSessionState
 import com.naaammme.bbspace.core.model.LiveRoute
@@ -49,8 +50,8 @@ internal fun LivePlaybackBody(
 ) {
     if (isExpanded) {
         Row(
-            modifier = modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = modifier.padding(BiliSpacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
         ) {
             Box(
                 modifier = Modifier

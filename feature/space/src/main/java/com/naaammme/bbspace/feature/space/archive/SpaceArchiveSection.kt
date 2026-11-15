@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,6 +26,10 @@ import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessVideoCardState
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceVideo
 import com.naaammme.bbspace.core.model.VideoTarget
@@ -35,7 +37,12 @@ import com.naaammme.bbspace.feature.space.SpaceArchiveUiState
 import com.naaammme.bbspace.feature.space.SpaceDynamicUiState
 import com.naaammme.bbspace.feature.space.SpaceSection
 import com.naaammme.bbspace.feature.space.dynamic.spaceDynamicSection
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import java.util.Locale
+
+/** 视频卡时长角标底盘（文件级常量：形状不许在组合期新建 —— `ListAllocationStructureTest` 有守卫）。 */
+private val SpaceDurationBadgeShape = RoundedCornerShape(BiliRadius.badge)
+
 
 internal fun LazyListScope.spaceArchiveSection(
     state: SpaceArchiveUiState,
@@ -112,7 +119,14 @@ private fun LazyListScope.videoSection(
             )
             TextButton(
                 onClick = { nextOrder?.let { onSelectOrder(it.value) } },
-                enabled = nextOrder != null
+                enabled = nextOrder != null,
+                // 全局拖拽反馈（第 34 轮 T2）：**这一颗可以挂** ——
+                // 本文件虽然有 `SeamlessCardCoverAnchor`，但锚点在 `SpaceVideoCard`
+                // 的 `BiliCardSurface` 卡片容器里（卡片本身的弹性反馈由该原语负责，
+                // 按铁律不能重复挂也无法在此挂）；这里是**工具条上的排序按钮**，
+                // 与视频卡既不共祖先也不参与过渡几何，屏幕像素与
+                // `getLocationInWindow` 之间不存在被 graphicsLayer 扭过的关系。
+                modifier = Modifier.appElasticPress(enabled = nextOrder != null)
             ) {
                 Text(
                     text = order?.title ?: "排序",
@@ -185,7 +199,7 @@ private fun SpaceVideoCard(
 ) {
     // 无缝打开：注册成功由系统接管过渡，失败走 onClick 普通打开
     val seamless = rememberSeamlessVideoCardState()
-    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = MaterialTheme.shapes.medium).radiusPx
+    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = SpaceCardShape).radiusPx
     val meta = remember(video.author, video.categoryName, video.publishTimeText) {
         listOfNotNull(video.author, video.categoryName, video.publishTimeText).joinToString(" · ")
     }
@@ -200,22 +214,27 @@ private fun SpaceVideoCard(
         ).joinToString(" · ")
     }
 
-    Card(
+    BiliCardSurface(
         onClick = {
             if (!seamless.tryOpen(video.target, video.cover, true, seamlessRadiusPx)) {
                 onClick()
             }
         },
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
+        shape = SpaceCardShape,
+        // 本卡内的 `SeamlessCardCoverAnchor`（见下方 CoverImage）是系统过渡的锚点宿主。
+        // `appElasticPress` 是绘制期 graphicsLayer，而 OPPO 框架按布局期
+        // `getLocationInWindow` 取锚点矩形 ⇒ 按住卡片点开视频时动画会从"屏幕上
+        // 已不存在的矩形"起飞。锚点真组合时整卡形变必须让位；
+        // 非 OPPO 机型（`active=false`）锚点不组合、走普通打开，保留按压反馈。
+        // 详见 `BiliCardSurface.elasticPressEnabled` 的 KDoc。
+        elasticPressEnabled = !seamless.active
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(BiliSpacing.smPlus),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             CoverImage(
                 url = video.cover,
@@ -230,12 +249,14 @@ private fun SpaceVideoCard(
                         text = durationText,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp)
+                            .padding(BiliSpacing.xsPlus)
                             .background(
                                 color = Color.Black.copy(alpha = 0.56f),
-                                shape = MaterialTheme.shapes.extraSmall
+                                shape = SpaceDurationBadgeShape
                             )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            // 角标内边距刻意不用 token：BiliSpacing 最小是 xs=4dp，
+                            // 会把 12dp 高的角标撑变形（保留字面量并在此说明）。
+                            .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White
                     )
@@ -243,7 +264,7 @@ private fun SpaceVideoCard(
             }
             Column(
                 modifier = Modifier.weight(0.62f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
             ) {
                 Text(
                     text = video.title,
@@ -284,3 +305,5 @@ private fun formatDuration(durationSec: Long): String {
         String.format(Locale.ROOT, "%d:%02d", minute, second)
     }
 }
+
+private val SpaceCardShape = RoundedCornerShape(BiliRadius.card)

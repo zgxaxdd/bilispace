@@ -40,6 +40,7 @@ import com.naaammme.bbspace.core.model.LiveRoomPanelState
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import com.naaammme.bbspace.feature.live.component.LivePlaybackBody
 import com.naaammme.bbspace.feature.live.player.LivePlayerPane
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import kotlinx.coroutines.flow.StateFlow
 
 @Composable
@@ -127,8 +128,8 @@ fun LiveScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        val playerGap = 16.dp
-        val playerTopPad = 16.dp
+        val playerGap = BiliSpacing.lg
+        val playerTopPad = BiliSpacing.lg
         val compactVideoH = maxWidth * (9f / 16f)
         val expandedContentW = (maxWidth - (playerTopPad * 2) - playerGap).coerceAtLeast(0.dp)
         val expandedPlayerW = expandedContentW * 0.54f
@@ -161,7 +162,17 @@ fun LiveScreen(
                         .statusBarsPadding(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = handleBack) {
+                    IconButton(
+                        onClick = handleBack,
+                        // 全局拖拽反馈（第 34 轮 T2）：直播页顶栏返回钮。
+                        //
+                        // ⚠️ **只有这一颗**：本页的 `LivePlayerPane` 里有 Media3
+                        // `PlayerView`（AndroidView），其祖先链上**一律不挂**
+                        // `appElasticPress` —— graphicsLayer 会把视频画面推进离屏合成，
+                        // 直接掉帧。返回钮在这个 Box 之外（它在 `Row` 里、与播放器面板
+                        // 是兄弟），所以可以安全挂。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",

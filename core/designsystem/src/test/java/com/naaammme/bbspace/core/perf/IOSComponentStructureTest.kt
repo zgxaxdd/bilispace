@@ -43,7 +43,14 @@ class IOSComponentStructureTest {
         assertTrue("grabber 应消费 tertiaryLabel 角色色", body.contains("roles.tertiaryLabel"))
     }
 
-    /** 全部 7 处 ModalBottomSheet 都必须接入风格自适应 grabber。 */
+    /**
+     * 全部 ModalBottomSheet 都必须接入风格自适应 grabber。
+     *
+     * **2026-10-18（W6）**：名单从 7 处扩到 8 处 —— 外观设置页新增的「色彩风格」选择弹层
+     * （22 档，`AppearanceSettingsScreen.kt:564` 已按约定写 `dragHandle = { BiliSheetGrabber() }`）。
+     * 这条守卫是**写死名单**的：新加 sheet 不进名单就"不会被保护"，所以在同一批次里补进来，
+     * 否则下一个 sheet 又会静默漏掉（W63 的同类病：没有编译期检查会拦住它）。
+     */
     @Test
     fun allSheetsUseAdaptiveGrabber() {
         val sheetFiles = listOf(
@@ -52,6 +59,7 @@ class IOSComponentStructureTest {
             "feature/dynamic/src/main/java/com/naaammme/bbspace/feature/dynamic/DynamicScreen.kt",
             "feature/home/src/main/java/com/naaammme/bbspace/feature/home/interest/InterestDialog.kt",
             "feature/search/src/main/java/com/naaammme/bbspace/feature/search/filter/SearchFiltersSheet.kt",
+            "feature/settings/src/main/java/com/naaammme/bbspace/feature/settings/appearance/AppearanceSettingsScreen.kt",
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/VideoScreen.kt",
             "feature/video/src/main/java/com/naaammme/bbspace/feature/video/detail/VideoDetailPage.kt"
         )

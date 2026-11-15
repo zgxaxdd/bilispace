@@ -1,6 +1,10 @@
 package com.naaammme.bbspace.feature.comment.component
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +19,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -31,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
@@ -49,6 +56,9 @@ import com.naaammme.bbspace.core.model.CommentReply
 import com.naaammme.bbspace.core.model.CommentUser
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.appSearchElasticPress
 
 internal sealed interface CommentReplyAction {
     data class Check(val rpid: Long) : CommentReplyAction
@@ -63,6 +73,20 @@ internal sealed interface CommentReplyAction {
     data class Share(val reply: CommentReply) : CommentReplyAction
 }
 
+// 卡片形状提到文件级：内联 `shape = RoundedCornerShape(...)` 会被
+// ListAllocationStructureTest 的"具名实参构造 Shape"棘轮计数，且每次组合重造一份。
+/** 评论卡：整卡 20dp 大圆角（与首页卡/排行卡同一 [BiliRadius.card] 语言）。 */
+private val CommentCardShape = RoundedCornerShape(BiliRadius.card)
+
+/** 楼中楼：卡中嵌卡用小一号的同族圆角（不随 CornerStyle 漂移）。 */
+private val ThreadReplyCardShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 等级/VIP/勋章小胶囊：8dp 徽章圆角，与封面角标同族。 */
+private val MiniChipShape = RoundedCornerShape(BiliRadius.badge)
+
+/** 评论动作 chip（点赞/点踩/回复）圆角：分组 token（16dp），不再随 CornerStyle 漂移。 */
+private val CommentActionChipShape = RoundedCornerShape(BiliRadius.groupedList)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CommentCard(
@@ -74,6 +98,7 @@ internal fun CommentCard(
     onAction: (CommentReplyAction) -> Unit
 ) {
     Card(
+        shape = CommentCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -88,10 +113,21 @@ internal fun CommentCard(
             )
 
             if (reply.replyCount > 0L) {
-                HorizontalDivider()
+                // 极低对比 hairline + 左右内缩：分隔"正文"与"查看回复"两段，
+                // 但读起来是留白分组而不是一条硬边框（默认 outlineVariant 全宽会压断卡片）
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = BiliSpacing.lg),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
                 TextButton(
                     onClick = { onAction(CommentReplyAction.OpenReplies(reply)) },
-                    modifier = Modifier.fillMaxWidth(),
+                    // 全局拖拽反馈（第 34 轮 T2）：本文件是**评论卡**（无 SeamlessAnchor、
+                    // 不在播放器祖先链上），"查看 N 条回复"是卡片内的独立整宽入口。
+                    // 用 `appSearchElasticPress()`（strength 0.6 宽控件档）：它是整行宽控件，
+                    // 满强度按下时整行横移会读作"卡片在晃"。
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .appSearchElasticPress(),
                     contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
                     Text(
@@ -120,9 +156,8 @@ internal fun ThreadReplyCard(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        // 楼中楼回复卡：groupedList(16) 固定——卡中嵌卡用小一号的同族圆角，
-        // 不随 CornerStyle 漂移（iOS 档下与原 shapes.large 等值）
-        shape = RoundedCornerShape(BiliRadius.groupedList),
+        // 楼中楼回复卡：卡中嵌卡用小一号的同族圆角（见文件级常量注释）
+        shape = ThreadReplyCardShape,
         modifier = modifier.fillMaxWidth()
     ) {
         ReplyBody(
@@ -130,7 +165,7 @@ internal fun ThreadReplyCard(
             currentMid = currentMid,
             isReplyBusy = isReplyBusy,
             onAction = onAction,
-            modifier = Modifier.padding(horizontal = BiliSpacing.md, vertical = 10.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.smPlus)
         )
     }
 }
@@ -160,11 +195,39 @@ private fun ReplyBody(
         horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
         verticalAlignment = Alignment.Top
     ) {
+        // 头像按下反馈（上游 `76839cb22` 评论动效统一的"可点元素按压"一部分）：
+        // 按下缩到 0.92、松开回 1，时长/曲线走 LocalAnimations token；
+        // 值只在 graphicsLayer 里读（绘制期），按压过程不按帧重组整条评论。
+        // reduceMotion（App 速度档=关 / 系统移除动画）时直接吸附，不播放缩放。
+        val avatarInteraction = remember { MutableInteractionSource() }
+        val avatarPressed by avatarInteraction.collectIsPressedAsState()
+        val avatarAnim = LocalAnimations.current
+        val avatarScale = remember { Animatable(1f) }
+        LaunchedEffect(avatarPressed, avatarAnim.reduceMotion) {
+            val target = if (avatarPressed && !avatarAnim.reduceMotion) 0.92f else 1f
+            if (avatarAnim.reduceMotion) {
+                avatarScale.snapTo(1f)
+            } else {
+                avatarScale.animateTo(
+                    targetValue = target,
+                    animationSpec = tween(
+                        durationMillis = avatarAnim.short,
+                        easing = avatarAnim.standard
+                    )
+                )
+            }
+        }
         Surface(
             onClick = { onAction(CommentReplyAction.OpenUser(reply.user)) },
-            modifier = Modifier.size(44.dp),
+            modifier = Modifier
+                .size(44.dp)
+                .graphicsLayer {
+                    scaleX = avatarScale.value
+                    scaleY = avatarScale.value
+                },
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface
+            color = MaterialTheme.colorScheme.surface,
+            interactionSource = avatarInteraction
         ) {
             AvatarImage(
                 url = reply.user.face,
@@ -192,12 +255,19 @@ private fun ReplyBody(
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
                 ) {
                     Text(
-                        modifier = Modifier.clickable {
-                            onAction(CommentReplyAction.OpenUser(reply.user))
-                        },
+                        modifier = Modifier
+                            // 全局拖拽反馈（第 34 轮 T2）：作者名是**独立可点文本**。
+                            //
+                            // ⚠️ 只挂这一处文字，**不挂**同行的头像 `Surface`：头像已经有
+                            // 自己的按压缩放（下面 avatarScale 0.92），再叠一层弹性形变
+                            // = 双抖（与 Switch/Slider 同一条判据）。
+                            .appElasticPress()
+                            .clickable {
+                                onAction(CommentReplyAction.OpenUser(reply.user))
+                            },
                         text = reply.user.name,
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary
@@ -274,8 +344,18 @@ private fun ReplyBody(
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                TextButton(onClick = { onAction(CommentReplyAction.Reply(reply)) }) {
-                    Text("回复")
+                TextButton(
+                    onClick = { onAction(CommentReplyAction.Reply(reply)) },
+                    // 全局拖拽反馈（第 34 轮 T2）：行尾"回复"是独立小件。
+                    modifier = Modifier.appElasticPress()
+                ) {
+                    Text(
+                        text = "回复",
+                        // 行内动作用 labelMedium（12 Medium）而非 TextButton 默认的 13 Bold：
+                        // 让"作者名 > 正文 > 动作"的顺序读得出来，回复不再是行里最重的一块
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 ReplyMenuButton(
                     busy = replyBusy,
@@ -297,7 +377,7 @@ private fun ReplyMessage(reply: CommentReply) {
     val translated = reply.translatedMessage?.takeIf(String::isNotBlank)
     if (message == null && translated == null) return
     Column(
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
     ) {
         reply.parentName?.takeIf(String::isNotBlank)?.let { name ->
             Text(
@@ -339,9 +419,11 @@ private fun ReplyMenuButton(
     Box {
         IconButton(
             onClick = { show = true },
-            enabled = !busy
+            enabled = !busy,
+            // 全局拖拽反馈（第 34 轮 T2）：行尾"更多"图标钮（本文件无无缝锚点）。
+            modifier = Modifier.appElasticPress()
         ) {
-            Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+            Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
         }
         DropdownMenu(
             expanded = show,
@@ -391,13 +473,18 @@ private fun ReplyMenuButton(
                     onClick = {
                         confirmDelete = false
                         onDelete()
-                    }
+                    },
+                    // 全局拖拽反馈：删除确认框的动作（浮层小件）。
+                    modifier = Modifier.appElasticPress()
                 ) {
                     Text("删除")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
+                TextButton(
+                    onClick = { confirmDelete = false },
+                    modifier = Modifier.appElasticPress()
+                ) {
                     Text("取消")
                 }
             }
@@ -422,12 +509,17 @@ private fun ReplyRateButton(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .clip(MaterialTheme.shapes.extraLarge)
+            .clip(CommentActionChipShape)
+            // 全局拖拽反馈（第 34 轮 T2）：点赞/点踩是**独立小 chip**，不参与过渡。
+            // `highlightShape` 与 `clip(CommentActionChipShape)` 同源，光斑裁在 chip 圆角内。
+            // `enabled` 透传：busy 时该 chip 不可点，形变也一并关掉（否则按下去有无反馈却不响应）。
+            .appElasticPress(enabled = enabled, highlightShape = CommentActionChipShape)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 2.dp)
     ) {
+        // 动作图标统一线性语言：只有"已点赞"这个选中态才用实心
         Icon(
-            imageVector = Icons.Default.ThumbUp,
+            imageVector = if (selected) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
             contentDescription = contentDescription,
             tint = tint,
             modifier = Modifier
@@ -449,7 +541,8 @@ private fun ReplyRateButton(
 private fun MiniChip(text: String) {
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = MaterialTheme.shapes.extraLarge
+        // 等级/VIP/勋章胶囊：8dp 徽章圆角（原 shapes.extraLarge 随 CornerStyle 漂移）
+        shape = MiniChipShape
     ) {
         Text(
             text = text,

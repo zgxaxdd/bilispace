@@ -30,6 +30,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 internal fun SpaceNoteTitleButton(
@@ -89,7 +91,9 @@ internal fun SpaceNoteTitleButton(
 
     TextButton(
         onClick = { showDialog = true },
-        contentPadding = PaddingValues(0.dp)
+        contentPadding = PaddingValues(0.dp),
+        // 全局拖拽反馈（第 34 轮 T2）：空间页顶部的"备注"标题按钮（本文件无无缝锚点）。
+        modifier = Modifier.appElasticPress()
     ) {
         Text(
             text = state.content.ifBlank { "备注" }.replace('\n', ' '),
@@ -136,15 +140,22 @@ private fun SpaceNoteDialog(
         title = null,
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
-                    OutlinedButton(onClick = onImport) {
+                    OutlinedButton(
+                        onClick = onImport,
+                        // 全局拖拽反馈：备注弹层里"导入/导出"两颗描边按钮（浮层小件）。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Text(text = "导入")
                     }
-                    OutlinedButton(onClick = onExport) {
+                    OutlinedButton(
+                        onClick = onExport,
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Text(text = "导出")
                     }
                 }
@@ -165,13 +176,17 @@ private fun SpaceNoteDialog(
                 onClick = {
                     onSave(input)
                     onDismiss()
-                }
+                },
+                modifier = Modifier.appElasticPress()
             ) {
                 Text(text = "保存")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text(text = "取消")
             }
         }

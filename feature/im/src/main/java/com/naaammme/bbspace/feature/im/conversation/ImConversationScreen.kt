@@ -2,6 +2,7 @@ package com.naaammme.bbspace.feature.im.conversation
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,9 +48,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
+import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.ImMessage
 import com.naaammme.bbspace.core.model.ImMsgType
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -57,6 +62,7 @@ import com.naaammme.bbspace.core.model.VideoTargetTool
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,7 +121,11 @@ fun ImConversationScreen(
             TopAppBar(
                 title = { Text(state.title.ifBlank { "会话" }) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        // 全局拖拽反馈（第 34 轮 T2）：会话页顶栏返回钮。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -143,25 +153,22 @@ fun ImConversationScreen(
                 }
 
                 messageItems.isEmpty() -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "暂无消息",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    // 空态走全站唯一出口（此前是自拼 Box+Text，与其它页的空态观感不一致）。
+                    StateMessageCard(
+                        text = "暂无消息",
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 else -> {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(
+                            horizontal = BiliSpacing.md,
+                            vertical = BiliSpacing.md
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
                         reverseLayout = true
                     ) {
                         items(
@@ -210,12 +217,22 @@ private fun ImMessageBubble(
             MessageContent(item = item, onOpenVideo = onOpenVideo)
         } else {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
                 verticalAlignment = Alignment.Bottom
             ) {
                 Box(
                     modifier = Modifier
                         .size(32.dp)
+                        // 全局拖拽反馈（第 34 轮 T2）：会话气泡里的**头像**是进入空间的
+                        // 独立小按钮。不可点时（`showAvatar` 为假 / 无 senderUid）
+                        // 不挂 —— 与下面的 clickable 用同一组条件。
+                        .then(
+                            if (item.showAvatar && onOpenSpace != null && message.senderUid > 0L) {
+                                Modifier.appElasticPress(highlightShape = CircleShape)
+                            } else {
+                                Modifier
+                            }
+                        )
                         .then(
                             if (item.showAvatar && onOpenSpace != null && message.senderUid > 0L) {
                                 // F-5：头像即"进入空间"的按钮，补 Role 与动作说明
@@ -255,7 +272,7 @@ private fun MessageContent(
             message.msgType == ImMsgType.NOTICE -> {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MessageBubbleShape,
                     modifier = Modifier.widthIn(max = 220.dp)
                 ) {
                     Column {
@@ -271,13 +288,13 @@ private fun MessageContent(
                                     text = item.timeText,
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
-                                        .padding(end = 6.dp, bottom = 4.dp)
+                                        .padding(end = BiliSpacing.xsPlus, bottom = BiliSpacing.xs)
                                 )
                             }
                         }
                         Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.padding(BiliSpacing.smPlus),
+                            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
                         ) {
                             Text(
                                 text = message.noticeTitle ?: message.content.ifBlank { "通知" },
@@ -334,7 +351,7 @@ private fun MessageContent(
                 val clickable = onOpenVideo != null && message.shareAid > 0L
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MessageBubbleShape,
                     modifier = Modifier
                         .widthIn(max = 220.dp)
                         .then(if (clickable) Modifier.clickable {
@@ -361,12 +378,12 @@ private fun MessageContent(
                                 text = item.timeText,
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
-                                    .padding(end = 6.dp, bottom = 4.dp)
+                                    .padding(end = BiliSpacing.xsPlus, bottom = BiliSpacing.xs)
                             )
                         }
                         Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.padding(BiliSpacing.smPlus),
+                            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
                         ) {
                             Text(
                                 text = message.content.ifBlank { "视频卡片" },
@@ -395,7 +412,7 @@ private fun MessageContent(
             !message.imageUrl.isNullOrBlank() -> {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MessageBubbleShape,
                     modifier = Modifier
                         .widthIn(max = 220.dp)
                 ) {
@@ -411,7 +428,7 @@ private fun MessageContent(
                             text = item.timeText,
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
-                                .padding(end = 6.dp, bottom = 4.dp)
+                                .padding(end = BiliSpacing.xsPlus, bottom = BiliSpacing.xs)
                         )
                     }
                 }
@@ -432,7 +449,7 @@ private fun MessageContent(
                 val timeColor = bodyColor.copy(alpha = 0.58f)
                 Surface(
                     color = surfaceColor,
-                    shape = MaterialTheme.shapes.medium
+                    shape = MessageBubbleShape
                 ) {
                     val timeFontSize = MaterialTheme.typography.labelSmall.fontSize
                     val text = remember(item.displayText, item.timeText, timeColor, timeFontSize) {
@@ -452,7 +469,10 @@ private fun MessageContent(
                     Text(
                         text = text,
                         modifier = Modifier
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .padding(
+                                horizontal = BiliSpacing.md,
+                                vertical = BiliSpacing.sm
+                            )
                             .copyTextOnLongPress(item.displayText, "消息"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = bodyColor
@@ -476,7 +496,7 @@ private fun MessageTimeChip(
         modifier = modifier
             .background(
                 color = chipBg,
-                shape = MaterialTheme.shapes.small
+                shape = MessageMetaShape
             )
             .padding(horizontal = 5.dp, vertical = 1.dp),
         style = MaterialTheme.typography.labelSmall,
@@ -489,12 +509,15 @@ private fun SystemNoticeContent(item: ConversationMessageItem) {
     val message = item.message
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.small
+        shape = MessageMetaShape
     ) {
         Text(
             text = message.noticeText ?: message.content,
             modifier = Modifier
-                .padding(horizontal = 10.dp, vertical = 4.dp)
+                .padding(
+                    horizontal = BiliSpacing.smPlus,
+                    vertical = BiliSpacing.xs
+                )
                 .copyTextOnLongPress(message.noticeText ?: message.content, "消息"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -582,4 +605,10 @@ private const val CONTENT_TYPE_NOTICE = "notice"
 private const val CONTENT_TYPE_SHARE = "share"
 private const val CONTENT_TYPE_TEXT = "text"
 private const val CONTENT_TYPE_IMAGE = "image"
+
+/** 消息气泡圆角：分组圆角 token（16dp），不再用会随 CornerStyle 漂移的 shapes.medium。 */
+private val MessageBubbleShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 时间 chip / 系统提示条圆角：badge token（8dp）。 */
+private val MessageMetaShape = RoundedCornerShape(BiliRadius.badge)
 

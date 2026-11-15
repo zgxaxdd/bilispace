@@ -13,6 +13,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
 import com.naaammme.bbspace.core.common.log.DiagnosticLog
@@ -25,6 +28,69 @@ import com.naaammme.bbspace.core.common.log.DiagnosticLog
 class SeamlessAnchorState {
     // 供跨模块调用方（feature 层卡片）在点击瞬间读取；写路径只属于 SeamlessAnchor
     var anchor: View? = null
+
+    /**
+     * 锚点所在 Compose 节点的 [LayoutCoordinates]（**活引用**，不是快照）。
+     *
+     * ## 为什么必须存坐标对象而不是存矩形（这是「OPPO 动画错位」的根因修法）
+     *
+     * 全局拖拽反馈（[com.naaammme.bbspace.core.designsystem.motion.appElasticPress]）
+     * 的形变是 `Modifier.graphicsLayer` —— **绘制期**变换：它改变像素落在屏幕上的位置，
+     * 但**不改布局**。于是同一个"锚点现在长在哪"有两个互相矛盾的答案：
+     *
+     * | 取法 | 相位 | 按压/拖拽形变中 |
+     * |---|---|---|
+     * | `View.getLocationInWindow()` / `getLocationOnScreen()` | 布局期 | 返回**未变形**矩形 |
+     * | `LayoutCoordinates.boundsInWindow()` | 绘制期链（含 layer） | 返回**变形后**矩形 |
+     *
+     * OPPO 无缝框架拿的是前者（它只认 View）。所以用户按住卡片（卡片正在放大 2%、
+     * 并被手指拖着偏移若干像素）时点开视频，框架按"未变形矩形"起飞 —— 而屏幕上
+     * 那张卡片其实已经在别处、另一个大小。这就是「无缝动画从错误的位置/大小开始」
+     * 的机制性来源，且排行页最明显（卡片在瀑布流里、点击前常有一次按压回弹未走完）。
+     *
+     * 修法不是"关掉拖拽反馈"，而是把**真实显示矩形**显式喂给框架：官方
+     * `BUNDLE_RECT` 的语义正是「view 在屏幕上显示的区域」，用于框架算错区域时兜底。
+     * 传它属于**按文档正确使用**，不是绕路。
+     *
+     * ## 为什么不能存 `Rect`
+     *
+     * `onGloballyPositioned` 只在布局/位置变化时回调，而 graphicsLayer 的缩放平移
+     * **不触发布局**。所以在回调里把 `boundsInWindow()` 存成 `Rect` 会永远拿到
+     * 上一次布局时的（未变形）值 —— 等于没修。存 [LayoutCoordinates] 引用则可以
+     * 在**点击那一刻**现场求值，此时读到的就是当前帧的变形结果。
+     *
+     * 读写都只在 UI 线程（布局回调与点击处理器）。
+     */
+    var layoutCoordinates: LayoutCoordinates? = null
+
+    /**
+     * 锚点**当前实际显示**的屏幕矩形（px，含祖先 `graphicsLayer` 的缩放/平移）。
+     *
+     * 坐标系对齐：`boundsInWindow()` 给的是窗口坐标，而官方 `BUNDLE_RECT` 要屏幕坐标。
+     * 两者相差一个窗口原点，用锚点 View 自己的 `getLocationOnScreen - getLocationInWindow`
+     * 求出该偏移再平移即可（同一窗口内该偏移是常量，无需遍历 View 树）。
+     *
+     * 未 attach / 尚未布局 / 尺寸非法时返回 null，调用方回退旧的 `screenRect()`。
+     */
+    fun displayRectPx(): android.graphics.Rect? {
+        val view = anchor ?: return null
+        if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0) return null
+        val coords = layoutCoordinates ?: return null
+        val inWindow = runCatching { coords.boundsInWindow() }.getOrNull() ?: return null
+        if (inWindow.width <= 0f || inWindow.height <= 0f) return null
+        val loc = IntArray(2)
+        val locWindow = IntArray(2)
+        view.getLocationOnScreen(loc)
+        view.getLocationInWindow(locWindow)
+        val dx = (loc[0] - locWindow[0]).toFloat()
+        val dy = (loc[1] - locWindow[1]).toFloat()
+        return android.graphics.Rect(
+            (inWindow.left + dx).toInt(),
+            (inWindow.top + dy).toInt(),
+            (inWindow.right + dx).toInt(),
+            (inWindow.bottom + dy).toInt()
+        )
+    }
 }
 
 @Composable
@@ -55,7 +121,12 @@ fun rememberSeamlessAnchorState(): SeamlessAnchorState = remember { SeamlessAnch
 @Composable
 fun SeamlessAnchor(state: SeamlessAnchorState, modifier: Modifier = Modifier) {
     AndroidView(
-        modifier = modifier,
+        // 上报锚点在 Compose 树里的**布局坐标对象**（活引用），供点击瞬间求真实显示矩形。
+        // 必须用 onGloballyPositioned 而不是 AndroidView 的 update：要的是 Compose
+        // 侧 LayoutCoordinates（它能穿过 graphicsLayer 给出变形后的窗口矩形），
+        // 而 View 自己的 getLocationInWindow 只反映布局结果。详见
+        // [SeamlessAnchorState.displayRectPx] 的相位对照表。
+        modifier = modifier.onGloballyPositioned { state.layoutCoordinates = it },
         factory = { context ->
             FrameLayout(context).apply {
                 isClickable = false
@@ -66,6 +137,28 @@ fun SeamlessAnchor(state: SeamlessAnchorState, modifier: Modifier = Modifier) {
         update = { state.anchor = it },
         onRelease = {
             if (state.anchor === it) state.anchor = null
+            // 坐标对象同样要摘：它持有 LayoutCoordinates（内含节点引用），
+            // 锚点已离开窗口还留着会让后续点击读到一个失效节点。
+            state.layoutCoordinates = null
+            // **锚点离开窗口时必须摘掉过渡装饰**（2026-10-12 审查补）。
+            //
+            // 装饰是画在锚点自己的 `background`/`foreground` 上的一张**冻结快照**
+            // （整卡像素）。清理它的正规路径有两条，而两条都可能走不到：
+            // · `onEnd(isOpen=false)` —— 实测在本机固件上**从不送达**；
+            // · `scheduleAnchorCleanup` 的兜底协程 —— 它以 `SeamlessTransitionState.closing`
+            //   为启动条件，而 `closing` 只在 `markClosing()`（返回/页内导航收起）里置位。
+            //   若详情页**未经这两个收起方法**就消失（系统回收、从最近任务划掉、
+            //   OEM 清栈），`closing` 永远不为真 ⇒ 协程一直等到 60s 超时才退出。
+            //
+            // 更糟的是卡片锚点在 `fullCardOverlay` 里位于内容**之上**（`BiliCardSurface`
+            // 先画 Column 内容、再画 overlay），而锚点铺满整卡 ⇒ 残留的冻结快照会
+            // **永久盖住整张卡片**（封面 + 标题全被一张旧图遮死），且用户无法自愈。
+            //
+            // 这里以"View 被回收"为确定性时机摘掉装饰：onRelease 必然发生，且此刻
+            // 该锚点已不可能再参与任何过渡（系统取不到未 attach 的锚点）。清理是幂等的
+            // （置 null），与上述两条路径重复执行也无害。
+            it.foreground = null
+            it.background = null
             // 诊断：锚点 View 被回收的时机。系统的打开与返回**都**要用这个 View：
             // 返回动画开始时若取不到已 attach 的锚点，会直接放弃 morph 退回 alpha
             // 交叉淡出（`view not attach to window or error, do alpha anim`）。

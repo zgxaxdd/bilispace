@@ -1,6 +1,6 @@
 package com.naaammme.bbspace.core.designsystem.theme
 
-import android.os.Build
+import androidx.annotation.VisibleForTesting
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
@@ -16,10 +16,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
 import com.naaammme.bbspace.core.designsystem.glass.GlassConfig
-import com.naaammme.bbspace.core.designsystem.glass.GlassGuardPolicy
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
 import com.naaammme.bbspace.core.designsystem.glass.LocalGlassGuard
 import com.naaammme.bbspace.core.designsystem.glass.rememberGlassGuardTracker
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedColorSchemeFactory
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedColorSpec
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedContrastLevel
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedPaletteStyle
 import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -30,6 +33,25 @@ import androidx.compose.ui.unit.Density
  * 分段控件、Dock 等）；经 [BiliTheme] 下发，默认 MATERIAL 保证独立预览可用。
  */
 val LocalUiStyle = staticCompositionLocalOf { UiStyle.MATERIAL }
+
+/**
+ * 完整主题配置（组件层需要"某个开关的当前值"时读它）。
+ *
+ * ## 为什么要有它（而不是让组件读 DataStore）
+ * `core:designsystem` **不能反向依赖设置存储**：组件是纯渲染层，读 Repository 会把
+ * 数据层拖进设计系统。上游 BiliPai 用同名 `LocalAppThemeConfig` 解决同一问题
+ * （`design-system/.../ui/AppThemeConfig.kt`），本仓照此结构。
+ *
+ * ## 消费方（当前只有一处，后续会增）
+ * `motion/AppElasticPress.kt` 读 [ThemeConfig.globalDragFeedbackEnabled] —— 决定
+ * 弹性按压是否跟随手指拉伸（关闭后仍保留按压膨胀，见该文件的门控说明）。
+ *
+ * 其余字段目前的消费方仍走各自的 CompositionLocal（`LocalUiStyle` / `LocalAnimations`
+ * / `LocalGlassConfig` 等）。**不要为了"统一"把那些也改成读本 Local**：
+ * 那些是 staticCompositionLocalOf，按"值变化=整树重组"的粒度设计；本 Local 携带整个
+ * data class，粒度更粗，混用会让改一个动画开关触发全树重组。
+ */
+val LocalThemeConfig = staticCompositionLocalOf { ThemeConfig() }
 
 private val MonochromeDarkColorScheme = darkColorScheme(
     primary = Color.White,
@@ -131,7 +153,12 @@ fun BiliTheme(
         config.useDynamicColor,
         config.paletteStyle,
         config.swapBaseColors,
-        config.isPureBlack
+        config.isPureBlack,
+        // W-配色接线：种子风格三维度必须进 remember 键，否则改设置不会重建
+        // colorScheme（设置页切风格会看起来"没反应"）。
+        config.seedPaletteStyle,
+        config.seedColorSpec,
+        config.seedContrastLevel
     ) {
         when (config.uiStyle) {
             // iOS：固定语义色板 + tint（seedColor）覆盖 primary。
@@ -144,10 +171,27 @@ fun BiliTheme(
                     config.useDynamicColor -> {
                         if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
                     }
-                    else -> createSeedColorScheme(config.seedColor, darkTheme)
+                    // Standard ⇒ 工厂返回 null ⇒ 回落既有手写管线（逐值不变）；
+                    // 非 Standard ⇒ HCT 产出，并跳过下面的 applyPaletteStyle。
+                    else -> resolveMaterialSeedScheme(
+                        seedColor = config.seedColor,
+                        isDark = darkTheme,
+                        seedPaletteStyle = config.seedPaletteStyle,
+                        seedColorSpec = config.seedColorSpec,
+                        seedContrastLevel = config.seedContrastLevel,
+                        pureBlack = config.isPureBlack
+                    )
                 }
-                val styled = if (config.paletteStyle == PaletteStyle.MONOCHROME) base
-                else applyPaletteStyle(base, config.paletteStyle, darkTheme)
+                // 非 Standard 时**跳过** applyPaletteStyle：HCT 方案已经是完整调色，
+                // 再经本仓的 tone 二次调色会把风格特征抹掉（等于没接）。
+                val styled = if (config.paletteStyle == PaletteStyle.MONOCHROME ||
+                    config.seedPaletteStyle.enabled
+                ) {
+                    base
+                } else {
+                    applyPaletteStyle(base, config.paletteStyle, darkTheme)
+                }
+                // 用户显式开关（纯黑背景 / 反转颜色）在两条路径下都保留
                 val neutralized = applyNeutralBackgroundScheme(styled, darkTheme, config.isPureBlack)
                 if (config.swapBaseColors) applyBaseColorSwap(neutralized) else neutralized
             }
@@ -186,6 +230,7 @@ fun BiliTheme(
 
     CompositionLocalProvider(
         LocalUiStyle provides config.uiStyle,
+        LocalThemeConfig provides config,
         LocalGlassConfig provides GlassConfig(config.glassMaterial, config.glassStrength),
         LocalGlassGuard provides glassGuardTracker.policy
     ) {
@@ -212,7 +257,41 @@ fun BiliTheme(
     }
 }
 
-private fun createSeedColorScheme(seedColor: Color, isDark: Boolean): ColorScheme {
+/**
+ * MATERIAL 档的**种子基底色**（不含 `applyPaletteStyle` 等后处理）。
+ *
+ * 纯函数、无 Compose/Context 依赖，因此可以 JVM 单测"默认零变化"：
+ * - `seedPaletteStyle == Standard` ⇒ [SeedColorSchemeFactory] 返回 null ⇒ 回落
+ *   [createSeedColorScheme]（旧手写管线），与接线前**同一次调用、同一组参数**；
+ * - 非 Standard ⇒ HCT 工厂产出（固定表 / dynamic 两条路径）。
+ *
+ * ⚠️ 动态取色（`useDynamicColor`）与 MONOCHROME 由调用方在前面分流，不经过本函数。
+ */
+@VisibleForTesting
+internal fun resolveMaterialSeedScheme(
+    seedColor: Color,
+    isDark: Boolean,
+    seedPaletteStyle: SeedPaletteStyle,
+    seedColorSpec: SeedColorSpec,
+    seedContrastLevel: SeedContrastLevel,
+    pureBlack: Boolean
+): ColorScheme = SeedColorSchemeFactory.create(
+    seedColor = seedColor,
+    isDark = isDark,
+    style = seedPaletteStyle,
+    pureBlack = pureBlack,
+    colorSpec = seedColorSpec,
+    contrastLevel = seedContrastLevel
+) ?: createSeedColorScheme(seedColor, isDark)
+
+/**
+ * 既有手写种子管线（**Standard 的产出**，也是非 seed 路径的历史实现）。
+ *
+ * 本轮只把它从 `private` 提为 `@VisibleForTesting internal`，**函数体一行未改**：
+ * 默认零变化的证据就是"Standard 仍然调用它"，而不是另写一份等价实现。
+ */
+@VisibleForTesting
+internal fun createSeedColorScheme(seedColor: Color, isDark: Boolean): ColorScheme {
     val seed = seedColor.tone(saturationScale = 0.82f, value = 0.92f)
     val primary = seed.tone(value = if (isDark) 0.82f else 0.64f)
     val primaryContainer = seed.tone(

@@ -18,7 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Card
@@ -49,6 +49,9 @@ import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.UpListRow
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.model.DynamicBody
 import com.naaammme.bbspace.core.model.DynamicImage
@@ -80,8 +83,11 @@ fun DynamicFeed(
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(
+            horizontal = BiliSpacing.md,
+            vertical = BiliSpacing.md
+        ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         upList?.let { data ->
             item(
@@ -126,7 +132,7 @@ fun DynamicFeed(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = BiliSpacing.sm),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator()
@@ -186,7 +192,8 @@ private fun DynamicCard(
     }
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().appElasticPress(),
+        shape = DynamicCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -214,24 +221,24 @@ private fun DynamicCardContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(BiliSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         DynamicHeader(item = item, onOpenSpace = onOpenSpace)
         DynamicBodyContent(item = item)
         item.stats?.let { stats ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.lg),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs),
                     modifier = Modifier
-                        .clip(MaterialTheme.shapes.extraLarge)
+                        .clip(DynamicStatChipShape)
                         .clickable { onLike(item) }
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
                 ) {
                     // A9：点赞选中态颜色 150ms 渐变 + 图标 spring 弹跳（同 A3 规格）
                     val likedTint by animateColorAsState(
@@ -290,9 +297,12 @@ private fun RepostStatText(count: Long, onClick: () -> Unit) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
-            .clip(MaterialTheme.shapes.extraLarge)
+            .clip(DynamicStatChipShape)
+            // 全局拖拽反馈（三颗统计芯片共用同一写法，见 DynamicStatChipShape 注释）：
+            // 位置在 `clickable` 之前，形变与光斑覆盖整颗芯片。
+            .appElasticPress(highlightShape = DynamicStatChipShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
     )
 }
 
@@ -303,9 +313,10 @@ private fun ShareStatText(onClick: () -> Unit) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
-            .clip(MaterialTheme.shapes.extraLarge)
+            .clip(DynamicStatChipShape)
+            .appElasticPress(highlightShape = DynamicStatChipShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
     )
 }
 
@@ -316,9 +327,10 @@ private fun ReplyStatText(count: Long, onClick: () -> Unit) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
-            .clip(MaterialTheme.shapes.extraLarge)
+            .clip(DynamicStatChipShape)
+            .appElasticPress(highlightShape = DynamicStatChipShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
     )
 }
 
@@ -329,7 +341,7 @@ private fun DynamicHeader(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AvatarImage(
@@ -425,15 +437,15 @@ private fun DynamicBodyContent(item: DynamicItem) {
                 DynamicText(text)
             }
             body.origin?.let { origin ->
-                // 嵌套在 surfaceContainerLow 卡片内的引用块，用 High 表达层级
-            val forwardBgColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                val forwardBgShape = MaterialTheme.shapes.medium
+                // 嵌套在 surfaceContainerLow 卡片内的引用块，用 High 表达层级；
+                // 圆角走分组 token（此前 shapes.medium 随 CornerStyle 在 12~16 漂移）。
+                val forwardBgColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(color = forwardBgColor, shape = forwardBgShape)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .background(color = forwardBgColor, shape = DynamicForwardShape)
+                        .padding(BiliSpacing.smPlus),
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
                 ) {
                     origin.authorName?.let {
                         Text(
@@ -474,7 +486,7 @@ private fun DynamicMediaCard(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         cover?.let {
             CoverImage(
@@ -482,12 +494,12 @@ private fun DynamicMediaCard(
                 modifier = Modifier
                     .width(132.dp)
                     .aspectRatio(16f / 10f),
-                shape = MaterialTheme.shapes.small
+                shape = DynamicMediaShape
             )
         }
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Text(
                 text = title,
@@ -506,14 +518,13 @@ private fun DynamicMediaCard(
             }
             badge?.let {
                 val badgeBgColor = MaterialTheme.colorScheme.secondaryContainer
-                val badgeBgShape = MaterialTheme.shapes.extraSmall
                 Text(
                     text = it,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier
-                        .background(badgeBgColor, badgeBgShape)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .background(badgeBgColor, DynamicBadgeShape)
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp)
                 )
             }
         }
@@ -522,7 +533,7 @@ private fun DynamicMediaCard(
 
 @Composable
 private fun DynamicImageRow(images: List<DynamicImage>) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
         items(
             items = images,
             key = { it.url }
@@ -532,7 +543,7 @@ private fun DynamicImageRow(images: List<DynamicImage>) {
                 modifier = Modifier
                     .width(140.dp)
                     .aspectRatio(image.displayAspectRatio()),
-                shape = MaterialTheme.shapes.small
+                shape = DynamicMediaShape
             )
         }
     }
@@ -557,4 +568,19 @@ private fun DynamicImage.displayAspectRatio(): Float {
         1f
     }
 }
+
+/** 动态卡圆角：全站卡片 token（20dp），不再用会随 CornerStyle 漂移的默认 shapes.medium。 */
+private val DynamicCardShape = RoundedCornerShape(BiliRadius.card)
+
+/** 统计动作 chip（点赞/转发/评论/分享）圆角：分组 token（16dp）。 */
+private val DynamicStatChipShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 转发引用块圆角：分组 token（16dp）。 */
+private val DynamicForwardShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 媒体封面/九宫格圆角：badge token（8dp），与正文卡的大圆角形成层级。 */
+private val DynamicMediaShape = RoundedCornerShape(BiliRadius.badge)
+
+/** 角标（"新视频"等）圆角：badge token（8dp）。 */
+private val DynamicBadgeShape = RoundedCornerShape(BiliRadius.badge)
 

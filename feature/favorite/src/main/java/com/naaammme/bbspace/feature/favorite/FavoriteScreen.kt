@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -44,10 +45,13 @@ import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListSkeletonList
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
 import com.naaammme.bbspace.core.model.FavoriteFolder
 import com.naaammme.bbspace.feature.favorite.folder.FavoriteFolderList
 import com.naaammme.bbspace.feature.favorite.item.FavoriteContentList
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.component.BiliTouchTargets
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,7 +82,7 @@ fun FavoriteScreen(
             TopAppBar(
                 title = { Text("收藏") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -87,10 +91,24 @@ fun FavoriteScreen(
                 },
                 actions = {
                     if (state.tab == FavoriteTab.FOLDER) {
-                        TextButton(onClick = { showCreate = true }) {
+                        // ## 视觉对齐（task-9 C1：同一顶栏内可点件等高）
+                        // 左侧返回钮是 IconButton（48dp 命中区），M3 TextButton 默认 40dp ——
+                        // 同一行里文字钮矮 8dp。统一到 `BiliTouchTargets.comfortable`
+                        //（= 48dp，由 BiliSpacing 推导，零新增 dp 字面量）。
+                        // 两颗按钮共用同一个高度取值，彼此也必然等高。
+                        val actionHeight = Modifier.defaultMinSize(
+                            minHeight = BiliTouchTargets.comfortable
+                        )
+                        TextButton(
+                            onClick = { showCreate = true },
+                            modifier = actionHeight.appElasticPress()
+                        ) {
                             Text("新建")
                         }
-                        TextButton(onClick = viewModel::openFolderSort) {
+                        TextButton(
+                            onClick = viewModel::openFolderSort,
+                            modifier = actionHeight.appElasticPress()
+                        ) {
                             Text("排序")
                         }
                     }
@@ -165,7 +183,7 @@ fun FavoriteScreen(
             title = { Text("删除收藏夹") },
             text = { Text("确认删除「${folder.title}」吗？其中的 ${folder.mediaCount} 个内容将一并移除。") },
             confirmButton = {
-                TextButton(
+                TextButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         deleteTarget = null
                         viewModel.deleteFolder(folder.fid)
@@ -175,7 +193,7 @@ fun FavoriteScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = { deleteTarget = null }) {
                     Text("取消")
                 }
             }
@@ -207,7 +225,7 @@ private fun FolderEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -216,14 +234,14 @@ private fun FolderEditDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
-                    FilterChip(
+                    FilterChip(modifier = Modifier.appElasticPress(),
                         selected = !privateFolder,
                         onClick = { privateFolder = false },
                         label = { Text("公开") }
                     )
-                    FilterChip(
+                    FilterChip(modifier = Modifier.appElasticPress(),
                         selected = privateFolder,
                         onClick = { privateFolder = true },
                         label = { Text("私有") }
@@ -232,7 +250,7 @@ private fun FolderEditDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            TextButton(modifier = Modifier.appElasticPress(),
                 onClick = { onConfirm(name.trim(), if (privateFolder) 1 else 0) },
                 enabled = name.isNotBlank()
             ) {
@@ -240,7 +258,7 @@ private fun FolderEditDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onDismiss) {
                 Text("取消")
             }
         }
@@ -263,7 +281,7 @@ private fun FolderSortDialog(
                     Text(
                         text = "加载中…",
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(vertical = 20.dp)
+                        modifier = Modifier.padding(vertical = BiliSpacing.xl)
                     )
                 }
 
@@ -281,7 +299,7 @@ private fun FolderSortDialog(
                             val index = state.entries.indexOfFirst { it.fid == folder.fid }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
@@ -290,9 +308,9 @@ private fun FolderSortDialog(
                                     maxLines = 1,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .padding(vertical = 8.dp)
+                                        .padding(vertical = BiliSpacing.sm)
                                 )
-                                IconButton(
+                                IconButton(modifier = Modifier.appElasticPress(),
                                     onClick = { onMove(folder.fid, -1) },
                                     enabled = index > 0
                                 ) {
@@ -301,7 +319,7 @@ private fun FolderSortDialog(
                                         contentDescription = "上移"
                                     )
                                 }
-                                IconButton(
+                                IconButton(modifier = Modifier.appElasticPress(),
                                     onClick = { onMove(folder.fid, 1) },
                                     enabled = index < state.entries.lastIndex
                                 ) {
@@ -317,12 +335,12 @@ private fun FolderSortDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = !state.submitting && !state.loading) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onConfirm, enabled = !state.submitting && !state.loading) {
                 Text(if (state.submitting) "保存中…" else "完成")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onDismiss) {
                 Text("取消")
             }
         }

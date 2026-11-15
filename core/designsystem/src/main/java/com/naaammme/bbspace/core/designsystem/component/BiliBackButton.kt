@@ -7,6 +7,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
@@ -23,7 +24,18 @@ fun BiliBackButton(
     modifier: Modifier = Modifier,
     contentDescription: String = "返回"
 ) {
-    IconButton(onClick = onClick, modifier = modifier) {
+    IconButton(
+        onClick = onClick,
+        // ## 全局拖拽反馈（2026-10-18 第十九轮，**原语层**接入）
+        //
+        // 接在本原语上：它是搜索页等页面顶栏返回钮的风格感知出口，
+        // 与已接好的 `AppMiuixIconButton` 是**同一角色的两个实现**（Material / iOS 各一），
+        // 两边必须同步接，否则同一颗返回钮在两种风格下反馈不一致。
+        //
+        // 注意本原语 **不会**与 `IOSChevron` 抢形变：chevron 是纯绘制叶子（无 clickable、
+        // 无 pointerInput），形变只发生在本 `IconButton` 的 48dp 命中区上。
+        modifier = modifier.appElasticPress()
+    ) {
         if (LocalUiStyle.current == UiStyle.IOS) {
             IOSChevron(
                 color = MaterialTheme.colorScheme.onBackground,

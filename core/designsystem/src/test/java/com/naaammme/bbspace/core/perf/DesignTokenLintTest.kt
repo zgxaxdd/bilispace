@@ -285,16 +285,25 @@ class DesignTokenLintTest {
      * 是**防回潮**（往 Text 上直接写 `fontSize = 13.sp` 比引 typography 容易得多，
      * 所以它一定会被人顺手做）。
      */
-    @Test
-    fun spLiteralsOutsideTheme_isFrozen() {
-        assertRatchet(
-            actual = sumOf("""\b\d+(\.\d+)?\.sp\b"""),
-            limit = 4,
-            what = "theme 包外的 `N.sp` 字面量",
-            why = "字号走 iOSTypography/MaterialTheme.typography。直接写 sp 会绕开" +
-                "字重、行高、字体族这一整套配套值，改主题时不会跟着变。"
-        )
-    }
+    /**
+     * ~~字号字面量。~~ **A2 迁移（2026-10-14 第 14 轮）：本断言已删除**，
+     * 改由 Lint 检测器 `BbspaceSpLiteral`（ci-lint/SpLiteralDetector.java）执行。
+     *
+     * 为什么可以删：切换前做过**等价性证明** —— 检测器在 `:feature:home`
+     * 与 `:feature:rank` 报出的正是同样那 4 处、行号逐一相同
+     * （`HomeVideoPage.kt:539/540`、`RankScreen.kt:366/553`）。存量已按路径登记进
+     * 三个模块的 `lint.xml`。
+     *
+     * 为什么更该删：本类扫描器用 `filterNot { path 含 theme/ }` 排除整个目录，
+     * 而 Lint 只能按**文件**豁免 —— 迁移后 theme 包里新增第三个文件**不会**自动被放过，
+     * 必须显式登记。这条从"目录级实现细节"变成了"逐文件的显式声明"。
+     *
+     * ⚠️ 迁移时如实记一笔：这条的执行顺序是**先删了棘轮、再补齐基线**
+     * （第 14 轮全模块 `lintDebug` 扫描才发现 `:core:designsystem` 少登了 90 处、
+     * `:feature:video` 少登了 3 处动画参数）。正确顺序是**先跑一遍检测器、
+     * 按它的输出打全基线，再删棘轮** —— 后三条迁移是这么做的，这条不是。
+     * 详情见执行报告 §1.15。
+     */
 
     // ── 工具 ─────────────────────────────────────────────────────────────────
 

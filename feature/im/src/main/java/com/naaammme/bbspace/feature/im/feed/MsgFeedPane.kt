@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,7 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -37,6 +37,9 @@ import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_COMMENT
 import com.naaammme.bbspace.core.model.PublishedRecord
 import com.naaammme.bbspace.core.model.im.MsgFeedItem
@@ -69,7 +72,7 @@ fun MsgFeedPane(
                 !state.errorMessage.isNullOrBlank() -> {
                     StateMessageCard(
                         text = state.errorMessage.orEmpty(),
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg),
                         isError = true,
                         actionText = "重试",
                         onAction = { vm.refresh() }
@@ -78,7 +81,7 @@ fun MsgFeedPane(
                 else -> {
                     StateMessageCard(
                         text = "暂无通知",
-                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg)
                     )
                 }
             }
@@ -115,8 +118,11 @@ fun MsgFeedPane(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.widthIn(max = 600.dp).fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(
+                    horizontal = BiliSpacing.md,
+                    vertical = BiliSpacing.md
+                ),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
             ) {
                 items(state.items, key = { it.msgId }) { item ->
                     MsgFeedCard(
@@ -133,7 +139,7 @@ fun MsgFeedPane(
                 if (state.isLoadingMore) {
                     item(key = "loading_more") {
                         Box(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = BiliSpacing.sm),
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator()
@@ -143,7 +149,7 @@ fun MsgFeedPane(
                     item(key = "load_more_error") {
                         StateMessageCard(
                             text = state.loadMoreError.orEmpty(),
-                            modifier = Modifier.padding(vertical = 8.dp),
+                            modifier = Modifier.padding(vertical = BiliSpacing.sm),
                             isError = true,
                             actionText = "重试",
                             onAction = { vm.loadMore() }
@@ -162,9 +168,11 @@ private fun MsgFeedCard(
 ) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth()
+        // 全局拖拽反馈（第 34 轮 T2）：动态卡片。
+        modifier = Modifier.fillMaxWidth().appElasticPress(),
+        shape = MsgFeedCardShape
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             val user = item.users.firstOrNull()
             Row(verticalAlignment = Alignment.Top) {
                 if (user != null) {
@@ -174,12 +182,13 @@ private fun MsgFeedCard(
                         modifier = Modifier.size(40.dp),
                         fallbackText = user.name.take(1)
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(BiliSpacing.md))
                     Column {
                         Text(
                             text = user.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
+                            // 字重交给 iOSTypography 槽位（titleSmall 自带 SemiBold）；
+                            // 此前内联 Bold 会盖掉排版阶梯的字重语言。
+                            style = MaterialTheme.typography.titleSmall
                         )
                         Text(
                             text = "回复了你的评论",
@@ -190,8 +199,7 @@ private fun MsgFeedCard(
                 } else {
                     Text(
                         text = "未知用户回复了你",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.titleSmall
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
@@ -204,8 +212,8 @@ private fun MsgFeedCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Spacer(modifier = Modifier.height(BiliSpacing.md))
+            Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = item.sourceContent,
@@ -221,14 +229,15 @@ private fun MsgFeedCard(
                 }
             }
             if (item.rootReplyContent.isNotBlank() || item.targetReplyContent.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.sm))
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ),
+                    shape = MsgFeedQuoteShape,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.padding(BiliSpacing.md)) {
                         Text(
                             text = item.targetReplyContent.takeIf { it.isNotBlank() } ?: item.rootReplyContent,
                             style = MaterialTheme.typography.bodySmall,
@@ -243,8 +252,7 @@ private fun MsgFeedCard(
     }
 }
 
-private fun MsgFeedItem.toPublishedRecord(): PublishedRecord? {
-    val user = users.firstOrNull()
+private fun MsgFeedItem.toPublishedRecord(): PublishedRecord? {    val user = users.firstOrNull()
     return PublishedRecord(
         key = "feed_${msgId}",
         kind = PUBLISHED_RECORD_KIND_COMMENT,
@@ -260,3 +268,9 @@ private fun MsgFeedItem.toPublishedRecord(): PublishedRecord? {
         parentId = 0L
     )
 }
+
+/** 通知卡圆角：全站卡片 token（20dp），不再取随 CornerStyle 漂移的 shapes 默认值。 */
+private val MsgFeedCardShape = RoundedCornerShape(BiliRadius.card)
+
+/** 引用块圆角：badge 档（8dp）—— 嵌在 20dp 卡片里，小一档才不会"同心套娃"。 */
+private val MsgFeedQuoteShape = RoundedCornerShape(BiliRadius.badge)

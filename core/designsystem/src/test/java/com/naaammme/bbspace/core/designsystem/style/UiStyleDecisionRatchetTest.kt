@@ -105,7 +105,11 @@ class UiStyleDecisionRatchetTest {
             "feature/auth/src/main/java/com/naaammme/bbspace/feature/auth/account/AccountScreen.kt" to 1,
             // 首页两处 + 视频页一处：顶栏搜索胶囊与卡片徽章材质，属"该读 GlassConfig"的候选。
             "feature/home/src/main/java/com/naaammme/bbspace/feature/home/HomeScreen.kt" to 1,
-            "feature/home/src/main/java/com/naaammme/bbspace/feature/home/video/HomeVideoPage.kt" to 2,
+            // 2026-10-18（W11 Alt-1）：2 → **1**。删掉的是「角标玻璃材质」那一处判定
+            // （`badgeGlassOn = iOS && LIQUID`）—— 它随每卡背板一起收口到非玻璃分支。
+            // 剩下的是 `showMoreMenu` 的动作面板分支（iOS `IOSActionSheet` vs MATERIAL
+            // `AlertDialog`），那是**真正的两套代码路径**，不能收进 token，保留。
+            "feature/home/src/main/java/com/naaammme/bbspace/feature/home/video/HomeVideoPage.kt" to 1,
             // 设置项本身：读的是**待生效**的 config.uiStyle（不是环境值），这是风格选择器必需的。
             "feature/settings/src/main/java/com/naaammme/bbspace/feature/settings/appearance/AppearanceSettingsScreen.kt" to 1,
             "feature/settings/src/main/java/com/naaammme/bbspace/feature/settings/components/SettingItem.kt" to 2

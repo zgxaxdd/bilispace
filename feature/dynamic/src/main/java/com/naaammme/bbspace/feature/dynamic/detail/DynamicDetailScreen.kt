@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -54,6 +55,8 @@ import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImageGrid
 import com.naaammme.bbspace.core.designsystem.component.SelectableText
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.CommentSubject
 import com.naaammme.bbspace.core.model.DynamicDetail
@@ -67,6 +70,7 @@ import com.naaammme.bbspace.feature.comment.CommentPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,7 +101,7 @@ fun DynamicDetailScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 ),
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -105,7 +109,7 @@ fun DynamicDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(
+                    IconButton(modifier = Modifier.appElasticPress(),
                         onClick = {
                             ShareUtils.shareText(
                                 context,
@@ -130,7 +134,7 @@ fun DynamicDetailScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(24.dp),
+                        .padding(BiliSpacing.xxl),
                     contentAlignment = Alignment.Center
                 ) {
                     StateMessageCard(
@@ -150,7 +154,7 @@ fun DynamicDetailScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(24.dp),
+                        .padding(BiliSpacing.xxl),
                     contentAlignment = Alignment.Center
                 ) {
                     StateMessageCard(text = "加载中…")
@@ -171,8 +175,8 @@ fun DynamicDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            .padding(horizontal = BiliSpacing.lg),
+                        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
                     ) {
                         LazyColumn(
                             modifier = Modifier
@@ -188,8 +192,8 @@ fun DynamicDetailScreen(
                                 .weight(1f)
                                 .fillMaxHeight(),
                             contentPadding = PaddingValues(
-                                horizontal = 16.dp,
-                                vertical = 12.dp
+                                horizontal = BiliSpacing.lg,
+                                vertical = BiliSpacing.md
                             )
                         )
                     }
@@ -201,8 +205,8 @@ fun DynamicDetailScreen(
                             .fillMaxSize()
                             .padding(padding),
                         contentPadding = PaddingValues(
-                            horizontal = 16.dp,
-                            vertical = 12.dp
+                            horizontal = BiliSpacing.lg,
+                            vertical = BiliSpacing.md
                         ),
                         header = {
                             DetailContent(detail, onLike = viewModel::toggleLike)
@@ -227,7 +231,7 @@ fun DynamicDetailScreen(
 private fun DetailContent(detail: DynamicDetail, onLike: (() -> Unit)?) {
     DynamicDetailHeader(
         author = detail.author,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md)
     )
     detail.paragraphs.forEach { paragraph ->
         DynamicDetailParagraphItem(paragraph)
@@ -235,7 +239,7 @@ private fun DetailContent(detail: DynamicDetail, onLike: (() -> Unit)?) {
     detail.forwardOrigin?.let { forwardOrigin ->
         DynamicForwardOriginCard(
             origin = forwardOrigin,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.sm)
         )
     }
     detail.stats?.let { stats ->
@@ -251,7 +255,7 @@ private fun DynamicDetailHeader(
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AvatarImage(
@@ -286,7 +290,7 @@ private fun DynamicDetailParagraphItem(paragraph: DynamicDetailParagraph) {
                     text = text,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.xsPlus)
                 )
             }
         }
@@ -294,7 +298,7 @@ private fun DynamicDetailParagraphItem(paragraph: DynamicDetailParagraph) {
             if (paragraph.images.isNotEmpty()) {
                 DynamicDetailImageGrid(
                     images = paragraph.images,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.xsPlus)
                 )
             }
         }
@@ -326,9 +330,9 @@ private fun DynamicForwardOriginCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, DynamicDetailForwardShape)
+            .padding(BiliSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
     ) {
         origin.authorName?.let {
             Text(it, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -337,15 +341,15 @@ private fun DynamicForwardOriginCard(
             SelectableText(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (!origin.title.isNullOrBlank() || !origin.cover.isNullOrBlank()) {
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = BiliSpacing.xs), horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)) {
                 origin.cover?.let {
                     CoverImage(
                         url = it,
                         modifier = Modifier.width(132.dp).aspectRatio(1.6f),
-                        shape = MaterialTheme.shapes.small
+                        shape = DynamicDetailMediaShape
                     )
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)) {
                     Text(origin.title.orEmpty(), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     origin.badge?.let { badge ->
                         Text(
@@ -353,8 +357,8 @@ private fun DynamicForwardOriginCard(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier
-                                .background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.extraSmall)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .background(MaterialTheme.colorScheme.secondaryContainer, DynamicDetailBadgeShape)
+                                .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp)
                         )
                     }
                 }
@@ -384,7 +388,7 @@ private fun DynamicDetailStats(stats: DynamicStats, onLike: (() -> Unit)?) {
                 text = text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md)
             )
         }
         return
@@ -392,8 +396,8 @@ private fun DynamicDetailStats(stats: DynamicStats, onLike: (() -> Unit)?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.lg),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (text.isNotEmpty()) {
@@ -405,11 +409,15 @@ private fun DynamicDetailStats(stats: DynamicStats, onLike: (() -> Unit)?) {
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs),
             modifier = Modifier
-                .clip(MaterialTheme.shapes.extraLarge)
+                .clip(DynamicDetailStatChipShape)
+                // 全局拖拽反馈：点赞是**有状态的整颗芯片**，按压反馈必须与动态卡片
+                // 本身一致（卡片已由 BiliCardSurface 原语继承）。
+                // `highlightShape` 传 `DynamicDetailStatChipShape`，光斑裁在胶囊内。
+                .appElasticPress(highlightShape = DynamicDetailStatChipShape)
                 .clickable(onClick = onLike)
-                .padding(horizontal = 6.dp, vertical = 4.dp)
+                .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
         ) {
             Icon(
                 imageVector = Icons.Default.ThumbUp,
@@ -438,7 +446,7 @@ private fun LazyListScope.detailContentItems(detail: DynamicDetail, onLike: (() 
     item(key = "detail_author", contentType = "author") {
         DynamicDetailHeader(
             author = detail.author,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md)
         )
     }
 
@@ -454,7 +462,7 @@ private fun LazyListScope.detailContentItems(detail: DynamicDetail, onLike: (() 
         item(key = "detail_forward_origin", contentType = "forward_origin") {
             DynamicForwardOriginCard(
                 origin = forwardOrigin,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.sm)
             )
         }
     }
@@ -468,3 +476,15 @@ private fun LazyListScope.detailContentItems(detail: DynamicDetail, onLike: (() 
 
 // K-7（2026-10-04 审查报告）：这里原有 `DYNAMIC_DETAIL_TAG = "DynamicDetailScreen"`，
 // 全仓零引用（日志 tag 由调用层的 Logger 封装给），已删除。
+
+/** 转发引用块圆角：分组 token（16dp），不再随 CornerStyle 漂移。 */
+private val DynamicDetailForwardShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 引用块内封面圆角：badge token（8dp）。 */
+private val DynamicDetailMediaShape = RoundedCornerShape(BiliRadius.badge)
+
+/** 角标圆角：badge token（8dp）。 */
+private val DynamicDetailBadgeShape = RoundedCornerShape(BiliRadius.badge)
+
+/** 点赞 chip 圆角：分组 token（16dp）。 */
+private val DynamicDetailStatChipShape = RoundedCornerShape(BiliRadius.groupedList)

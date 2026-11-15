@@ -52,6 +52,8 @@ import com.naaammme.bbspace.infra.player.EngineSource
 import com.naaammme.bbspace.infra.player.PlayerPlaybackState
 import com.naaammme.bbspace.infra.player.PlayerConfig
 import com.naaammme.bbspace.infra.player.PlayerEngine
+import com.naaammme.bbspace.infra.player.cdn.CdnRegionPlugin
+import com.naaammme.bbspace.infra.player.cdn.CdnTransferRuntime
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -122,6 +124,15 @@ class StreamPlaybackSessionImpl @Inject constructor(
      */
     @Volatile
     private var cdnHealthSnapshot: Map<String, CdnHealthPolicy.Health> = emptyMap()
+
+    /**
+     * 本次开播的**区域/自定义线路插件**配置（W4，默认关闭）。
+     *
+     * 与 [cdnHealthSnapshot] 同一生命周期：开播时从设置读一次。插件只改"候选内容与顺序"
+     * （见 [CdnRegionPlugin]），不碰并行槽位/降级恢复 —— 那两条归数据源与引擎。
+     */
+    @Volatile
+    private var cdnRegionConfig: CdnRegionPlugin.Config = CdnRegionPlugin.Config.Disabled
 
     /** 当前主线路的 host（健康度回写按它记账）。 */
     @Volatile
@@ -471,8 +482,16 @@ class StreamPlaybackSessionImpl @Inject constructor(
                 val stream = source.streams.firstOrNull { it.quality == preferredQualityValue }
                     ?: source.streams.firstOrNull()
                 val audio = selectAudio(stream, source.audios, preferredAudioId)
-                val cdnMode = playerSettings.state.first().playback.videoCdnMode
+                val playbackPrefs = playerSettings.state.first().playback
+                val cdnMode = playbackPrefs.videoCdnMode
                 currentVideoCdnMode = cdnMode
+                // W4：区域/自定义线路插件（设置项 → 配置快照；默认全关，关时候选与排序不变）
+                cdnRegionConfig = CdnRegionPlugin.Config(
+                    enabled = playbackPrefs.cdnRegionEnabled,
+                    strictCustomCdn = playbackPrefs.cdnStrictCustomCdn,
+                    regionHosts = playbackPrefs.cdnRegionHosts,
+                    customRules = playbackPrefs.cdnCustomRules
+                )
                 // 智能选线：开播前取一次健康度快照（已按当前时间折现）。
                 // 非 Smart 档也会取 —— 成本是一次 map 拷贝，但换来"切到智能档立刻生效"，
                 // 不必重开播放。
@@ -738,6 +757,42 @@ class StreamPlaybackSessionImpl @Inject constructor(
                         mode = cdnMode
                     )
                 } ?: emptyList()
+                // ---- W4：区域 / 自定义线路插件（**只改候选内容与顺序**）----
+                // 关闭时 applyOrderedUrls 逐元素返回入参 ⇒ 与既有行为逐字节一致；
+                // 打开时按"自定义 > 属地优选 > 原始"重排/改写 host（stub 语义见 CdnRegionPolicy）。
+                // 它不碰并行槽位/降级/卡顿恢复 —— 那些预算在数据源与引擎里，插件无权越过。
+                val regionConfig = cdnRegionConfig
+                val pluginVideoOrder = CdnRegionPlugin.applyOrderedUrls(
+                    originalUrls = videoOrder,
+                    config = regionConfig,
+                    healthByHost = cdnHealthSnapshot
+                )
+                val pluginAudioOrder = CdnRegionPlugin.applyOrderedUrls(
+                    originalUrls = audioOrder,
+                    config = regionConfig,
+                    healthByHost = cdnHealthSnapshot
+                )
+                val pluginVideoUrl = pluginVideoOrder.firstOrNull() ?: cdn.videoUrl
+                val pluginAudioUrl = pluginAudioOrder.firstOrNull() ?: cdn.audioUrl
+                // ---- W4 收口（2026-10-18）：把**真正下发的**候选表发布给诊断面板 ----
+                // 面板读的是 `CdnTransferRuntime.state`，若让它自己按设置重算一遍，
+                // 显示的是"预测顺序"而不是"下发顺序" —— 那种诊断会说谎。
+                // 这里复用插件的 diagnostics（纯列表变换、不抛业务异常），只在开播时写一次。
+                // ⚠️ **不要**用裸 `runCatching` 包这一段：本文件在 suspend 链路上，
+                // `VideoLogicGuardTest.cancellationSwallowingIsClosed` 会红（裸 runCatching
+                // 会吞掉协程取消）。本来也不该兜——纯变换没有可恢复的失败面。
+                val regionDiagnostics = CdnRegionPlugin.diagnostics(
+                    originalUrls = videoOrder,
+                    config = regionConfig,
+                    healthByHost = cdnHealthSnapshot
+                )
+                CdnTransferRuntime.noteRegionSelection(
+                    enabled = regionDiagnostics.enabled,
+                    hosts = regionDiagnostics.orderedHosts,
+                    sources = regionDiagnostics.sourceLabels
+                )
+                // 插件可以改写主线路（属地/自定义命中时首元素已不是服务端原选）⇒ 记账跟着实际主线路走。
+                currentVideoHost = CdnSmartSelectionPolicy.hostOf(pluginVideoUrl)
                 // 现场取证（选线闭环的**唯一**可判定证据）：
                 // 服务端原始次序 vs 服务端没有的健康度快照下选出来的那条。
                 // 没有这行，"智能选线到底有没有用健康度"在真机上就只剩"结果对不对"的猜测
@@ -745,19 +800,20 @@ class StreamPlaybackSessionImpl @Inject constructor(
                 DiagnosticLog.i("BbCdnSelect") {
                     val server = mergePlaybackUrls(stream.videoUrl, stream.videoBackupUrls)
                         .joinToString(",") { CdnSmartSelectionPolicy.hostOf(it) }
-                    val ranked = videoOrder.joinToString(",") { CdnSmartSelectionPolicy.hostOf(it) }
+                    val ranked = pluginVideoOrder.joinToString(",") { CdnSmartSelectionPolicy.hostOf(it) }
                     "mode=$cdnMode observations=${cdnHealthSnapshot.size} " +
-                        "server=[$server] ranked=[$ranked] chosen=${CdnSmartSelectionPolicy.hostOf(cdn.videoUrl)}"
+                        "region=${if (regionConfig.enabled && regionConfig.hasRewrites) "on" else "off"} " +
+                        "server=[$server] ranked=[$ranked] chosen=${CdnSmartSelectionPolicy.hostOf(pluginVideoUrl)}"
                 }
                 EngineSource.SingleFileDash(
-                    videoUrl = cdn.videoUrl,
-                    audioUrl = cdn.audioUrl,
+                    videoUrl = pluginVideoUrl,
+                    audioUrl = pluginAudioUrl,
                     videoSampleMimeType = resolveVideoSampleMimeType(stream.codecId),
                     audioSampleMimeType = audio?.let { resolveAudioSampleMimeType(it.id) },
                     durationMs = durationMs,
                     // 首元素为已选主线路，其后为其余备用线路，打开失败时依次切换
-                    videoBackupUrls = videoOrder,
-                    audioBackupUrls = audioOrder
+                    videoBackupUrls = pluginVideoOrder,
+                    audioBackupUrls = pluginAudioOrder
                 )
             }
 

@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -57,6 +58,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
 import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import androidx.compose.ui.graphics.Color
 import coil3.compose.AsyncImage
@@ -68,6 +71,7 @@ import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.dynamic.feed.DynamicFeed
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 private const val DYNAMIC_MAX_IMAGE_COUNT = 9
 
@@ -136,7 +140,7 @@ fun DynamicScreen(
         },
         floatingActionButton = {
             if (state.isLoggedIn) {
-                ExtendedFloatingActionButton(
+                ExtendedFloatingActionButton(modifier = Modifier.appElasticPress(),
                     onClick = { showPublish = true },
                     icon = {
                         Icon(imageVector = Icons.Default.Edit, contentDescription = null)
@@ -157,7 +161,7 @@ fun DynamicScreen(
                 !state.isLoggedIn -> {
                     StateMessageCard(
                         text = "请先登录后查看动态",
-                        modifier = Modifier.fillMaxSize().padding(24.dp)
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.xxl)
                     )
                 }
 
@@ -173,7 +177,7 @@ fun DynamicScreen(
                 state.errorMessage != null && state.items.isEmpty() -> {
                     StateMessageCard(
                         text = state.errorMessage.orEmpty().ifBlank { "加载动态失败" },
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.xxl),
                         isError = true
                     )
                 }
@@ -181,7 +185,7 @@ fun DynamicScreen(
                 state.items.isEmpty() -> {
                     StateMessageCard(
                         text = "暂无动态",
-                        modifier = Modifier.fillMaxSize().padding(24.dp)
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.xxl)
                     )
                 }
 
@@ -275,9 +279,9 @@ private fun DynamicPublishSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = BiliSpacing.lg)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             Text("发布动态", style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(
@@ -289,7 +293,7 @@ private fun DynamicPublishSheet(
                 modifier = Modifier.fillMaxWidth()
             )
             if (images.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                     items(images, key = { it.toString() }) { uri ->
                         AsyncImage(
                             model = uri,
@@ -297,17 +301,17 @@ private fun DynamicPublishSheet(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(88.dp)
-                                .clip(MaterialTheme.shapes.medium)
+                                .clip(DynamicPublishThumbShape)
                         )
                     }
                 }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
+                OutlinedButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         picker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -319,7 +323,7 @@ private fun DynamicPublishSheet(
                     Text("选图 ${images.size}/$DYNAMIC_MAX_IMAGE_COUNT")
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                Button(
+                Button(modifier = Modifier.appElasticPress(),
                     onClick = {
                         if (publishing) return@Button
                         publishing = true
@@ -356,7 +360,7 @@ private fun RepostDialog(
         onDismissRequest = { if (!reposting) onDismiss() },
         title = { Text("转发动态") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)) {
                 Text(
                     text = "@$sourceName",
                     style = MaterialTheme.typography.bodySmall,
@@ -373,7 +377,7 @@ private fun RepostDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            TextButton(modifier = Modifier.appElasticPress(),
                 onClick = {
                     if (reposting) return@TextButton
                     reposting = true
@@ -385,7 +389,7 @@ private fun RepostDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !reposting) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onDismiss, enabled = !reposting) {
                 Text("取消")
             }
         }
@@ -393,3 +397,6 @@ private fun RepostDialog(
 }
 
 private const val LOAD_MORE_TRIGGER_OFFSET = 4
+
+/** 发布面板缩略图圆角：分组 token（16dp），不再取随 CornerStyle 漂移的 shapes.medium。 */
+private val DynamicPublishThumbShape = RoundedCornerShape(BiliRadius.groupedList)

@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.theme.asBold
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,7 +33,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -41,6 +42,7 @@ import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.PlaybackHistory
 import com.naaammme.bbspace.feature.bbspace.rememberExportJson
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 fun PlaybackHistoryPane(
@@ -56,7 +58,7 @@ fun PlaybackHistoryPane(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md),
         contentPadding = PaddingValues(0.dp)
     ) {
         item {
@@ -112,7 +114,7 @@ fun PlaybackHistoryPane(
             title = { Text("删除记录") },
             text = { Text("删除视频 ${item.aid}") },
             confirmButton = {
-                TextButton(
+                TextButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         pendingDelete = null
                         vm.delete(item)
@@ -122,7 +124,7 @@ fun PlaybackHistoryPane(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = { pendingDelete = null }) {
                     Text("取消")
                 }
             }
@@ -135,7 +137,7 @@ fun PlaybackHistoryPane(
             title = { Text("清空播放历史") },
             text = { Text("这会删除所有本地播放历史记录") },
             confirmButton = {
-                TextButton(
+                TextButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         showClearDialog = false
                         vm.clear()
@@ -145,7 +147,7 @@ fun PlaybackHistoryPane(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = { showClearDialog = false }) {
                     Text("取消")
                 }
             }
@@ -163,13 +165,12 @@ private fun PlaybackHistoryManageCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             Text(
                 text = "播放历史",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.titleMedium.asBold()
             )
             Text(
                 text = "当前有 $count 条本地记录",
@@ -178,17 +179,17 @@ private fun PlaybackHistoryManageCard(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 TextButton(
                     onClick = onExport,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).appElasticPress()
                 ) {
                     Text("导出")
                 }
                 TextButton(
                     onClick = onClear,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).appElasticPress()
                 ) {
                     Text("清空")
                 }
@@ -230,14 +231,14 @@ private fun PlaybackHistoryCard(
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().appElasticPress(),
         onClick = { expanded = !expanded }
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(BiliSpacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             Column(
                 modifier = Modifier
@@ -249,12 +250,11 @@ private fun PlaybackHistoryCard(
                             easing = LocalAnimations.current.emphasized
                         )
                     ),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium.asBold(),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -280,7 +280,7 @@ private fun PlaybackHistoryCard(
                     )
                     TextButton(
                         onClick = onDelete,
-                        modifier = Modifier.align(Alignment.End)
+                        modifier = Modifier.align(Alignment.End).appElasticPress()
                     ) {
                         Text("删除")
                     }

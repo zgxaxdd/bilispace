@@ -46,8 +46,10 @@ android {
         // minSdk / targetSdk / testInstrumentationRunner 已由
         // bbspace.android.application 提供，不再重复。
         applicationId = "com.naaammme.bbspace"
-        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 10804
-        versionName = (project.findProperty("versionName") as String?) ?: "1.8.04"
+        // 版本号唯一真相：默认值与 versionName 平铺在这里，
+        // 发布时可用 -PversionCode= / -PversionName= 覆盖（CI 由 tag 推导）。
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 20000
+        versionName = (project.findProperty("versionName") as String?) ?: "2.0.0"
 
         vectorDrawables.useSupportLibrary = true
     }

@@ -18,7 +18,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -41,8 +40,10 @@ import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
 import com.naaammme.bbspace.core.designsystem.motion.jiggleOnDissolve
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
 import com.naaammme.bbspace.core.settings.blocked.BlockedUpEntry
 import com.naaammme.bbspace.core.settings.blocked.BlockedUpStore
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 /**
  * NX-08「拉黑名单」：把 PT-06 建立的**本地名单**做成可见、可撤销。
@@ -81,7 +82,7 @@ fun BlockedUpScreen(
                 TopAppBar(
                     title = { Text("拉黑名单") },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        AppMiuixIconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                         }
                     },
@@ -204,7 +205,7 @@ private fun BlockedUpRow(
                     }
                 )
             }
-            TextButton(onClick = { dissolving = true }) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = { dissolving = true }) {
                 Text("撤销")
             }
             }

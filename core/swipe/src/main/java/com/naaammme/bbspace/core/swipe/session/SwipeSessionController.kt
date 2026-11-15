@@ -42,6 +42,28 @@ class SwipeSessionController {
     /** 接力队列（页 1..n）；锚点不在其中（`pages = listOf(anchor) + queue` 是调用方的拼法）。 */
     val queue: StateFlow<List<SwipeEntry>> = _queue.asStateFlow()
 
+    /**
+     * **页序的唯一拼法**：`[锚点] + 接力队列`（D11）。
+     *
+     * ## 为什么必须收成一处
+     * 重构前 pager 与 VM **各拼一份**：
+     * - `PortraitSwipePager.kt`：`remember(anchor, queue) { listOf(anchor) + queue }`
+     * - `VideoViewModel.prefetchSwipeQueue()`：`listOf(anchor) + swipeSession.queue.value`
+     *
+     * 两处写法一致时无事；但这是**两条独立的拼接**，任何一边改动（例如将来把锚点
+     * 也放进 queue、或跳过某类条目）都会让"pager 的第 N 页"与"预取的第 N 页"
+     * 指向不同视频 —— 而预取错了**没有任何症状**，只是那一页滑过去要多等一拍。
+     *
+     * 现在调用方一律走这里。索引语义只有一处定义，改这里就是改全部。
+     *
+     * @return 页序；锚点未发布（`Idle` / story 在途）时返回空列表 —— 与旧判据
+     *   「anchor == null 时不动队列」一致。
+     */
+    fun pages(): List<SwipeEntry> {
+        val anchor = _anchor.value ?: return emptyList()
+        return listOf(anchor) + _queue.value
+    }
+
     private val _tail = MutableStateFlow(SwipeQueueTail.Idle)
 
     /** 补货尾态（"正在为你找更多视频…" / "已经是最后一个了"的驱动）。 */

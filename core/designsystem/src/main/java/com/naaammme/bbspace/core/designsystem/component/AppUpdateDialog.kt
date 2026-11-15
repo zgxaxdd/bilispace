@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Immutable
 data class AppUpdateDialogState(
@@ -43,7 +45,7 @@ fun AppUpdateDialog(
                     .fillMaxWidth()
                     .heightIn(max = 320.dp)
                     .verticalScroll(scrollState),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 SelectableText(
                     text = state.desc,
@@ -61,14 +63,20 @@ fun AppUpdateDialog(
                     } else {
                         onOpenUrl(url)
                     }
-                }
+                },
+                // 全局拖拽反馈（第 34 轮 T2）：对话框动作是纯浮层小件，
+                // 不参与任何无缝过渡，也不在 PlayerView 祖先链上。
+                modifier = Modifier.appElasticPress()
             ) {
                 Text(state.confirmText ?: "知道了")
             }
         },
         dismissButton = if (state.url != null) {
             {
-                TextButton(onClick = onDismiss) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.appElasticPress()
+                ) {
                     Text("关闭")
                 }
             }

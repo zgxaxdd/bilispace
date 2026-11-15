@@ -30,8 +30,10 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             extensions.configure<LibraryExtension> {
                 namespace = derivedNamespace()
                 // compileSdk 37 + minor 2：AGP 9 的 `compileSdk { }` 块支持 minor 版本。
-                // haze 2.0.0-beta03 的 AAR 元数据声明 `minCompileSdk=37, minCompileMinorSdk=2`，
-                // 只写 `compileSdk = 37` 会被 AAR 元数据检查判为不满足。
+                // **2026-10-13 更新**：原先这里钉 minor 2 的理由是 "haze 2.0.0-beta03 的 AAR
+                // 元数据声明 minCompileMinorSdk=2"。haze 已升到 2.0.1，其 minCompileMinorSdk
+                // 降为 0 ⇒ **该理由已消失**；当前保留 37.2 是因为全仓已在此版本上验证通过，
+                // 降 minor 没有收益（且要重跑全部模块的 AAR 元数据检查）。
                 // **必须与 ApplicationConventionPlugin 同步**：库模块也要编译到 37.2，
                 // 否则 `:feature:*` 的 checkReleaseAarMetadata 会失败。
                 compileSdk {

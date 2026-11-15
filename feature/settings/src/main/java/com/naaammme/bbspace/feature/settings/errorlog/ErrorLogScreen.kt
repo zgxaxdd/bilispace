@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
 import com.naaammme.bbspace.feature.settings.errorlog.ErrorLogViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.common.log.ErrorLog
@@ -48,6 +50,7 @@ import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,13 +66,13 @@ fun ErrorLogScreen(
             TopAppBar(
                 title = { Text("错误日志 (${logs.size})") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
                     if (logs.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.clear() }) {
+                        IconButton(modifier = Modifier.appElasticPress(), onClick = { viewModel.clear() }) {
                             Icon(Icons.Default.Delete, contentDescription = "清空错误日志")
                         }
                     }
@@ -90,8 +93,8 @@ fun ErrorLogScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(BiliSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 // key 带上 index：time+tag 在同毫秒同 tag 时会重复，重复 key 会让 LazyColumn 崩溃
                 itemsIndexed(logs, key = { index, log -> "${log.time}-${log.tag}-$index" }) { _, log ->
@@ -111,14 +114,14 @@ private fun ErrorLogItem(log: ErrorLog, fmt: SimpleDateFormat) {
 
     Card(
         onClick = { if (hasStack) expanded = !expanded },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().appElasticPress(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
         )
     ) {
         Column(
             modifier = Modifier
-                .padding(10.dp)
+                .padding(BiliSpacing.smPlus)
                 // A12：错误日志堆栈展开/折叠 300ms Emphasized 高度过渡
                 .animateContentSize(
                     animationSpec = tween(
@@ -140,7 +143,7 @@ private fun ErrorLogItem(log: ErrorLog, fmt: SimpleDateFormat) {
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     Text(
                         text = timeStr,
@@ -163,14 +166,15 @@ private fun ErrorLogItem(log: ErrorLog, fmt: SimpleDateFormat) {
                                 clipboard.setPrimaryClip(ClipData.newPlainText("error_log", text))
                                 Toast.makeText(context, "日志已复制", Toast.LENGTH_SHORT).show()
                             }
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            // 微间距 2dp：BiliSpacing 最小是 xs=4dp，硬套 token 会改变布局，故保留字面量。
+                            .padding(horizontal = BiliSpacing.xs, vertical = 2.dp)
                     )
                 }
             }
             Text(
                 text = log.message,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier.padding(top = BiliSpacing.xs)
             )
             if (hasStack) {
                 Text(
@@ -180,7 +184,7 @@ private fun ErrorLogItem(log: ErrorLog, fmt: SimpleDateFormat) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (expanded) Int.MAX_VALUE else 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = BiliSpacing.xs)
                 )
             }
         }

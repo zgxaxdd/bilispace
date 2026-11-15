@@ -87,6 +87,7 @@ import com.naaammme.bbspace.core.designsystem.component.VideoRelateCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.copyTextOnLongPress
 import com.naaammme.bbspace.core.common.ShareUtils
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliDetailLayout
 import com.naaammme.bbspace.core.model.CommentSubject
 import com.naaammme.bbspace.core.model.QualityOption
 import com.naaammme.bbspace.core.model.ResolvedVideoIds
@@ -110,6 +111,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -144,14 +147,19 @@ internal fun VideoDetailPage(
      */
     onIntroPageVisibleChange: (Boolean) -> Unit = {},
     /**
-     * 简介内容**额外的顶部间距**（px→dp 由调用点给）。
+     * 简介区首个内容块（标题块）的顶部间距，即"画面底边 → 标题"的呼吸量。
      *
-     * 为什么需要：播放带底边 == 画面底边之后（见 VideoScreen 的几何注释），
+     * 为什么必须由**内容自身**给：播放带底边 == 画面底边之后（见 VideoScreen 的几何注释），
      * 简介区与画面之间不再有"播放带多出来的那段黑"充当间距 ⇒ 标题会贴着视频下沿
-     * （用户反馈"文字与视频挨得太近"）。间距必须由**内容自身**给：
-     * 用 offset 把整块内容推下去会在中间留出没有背景的一段（露出根层黑底）。
+     * （用户反馈"文字与视频挨得太近"）。用 offset 把整块内容推下去会在中间留出
+     * 没有背景的一段（露出根层黑底），所以只能走 `contentPadding`。
+     *
+     * 取值由调用点显式给 [BiliDetailLayout.INTRO_TOP_GAP]（竖排分支），
+     * 横排/展开分支给 0（详情区与播放器并排，不存在"画面下方"）。
+     * **不要把它取成状态栏高度** —— 那样"留多少白"就由系统 inset 决定了，
+     * 详见 [BiliDetailLayout] 的 KDoc。
      */
-    contentTopPad: Dp = 0.dp,
+    introTopGap: Dp = 0.dp,
 ) {
     val aidKey = ids.aid.takeIf { it > 0L }
     val curCid = ids.cid.takeIf { it > 0L }
@@ -273,7 +281,7 @@ internal fun VideoDetailPage(
                 onDownloadClick = onDownloadClick,
                 onAction = handleAction,
                 interaction = interaction,
-                contentTopPad = contentTopPad
+                introTopGap = introTopGap
             )
 
             else -> {
@@ -364,8 +372,8 @@ private fun DetailPageContent(
     detailLoading: Boolean,
     detailError: String?,
     horizontalPad: Dp,
-    /** 简介内容额外的顶部间距（由 VideoScreen 按播放带几何给，见 VideoDetailPage 同名参数）。 */
-    contentTopPad: Dp = 0.dp,
+    /** 简介内容首项（标题块）的顶部间距，由 VideoScreen 按播放带几何给（见同名参数）。 */
+    introTopGap: Dp = 0.dp,
     infoListState: LazyListState,
     descOn: Boolean,
     tagOn: Boolean,
@@ -383,9 +391,29 @@ private fun DetailPageContent(
     val itemMod = remember(horizontalPad) {
         if (horizontalPad > 0.dp) Modifier.padding(horizontal = horizontalPad) else Modifier
     }
-    val infoTopPad = remember(horizontalPad, contentTopPad) {
-        (if (horizontalPad > 0.dp) 16.dp else 0.dp) + contentTopPad
-    }
+    // 简介区首项（标题块）的顶部间距。
+    //
+    // ── 2026-10-12 重做（用户第二次反馈「标题与视频相隔很远，给人很空的感觉」）──
+    //
+    // 上一版（10-11）是在 `16dp + contentTopPad(=statusTop)` 上减掉 24dp。减完仍剩
+    // ≈32dp 净间距，加上标题行盒的行距后首行字形离画面底边 ≈35dp —— 真机上读作
+    // "一整条空带"。但**真正的毛病不是数值不够大，而是这个式子的结构**：
+    //
+    //   · `contentTopPad` 取的是**状态栏高度**（本机 1272×2800 @3.5 实测 141px≈40dp）。
+    //     它是按量级抄来的，不是几何必需 —— 画面底边本来就远低于状态栏、不存在遮挡。
+    //     于是"画面与正文之间留多少白"被一个**与设计无关的系统量**决定了：
+    //     换个机型（状态栏 24dp 或 48dp）间距就跟着变，这不该是版式的输入。
+    //   · 骨架屏 `VideoDetailInfoSkeleton` 在 designsystem，**根本看不到 statusTop**，
+    //     它只按 `BiliSpacing.lg` 对齐 ⇒ 加载态与真实内容天生差 ≈40dp，
+    //     详情一到就整块向下跳一格。用户说的「骨架动画也需要相应调整」就是这个。
+    //
+    // 所以这一版把间距还给设计：**一个入参、两个状态、零算术**。40dp 的系统量彻底
+    // 退出这条式子，`horizontalPad` 那 16dp 也不再叠加（它原本是给"横排展开分支"的
+    // 页边距补偿，而那条分支不经过这里 —— 它给 0，与改动前逐像素一致）。
+    //
+    // 值定义在 `core:designsystem` 而不是本模块：骨架屏必须用**同一个常量**
+    // （[BiliDetailLayout.INTRO_TOP_GAP]），差一格就会在交接处跳版。
+    val infoTopPad = introTopGap
 
     LazyColumn(
         state = infoListState,
@@ -566,6 +594,13 @@ internal fun QualityOptionItem(
     val rowMod = if (onClick != null) {
         Modifier
             .fillMaxWidth()
+            // 全局拖拽反馈（第 34 轮 T2）：**清晰度档位行**（整行宽 ⇒ 用 0.6 克制档）。
+            // 本文件是详情页的**非播放器区**（player/ 目录才是播放器），
+            // 且这里没有 SeamlessAnchor；虽然同页有播放器，但这一行在
+            // LazyColumn 的内容区、不在 PlayerView 的 Compose 祖先链上。
+            .appElasticPress(
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f)
+            )
             .clickable(onClick = onClick)
     } else {
         Modifier.fillMaxWidth()

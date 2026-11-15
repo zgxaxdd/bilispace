@@ -37,7 +37,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.FavoriteFolder
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 fun FavoriteFolderList(
@@ -51,8 +53,11 @@ fun FavoriteFolderList(
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(
+            horizontal = BiliSpacing.md,
+            vertical = BiliSpacing.md
+        ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         items(
             items = folders,
@@ -86,7 +91,13 @@ private fun FavoriteFolderCard(
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { menuOpen = true }
-            ),
+            )
+            // 全局拖拽反馈：本行**有长按手势**（长按开菜单）。
+            // `dragEnabled = false` ⇒ 只保留按压缩放/光斑，不做跟手位移 ——
+            // 否则"按住不动等菜单"的过程中整卡会跟着手指走，长按意图读起来是拖拽。
+            // 与 `BiliCardSurface` 对 onLongClick 的判据同一条（task-9 A 的
+            // "长按/滑动的行不要挂跟手" 在这里落成"挂按压、不挂跟手"）。
+            .appElasticPress(dragEnabled = false),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -94,8 +105,8 @@ private fun FavoriteFolderCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(BiliSpacing.smPlus),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             CoverImage(
                 url = folder.cover,
@@ -114,7 +125,7 @@ private fun FavoriteFolderCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 Text(
                     text = folder.title,
@@ -133,7 +144,7 @@ private fun FavoriteFolderCard(
                 )
             }
             Box {
-                IconButton(onClick = { menuOpen = true }) {
+                IconButton(modifier = Modifier.appElasticPress(), onClick = { menuOpen = true }) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "收藏夹管理"

@@ -164,4 +164,58 @@ class PlaybackHeadPrewarmWiringGuardTest {
             prewarmBody.any { it.contains("PlaybackCacheKeyFactory()") }
         )
     }
+
+    /**
+     * B12（2026-10-13，上游 v0.3.6 同步）：**在途取流必须合并**。
+     *
+     * ## 缺陷
+     * 预取（`preloadPlayUrl`）与开播（`fetchPlaybackSource`）是两条**独立发起**的路径，
+     * 共用 `PlayUrlCache`，但缓存只在请求**成功之后**才写入 ⇒ "预取在途、用户已经滑到"
+     * 这个窗口里两条路径都 cache miss，**同一个 key 发两次完整 gRPC 往返**。
+     * 真机读数里 `t1 建源` 占首帧 ~72%，重复一次就是白等一个往返。
+     *
+     * ## 断言（锚在写法形态上，W20/W21）
+     * ① 取流必须经过 `OnDemandRequestCache.getOrLoad(`（合并层在场）；
+     * ② 真正发请求的那一段必须被**抽成单独方法**并被合并层包住 ——
+     *    否则"合并"只是装饰，网络调用仍可能被并发执行；
+     * ③ **结果缓存仍归 `PlayUrlCache`**：合并层不得再缓存结果
+     *    （单一真值源；两套 TTL 会打架）。
+     */
+    @Test
+    fun playUrlFetchIsCoalescedInFlight() {
+        val impl = impl()
+        val fetchBody = blockBody(impl, "override suspend fun fetchPlaybackSource(")
+        assertTrue(
+            "B12：取流必须走 OnDemandRequestCache.getOrLoad(（在途合并层），" +
+                "否则预取与开播会对同一个 key 各发一次完整往返。",
+            fetchBody.any { it.contains("inFlightPlayUrl") } &&
+                fetchBody.any { it.contains(".getOrLoad(cacheKey)") }
+        )
+        assertTrue(
+            "B12：真正的网络/解析段必须抽成独立方法（loadPlaybackSource）并被合并层包住 ——" +
+                "直接写在 fetch 体内的话，合并层包不住它，并发仍会重复发请求。",
+            impl.any { it.contains("private suspend fun loadPlaybackSource(") }
+        )
+        val coalesceAt = fetchBody.indexOfFirst { it.contains(".getOrLoad(cacheKey)") }
+        val loadAt = fetchBody.indexOfFirst { it.contains("loadPlaybackSource(request)") }
+        assertTrue(
+            "B12：loadPlaybackSource 必须作为 getOrLoad 的**参数**传入（在合并层内部执行）" +
+                "coalesce@$coalesceAt load@$loadAt。",
+            coalesceAt >= 0 && loadAt >= coalesceAt &&
+                // 同一行也算合法（lambda 可以写成 `getOrLoad(cacheKey) { loadPlaybackSource(request) }`），
+                // 关键是 loadPlaybackSource 出现在**合并调用之后**，而不是 fetch 体里另起一段。
+                fetchBody[loadAt].contains("loadPlaybackSource(request)")
+        )
+        assertTrue(
+            "B12 单一真值源：结果缓存只许归 PlayUrlCache 管 —— 合并层必须 maxAgeMs = 0" +
+                "（≥ 两套 TTL 会互相打架，且 PlayUrlCache 的失效语义会被绕过）。",
+            impl.any { it.contains("maxAgeMs = 0L") }
+        )
+        assertTrue(
+            "B12 回归防护：网络调用不得再出现在 fetchPlaybackSource 体内" +
+                "（那会让合并层形同虚设）。",
+            fetchBody.none { it.contains("grpcClient.call(") } &&
+                fetchBody.none { it.contains("webPlaybackResolver.fetchPlaybackSource(") }
+        )
+    }
 }

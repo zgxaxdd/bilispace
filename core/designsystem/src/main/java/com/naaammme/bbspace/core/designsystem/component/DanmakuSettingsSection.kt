@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 fun DanmakuSettingsSection(
@@ -247,6 +249,10 @@ private fun ChoiceCard(
                     FilterChip(
                         selected = option == currentValue,
                         onClick = { onSelect(option) },
+                        // 全局拖拽反馈（第 34 轮 T2）：弹幕区域档位是一排互斥小芯片，
+                        // 纯设置项、不参与过渡。（`FilterChip` 自身只有颜色态，没有
+                        // 形变，所以挂外层不会"双抖" —— 与 Switch/Slider 不同。）
+                        modifier = Modifier.appElasticPress(),
                         label = { Text(label(option)) }
                     )
                 }
@@ -290,8 +296,8 @@ private fun formatMultiple(value: Float): String {
 }
 
 private object Padding {
-    val Horizontal = 16.dp
-    val Vertical = 16.dp
-    val Inner = 4.dp
-    val InnerLarge = 8.dp
+    val Horizontal = BiliSpacing.lg
+    val Vertical = BiliSpacing.lg
+    val Inner = BiliSpacing.xs
+    val InnerLarge = BiliSpacing.sm
 }

@@ -31,14 +31,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
@@ -63,7 +61,6 @@ import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
-import com.naaammme.bbspace.core.designsystem.theme.withFontSize
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.core.model.VideoTargetTool
@@ -92,9 +89,24 @@ private val RankChipShape = RoundedCornerShape(BiliRadius.groupedList)
 /** 封面块：只圆上两角，下沿直角，与信息区无缝拼接（推荐页 FeedCardCoverShape 同款）。 */
 private val RankCardCoverShape: Shape = BiliRadius.topRounded(BiliRadius.card)
 
+/**
+ * 封面角标（名次 / 播放数 / 时长 / 期数）的圆角。
+ *
+ * 文件级常量而不是内联 `shape = RoundedCornerShape(...)`：
+ * `ListAllocationStructureTest.shapeAllocationBypassForms_areFrozenAtMeasuredBaseline`
+ * 把全仓"具名实参直接构造 Shape"的计数钉死，写在 composable 参数位上每次都新建一份。
+ */
+private val RankCoverBadgeShape = RoundedCornerShape(BiliRadius.badge)
+
 /** 封面取色采样尺寸：与信息流双列卡的封面预加载尺寸一致（640×480），命中同一份解码位图。 */
 private const val RANK_COVER_SAMPLE_WIDTH_PX = 640
 private const val RANK_COVER_SAMPLE_HEIGHT_PX = 480
+
+/**
+ * 前三名的门槛。名次本身是数据属性，但"第几名要更醒目"是**呈现决策**，
+ * 所以放在 UI 层而不是模型层。
+ */
+private const val TOP_RANK_HIGHLIGHT = 3
 
 /**
  * 首页「排行」页：热门/分区排行榜（UGC rid）、PGC 季度排行、每周必看、入站必刷。
@@ -124,6 +136,13 @@ fun RankScreen(
             screenHeightPx = screenHpx,
             bottomOcclusionRatio = bottomNavRatio()
         )?.let { it.top to it.bottom }
+    }
+    // ── 名次（本页新增的第三级信息）──────────────────────────────────────────
+    // 接口按名次返回条目，所以**列表下标 + 1 就是名次**，不需要另加数据字段。
+    // 先一次性算成 key→名次：若写在卡片里现算，每张可见卡每帧都要对整份榜单
+    // （最多 100 条）做一次线性查找；这里只在 entries 换页时算一次。
+    val rankByKey = remember(state.entries) {
+        state.entries.mapIndexed { index, entry -> entry.key to index + 1 }.toMap()
     }
 
     AdaptiveMediaGrid(
@@ -165,10 +184,13 @@ fun RankScreen(
                     onSelectSeries = viewModel::selectSeries
                 )
                 StateMessageCard(
-                    text = "暂无内容",
+                    // 空态补一句"下一步能做什么"：原实现只有「暂无内容」四个字，
+                    // 层级上也只有一档字重，与错误态、加载态的呈现不成体系。
+                    text = "换个分区或下拉刷新试试",
+                    title = "暂无内容",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(BiliSpacing.lg)
                 )
             }
         },
@@ -184,18 +206,20 @@ fun RankScreen(
                     )
                     StateMessageCard(
                         text = message,
+                        title = "加载失败",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         isError = true
                     )
                 }
             } else {
                 StateMessageCard(
                     text = message,
+                    title = "加载失败",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(BiliSpacing.lg),
                     isError = true
                 )
             }
@@ -210,9 +234,11 @@ fun RankScreen(
             )
         }
     ) { entry ->
+        val rank = rankByKey[entry.key] ?: 0
         when (entry) {
             is RankEntry.Video -> RankVideoCard(
                 item = entry.item,
+                rank = rank,
                 listCover = listCover,
                 onOpenVideo = onOpenVideo,
                 onOpenSpace = onOpenSpace
@@ -220,6 +246,7 @@ fun RankScreen(
 
             is RankEntry.Pgc -> RankPgcCard(
                 item = entry.item,
+                rank = rank,
                 onOpenVideo = onOpenVideo
             )
         }
@@ -276,30 +303,44 @@ private fun RankSelectors(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                    // 与上一行同口径（原为 8/2dp 内联字面量）：两行选择器读作同一组控件
+                    .padding(
+                        horizontal = BiliCardDensity.infoHorizontal,
+                        vertical = BiliCardDensity.infoVertical
+                    ),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 state.seriesList.forEach { entry ->
                     val selectedNow = entry.number == state.seriesNumber
                     Surface(
                         shape = RankChipShape,
+                        // 与类型行同一套选中语言（原为 tertiaryContainer，同屏两行两个色调）。
+                        // 本仓是单色体系，选中态靠 primary 明暗而不是第三种颜色区分。
                         color = if (selectedNow) {
-                            MaterialTheme.colorScheme.tertiaryContainer
+                            MaterialTheme.colorScheme.primary
                         } else {
-                            MaterialTheme.colorScheme.surfaceContainerLow
+                            MaterialTheme.colorScheme.surfaceContainerHigh
                         },
-                        modifier = Modifier.clickable { onSelectSeries(entry.number) }
+                        // 与类型行同样补 RadioButton 语义（两者都是单选组）
+                        modifier = Modifier.selectable(
+                            selected = selectedNow,
+                            role = Role.RadioButton,
+                            onClick = { onSelectSeries(entry.number) }
+                        )
                     ) {
                         Text(
                             text = entry.name.ifBlank { "第${entry.number}期" },
                             style = MaterialTheme.typography.labelMedium,
                             color = if (selectedNow) {
-                                MaterialTheme.colorScheme.onTertiaryContainer
+                                MaterialTheme.colorScheme.onPrimary
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
                             maxLines = 1,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(
+                                horizontal = BiliSpacing.smPlus,
+                                vertical = BiliSpacing.xs
+                            )
                         )
                     }
                 }
@@ -311,6 +352,7 @@ private fun RankSelectors(
 @Composable
 private fun RankVideoCard(
     item: RankVideoItem,
+    rank: Int,
     listCover: () -> Pair<Float, Float>? = { null },
     onOpenVideo: (VideoTarget) -> Unit,
     onOpenSpace: (SpaceRoute) -> Unit
@@ -360,25 +402,62 @@ private fun RankVideoCard(
         defaultOnSurface = MaterialTheme.colorScheme.onSurface,
         defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    // 标题样式：withFontSize 自带 remember（@Composable 扩展，不能包进外层 remember）；
-    // 字号走 withFontSize（sp 字面量棘轮：不新增 18.sp 行高档），字重单独 copy 补上
-    val titleStyle = MaterialTheme.typography.bodyLarge
-        .withFontSize(14.sp)
-        .copy(fontWeight = FontWeight.Medium)
+    // 标题：改用 iOSTypography.titleSmall（14 SemiBold + 等宽数字），与下一行
+    // bodySmall（13 Light）拉开"标题 ↔ meta"两个字重档。
+    // 此前是 bodyLarge.withFontSize(14.sp).copy(fontWeight = Medium)：与 meta 只差一档，
+    // 首屏读下来整张卡是"一片同重的字"，这正是用户说的「文字摆在上面太单调」。
+    val titleStyle = MaterialTheme.typography.titleSmall
 
     BiliCardSurface(
         onClick = {
-            if (
-                canSeamless &&
-                seamlessOpener.tryOpen(
-                    anchor = anchorState.anchor,
-                    target = target,
-                    coverUrl = item.cover,
-                    coverLarge = false,
-                    anchorRadiusPx = seamlessSpec.radiusPx,
-                    listCover = listCover()
-                )
-            ) {
+            // 与首页 FeedCard 同一套无缝时序（用户第 34 轮反馈点名「尤其是排行界面的
+            // 动画」——本卡此前走的是「直接 tryOpen、无截图」的旧路径，与首页两条路：
+            //
+            // ① **没有 PixelCopy**：锚点是零绘制 View，框架捕获不到内容就退回
+            //    `BUNDLE_BITMAP`（软件封面位图）兜底；而这张卡是「4:3 封面 + 简介区」
+            //    的近 1:1 矩形，封面会被**纵向拉伸铺满整卡** ⇒ 打开/返回时都能看到
+            //    「封面糊住简介区」的半帧。
+            // ② **没有 fallbackColor**：框架取不到色时填黑，返回途中拖出一道黑轨迹。
+            //
+            // 现在与首页完全同源：点击这一帧先 PixelCopy 截整卡真实像素（含简介文字），
+            // 回调里再 tryOpen + startActivity —— 官方「setSeamlessView 必须在
+            // startActivity 之前」的时序契约仍然成立（两者在回调里先后紧邻）。
+            val anchorView = anchorState.anchor
+            // 直接对 seamlessOpener 判空（而不是 `canSeamless && …` 再在里面 Elvis）：
+            // Kotlin 不会因为一个布尔变量为真就对其内部的非空判断做智能转换，
+            // 写成 `canSeamless && …` 再 `seamlessOpener ?: return` 会让编译器把 Elvis
+            // 判为恒真（实测 warning: always returns the left operand）。
+            // 这里把判空提到条件里，语义等价、类型收窄是真的。
+            val opener = seamlessOpener
+            if (opener != null && anchorView != null && OplusViewSeamlessCompat.isVersionSupported()) {
+                opener.captureCardBitmap(anchorView, anchorState) { captured ->
+                    val opened = opener.tryOpen(
+                        anchor = anchorView,
+                        target = target,
+                        coverUrl = item.cover,
+                        coverLarge = false,
+                        anchorRadiusPx = seamlessSpec.radiusPx,
+                        listCover = listCover(),
+                        // 官方 BUNDLE_COLOR：view 之外区域的填充色（不传则框架取色，
+                        // 取错表现为打开/返回瞬间闪黑）
+                        fallbackColor = seamlessSpec.fallbackColor,
+                        keepAnchorVisible = true,
+                        cardBitmap = captured,
+                        // 真实显示矩形（含全局拖拽反馈的 graphicsLayer 形变）——
+                        // 排行卡在瀑布流里、点击前常带一次未走完的按压回弹，
+                        // 这是"按住卡片点开时动画从错误矩形起飞"的修法。
+                        anchorState = anchorState
+                    )
+                    if (!opened) {
+                        captured?.recycle()
+                        CoverExpandOrigin.record(
+                            target = target,
+                            coverUrl = item.cover,
+                            coverLarge = false
+                        )
+                        onOpenVideo(target)
+                    }
+                }
                 return@BiliCardSurface
             }
             CoverExpandOrigin.record(target = target, coverUrl = item.cover, coverLarge = false)
@@ -390,7 +469,26 @@ private fun RankVideoCard(
         // （推荐页同款——不透明底色是染色"只兑一次白"的前提，见该卡同名注释）
         containerColor = infoDrawSpec.containerColor,
         // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
-        modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
+        modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target),
+        // 无缝锚点铺满**整张卡片**（封面 + 信息区），与首页 FeedCard 同口径。
+        //
+        // 为什么从封面 Box 里挪出来：锚点矩形就是系统的过渡几何范围。此前它
+        // `matchParentSize()` 在只包封面的 Box 里 ⇒ 锚点 = 封面矩形（4:3），
+        // 而系统打开的目标是整屏播放器。于是「封面单独放大成播放器、信息区原地不动」，
+        // 返回时同理 —— 这是用户说的「排行界面动画有 bug」最直接的观感来源。
+        // 首页 FeedCard 早已用 fullCardOverlay 解决同一问题（其注释记录了完整历史），
+        // 排行卡漏了这一步。
+        //
+        // 放在 fullCardOverlay 而不是内容里：内容装在 Column（要用 weight），
+        // 而 matchParentSize 是 BoxScope 限定修饰符，放 Column 里会被当成真实子项。
+        fullCardOverlay = if (canSeamless) {
+            { SeamlessAnchor(anchorState, Modifier.matchParentSize()) }
+        } else {
+            null
+        },
+        // 锚点真组合时**整卡形变必须让位**（排行页是用户报的"动画 bug"最明显的一页）。
+        // 详见 `BiliCardSurface.elasticPressEnabled` 的 KDoc。
+        elasticPressEnabled = !canSeamless
     ) {
         Box(
             modifier = Modifier
@@ -398,10 +496,6 @@ private fun RankVideoCard(
                 .aspectRatio(4f / 3f)
                 .coverExpandTrack(target)
         ) {
-            // 锚点在封面内容之下（z 序）：过渡位图不能盖住封面上的时长角标
-            if (canSeamless) {
-                SeamlessAnchor(anchorState, Modifier.matchParentSize())
-            }
             CoverImage(
                 url = item.cover,
                 contentDescription = item.title,
@@ -411,12 +505,20 @@ private fun RankVideoCard(
                 coverFourThree = true,
                 modifier = Modifier.matchParentSize()
             ) {
-                // 角标对齐推荐页卡面：播放数左上、时长右下
+                // 名次角标：榜单页此前**完全不显示名次**，用户只能靠数位置猜——
+                // 这是本页观感提升最快的一处（前三名另有更重/更大的专属档）。
+                RankBadge(
+                    rank = rank,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(BiliSpacing.sm)
+                )
+                // 播放数从左上让到左下：名次占了左上，且"左下角信息"与首页卡位置语言一致
                 item.view.takeIf { it > 0L }?.let { view ->
                     RankCoverBadge(
                         text = formatRankCount(view),
                         modifier = Modifier
-                            .align(Alignment.TopStart)
+                            .align(Alignment.BottomStart)
                             .padding(BiliSpacing.sm)
                     )
                 }
@@ -504,6 +606,7 @@ private fun RankVideoCard(
 @Composable
 private fun RankPgcCard(
     item: RankPgcItem,
+    rank: Int,
     onOpenVideo: (VideoTarget) -> Unit
 ) {
     val target = remember(item.seasonId, item.epId) {
@@ -523,6 +626,10 @@ private fun RankPgcCard(
         containerColor = MaterialTheme.colorScheme.surface
     )
     val seamlessOpener = LocalSeamlessCardOpener.current
+    // 与 RankVideoCard 同款组合期门禁（2026-10-12 审查补）：本卡原先只判 `opener != null`
+    // 且**从未放置 SeamlessAnchor** —— `anchorState.anchor` 恒为 null，`tryOpen` 恒返回
+    // false，PGC 排行卡的无缝路径 100% 是死代码（每次点击都白跑一趟 tryOpen 再降级）。
+    val canSeamless = seamlessOpener != null && OplusViewSeamlessCompat.isVersionSupported()
 
     // 推荐页同款视觉（与 RankVideoCard 同一配方，见那边注释）
     val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -543,25 +650,41 @@ private fun RankPgcCard(
         defaultOnSurface = MaterialTheme.colorScheme.onSurface,
         defaultOnSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    // 标题样式：withFontSize 自带 remember（@Composable 扩展，不能包进外层 remember）；
-    // 字号走 withFontSize（sp 字面量棘轮：不新增 18.sp 行高档），字重单独 copy 补上
-    val titleStyle = MaterialTheme.typography.bodyLarge
-        .withFontSize(14.sp)
-        .copy(fontWeight = FontWeight.Medium)
+    // 标题与 RankVideoCard 同一档（14 SemiBold + tnum），两卡并排时标题同一字重语言
+    val titleStyle = MaterialTheme.typography.titleSmall
 
     BiliCardSurface(
         onClick = {
             val currentTarget = target ?: return@BiliCardSurface
-            if (
-                seamlessOpener != null &&
-                seamlessOpener.tryOpen(
-                    anchor = anchorState.anchor,
-                    target = currentTarget,
-                    coverUrl = item.cover,
-                    coverLarge = false,
-                    anchorRadiusPx = seamlessSpec.radiusPx
-                )
-            ) {
+            // 与 RankVideoCard 完全同一套修复（见那张卡的详细注释）：补 PixelCopy
+            // 整卡像素 + fallbackColor + 真实显示矩形，并把锚点提到整卡。
+            val anchorView = anchorState.anchor
+            // 同 RankVideoCard：把 seamlessOpener 的判空提到条件里，让类型收窄成为真的
+            //（用 canSeamless 布尔变量不会触发智能转换，Elvis 会被判恒真）。
+            val opener = seamlessOpener
+            if (opener != null && anchorView != null && OplusViewSeamlessCompat.isVersionSupported()) {
+                opener.captureCardBitmap(anchorView, anchorState) { captured ->
+                    val opened = opener.tryOpen(
+                        anchor = anchorView,
+                        target = currentTarget,
+                        coverUrl = item.cover,
+                        coverLarge = false,
+                        anchorRadiusPx = seamlessSpec.radiusPx,
+                        fallbackColor = seamlessSpec.fallbackColor,
+                        keepAnchorVisible = true,
+                        cardBitmap = captured,
+                        anchorState = anchorState
+                    )
+                    if (!opened) {
+                        captured?.recycle()
+                        CoverExpandOrigin.record(
+                            target = currentTarget,
+                            coverUrl = item.cover,
+                            coverLarge = false
+                        )
+                        onOpenVideo(currentTarget)
+                    }
+                }
                 return@BiliCardSurface
             }
             CoverExpandOrigin.record(target = currentTarget, coverUrl = item.cover, coverLarge = false)
@@ -571,7 +694,18 @@ private fun RankPgcCard(
         shape = RankCardShape,
         containerColor = infoDrawSpec.containerColor,
         // 回退 morph 期间源卡片随幽灵进度淡出（系统无缝路径恒 alpha=1，见该函数注释）
-        modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target)
+        modifier = Modifier.fillMaxWidth().coverExpandSourceFade(target),
+        // 锚点铺满整卡（理由见 RankVideoCard 的 fullCardOverlay 注释）
+        fullCardOverlay = if (canSeamless) {
+            { SeamlessAnchor(anchorState, Modifier.matchParentSize()) }
+        } else {
+            null
+        },
+        // 锚点真组合时**整卡形变必须让位**：`appElasticPress` 是绘制期 graphicsLayer，
+        // 而 OPPO 框架按布局期 `getLocationInWindow` 取锚点矩形 ⇒ 按住卡片点开时
+        // 动画会从"屏幕上已不存在的矩形"起飞（排行页最明显：瀑布流里点击前常带
+        // 一次未走完的按压回弹）。详见 `BiliCardSurface.elasticPressEnabled` 的 KDoc。
+        elasticPressEnabled = !canSeamless
     ) {
         Box(
             modifier = Modifier
@@ -586,6 +720,12 @@ private fun RankPgcCard(
                 coverFourThree = true,
                 modifier = Modifier.matchParentSize()
             ) {
+                RankBadge(
+                    rank = rank,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(BiliSpacing.sm)
+                )
                 item.indexShow?.let { indexShow ->
                     RankCoverBadge(
                         text = indexShow,
@@ -642,11 +782,47 @@ private fun RankPgcCard(
     }
 }
 
+/**
+ * 名次角标（本页的"第三级信息"：名次 ↔ 标题 ↔ meta）。
+ *
+ * 三档层级，全部取自既有 typography token，零新增字号：
+ * - **前三名**：`titleSmall`（14 SemiBold，自带 tnum）+ 更实的黑底（0.78）+ 更大内边距；
+ * - **其余名次**：`labelMedium`（12 Medium，自带 tnum）+ 半透底（0.55）+ 更紧内边距。
+ *
+ * 为什么数字要用带 tnum 的槽位：一列卡片的个位/两位/三位数若字宽不一致，
+ * 角标会随名次"忽宽忽窄"；tnum 让数字位宽恒定，整列对齐。
+ * 为什么不用彩色：本仓是单色体系（见 BRIEF §2），层级靠**字号/字重/底实度**表达。
+ */
+@Composable
+private fun RankBadge(rank: Int, modifier: Modifier = Modifier) {
+    if (rank <= 0) return
+    val isTop = rank <= TOP_RANK_HIGHLIGHT
+    Surface(
+        modifier = modifier,
+        shape = RankCoverBadgeShape,
+        color = Color.Black.copy(alpha = if (isTop) 0.78f else 0.55f)
+    ) {
+        Text(
+            text = rank.toString(),
+            modifier = Modifier.padding(
+                horizontal = if (isTop) BiliSpacing.sm else BiliSpacing.xs,
+                vertical = BiliSpacing.xs
+            ),
+            color = Color.White,
+            style = if (isTop) {
+                MaterialTheme.typography.titleSmall
+            } else {
+                MaterialTheme.typography.labelMedium
+            }
+        )
+    }
+}
+
 @Composable
 private fun RankCoverBadge(text: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(BiliRadius.badge),
+        shape = RankCoverBadgeShape,
         color = Color.Black.copy(alpha = 0.62f)
     ) {
         Text(

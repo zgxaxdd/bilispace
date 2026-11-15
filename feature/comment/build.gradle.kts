@@ -25,4 +25,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.hilt.navigation.compose)
+
+    // A14（2026-10-13，上游 v0.3.6 同步）：首屏骨架槽位数推导的边界测试
+    // （CommentSkeletonSlotPolicyTest，纯 JVM 无 Android 依赖）。
+    testImplementation(libs.junit)
 }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A2 迁移基线（2026-10-13 第 10 轮）。见 app/lint.xml 的完整说明。
+
+  BbspaceAnimateAsState 已由 FrameBudgetLintTest.animateAsState_isFrozen 数文本棘轮
+  （上限 10）迁移到 ci-lint/AnimateAsStateDetector；切换前做过等价性证明（10/10 行号一致）。
+  本模块原有 1 处。
+
+  BbspaceSpLiteral 由 DesignTokenLintTest.spLiteralsOutsideTheme_isFrozen 数文本棘轮
+  （theme 包外上限 4）迁移到 ci-lint/SpLiteralDetector；切换前做过等价性证明
+  （4/4 行号一致）。本模块原有 2 处（同一文件相邻两行，是同一个 TextStyle 的字号+行高）。
+-->
+<lint>
+    <issue id="BbspaceAnimateAsState">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/home/video/HomeVideoPage.kt" />
+    </issue>
+    <issue id="BbspaceSpLiteral">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/home/video/HomeVideoPage.kt" />
+    </issue>
+</lint>

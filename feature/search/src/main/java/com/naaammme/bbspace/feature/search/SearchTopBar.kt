@@ -33,9 +33,10 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliBackButton
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -83,7 +84,7 @@ internal fun SearchTopBar(
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SearchCapsuleField(
@@ -108,7 +109,7 @@ internal fun SearchTopBar(
                     )
                 )
                 if (spaceUid != null) {
-                    IconButton(
+                    IconButton(modifier = Modifier.appElasticPress(),
                         onClick = {
                             focusManager.clearFocus(force = true)
                             keyboard?.hide()
@@ -121,7 +122,7 @@ internal fun SearchTopBar(
                         )
                     }
                 }
-                IconButton(
+                IconButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         focusManager.clearFocus(force = true)
                         keyboard?.hide()

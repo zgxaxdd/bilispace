@@ -22,15 +22,16 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.space.archive.spaceArchiveSection
 import com.naaammme.bbspace.feature.space.header.spaceHeaderSection
 import com.naaammme.bbspace.feature.space.note.SpaceNoteTitleButton
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
@@ -106,7 +107,11 @@ fun SpaceScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        // 全局拖拽反馈（第 34 轮 T2）：空间页顶栏返回钮。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -122,7 +127,9 @@ fun SpaceScreen(
                                     header.profile.name,
                                     header.profile.face
                                 )
-                            }
+                            },
+                            // 全局拖拽反馈：顶栏"聊天"图标钮，与返回钮同排同档。
+                            modifier = Modifier.appElasticPress()
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.MailOutline,
@@ -142,8 +149,8 @@ fun SpaceScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
             ) {
                 spaceHeaderSection(
                     state = header,

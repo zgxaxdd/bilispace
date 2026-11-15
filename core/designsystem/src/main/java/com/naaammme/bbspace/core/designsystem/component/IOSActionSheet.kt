@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.BiliColorRoles
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
@@ -76,7 +77,12 @@ data class IOSActionSheetAction(
 private val ActionGroupRadius = 14.dp
 /** compose-cupertino ActionSheetButtonHeight。 */
 private val ActionRowHeight = 56.dp
-/** compose-cupertino ActionSheetSidePadding。 */
+/** compose-cupertino ActionSheetSidePadding。
+ *
+ * 刻意保留字面量 `8.dp`（而不是 `BiliSpacing.sm`）：`IOSComponentStructureTest.actionSheetSpec`
+ * 把"侧距 8dp"的**结构契约**钉在源码写法上（与 ActionRowHeight = 56.dp 同一类规格断言）。
+ * 值相等，但测试读的是源码文本，改成 token 会让结构测试红。
+ */
 private val SidePadding = 8.dp
 
 @Composable
@@ -278,6 +284,15 @@ private fun ActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = ActionRowHeight)
+            // ## 全局拖拽反馈（2026-10-18 第十九轮，**原语层**接入）
+            //
+            // 接在 `ActionRow` 上：动作面板/二级子面板/取消块/Dialog 动作项
+            // 全部经由本函数渲染，一处挂载覆盖面板里的**每一个动作项**。
+            //
+            // 位置在 `clickable` 之前（包住整条链）：形变作用于整行 56dp 白底，
+            // 而不是只让文字缩放。`ActionGroupCard` 自己**不挂** —— 它只提供
+            // 分组底色与圆角，挂上去会让"按下整块面板"而不是"按下这个动作"。
+            .appElasticPress(enabled = enabled)
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = BiliSpacing.lg),
         contentAlignment = Alignment.Center

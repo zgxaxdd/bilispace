@@ -49,6 +49,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.LivePlaybackViewState
 import com.naaammme.bbspace.core.model.LiveQualityOption
 import com.naaammme.bbspace.core.model.LiveRoomMessage
@@ -61,6 +62,8 @@ import com.naaammme.bbspace.core.model.DanmakuItem
 import com.naaammme.bbspace.core.model.DanmakuSessionState
 import com.naaammme.bbspace.feature.live.toUiMessage
 import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 import com.naaammme.bbspace.infra.player.danmaku.DanmakuLayer
 import com.naaammme.bbspace.infra.player.danmaku.DanmakuOverlayState
 import com.naaammme.bbspace.infra.player.danmaku.DanmakuRenderMode
@@ -252,7 +255,7 @@ internal fun LivePlayerPane(
                 },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
             )
         }
 
@@ -272,7 +275,7 @@ internal fun LivePlayerPane(
                     text = "重试",
                     color = Color.White,
                     style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    modifier = Modifier.padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.smPlus)
                 )
             }
         }
@@ -382,8 +385,8 @@ private fun LivePlayerCtrlBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.sm),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus),
             verticalAlignment = Alignment.CenterVertically
         ) {
             LiveCtrlBtn(
@@ -443,8 +446,24 @@ private fun LiveCtrlBtn(
             .heightIn(min = 32.dp)
             .clip(MaterialTheme.shapes.small)
             .background(bg)
+            // ## 全局拖拽反馈（第 34 轮 T2）—— 为什么这颗可以挂，而它的父层不行
+            //
+            // 铁律是「`PlayerView` 的**祖先链**上不挂」：`graphicsLayer` 会给被包住的
+            // 子树建立独立图层，包到 `AndroidView(PlayerView)` 上就走离屏合成、掉帧。
+            //
+            // 这颗 chip 是 `AndroidView` 的**兄弟节点**（同一个 Box 下的并列子项），
+            // 挂在它自身的 modifier 上 → `graphicsLayer` 的子树只有这个 32dp 高的
+            // `Text`，**不含视频画面**。所以视频仍走硬件直通合成，不掉帧。
+            // 判据是可证的结构关系，不是"感觉没事"：
+            //   父 Box 的 children = [AndroidView, DanmakuLayer, ..., LivePlayerCtrlBar]
+            //   LivePlayerCtrlBar → Row → LiveCtrlBtn(modifier=这里)
+            //   视频视图不在这个 modifier 的子树里。
+            .appElasticPress(
+                enabled = enabled,
+                highlightShape = MaterialTheme.shapes.small
+            )
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = BiliSpacing.sm, vertical = BiliSpacing.xsPlus),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -472,14 +491,24 @@ private fun LiveQualitySelectionDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
             ) {
                 options.forEach { option ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            // 全局拖拽反馈（第 34 轮 T2）：画质档位行。
+                            //
+                            // 这里是 **`AlertDialog` 内部的整行**，弹层走独立窗口、
+                            // 与 `PlayerView` 的 Compose 祖先链**完全不相交**
+                            //（对话框内容不在那个 Box 的子树里）⇒ 不会把视频画面
+                            // 推进离屏合成，可以安全挂。
+                            // 用 0.6 克制档：整行宽控件，满强度会明显横移。
+                            .appElasticPress(
+                                state = rememberAppElasticPressState(feedbackStrength = 0.6f)
+                            )
                             .clickable { onSelect(option.qn) }
-                            .padding(vertical = 10.dp),
+                            .padding(vertical = BiliSpacing.smPlus),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -499,7 +528,11 @@ private fun LiveQualitySelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                // 全局拖拽反馈：对话框动作（独立窗口，不碰 PlayerView 祖先链）。
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("关闭")
             }
         }
@@ -525,7 +558,10 @@ private fun LivePlaybackInfoDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("关闭")
             }
         }

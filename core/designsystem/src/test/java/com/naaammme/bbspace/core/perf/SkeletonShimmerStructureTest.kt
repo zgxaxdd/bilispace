@@ -424,6 +424,57 @@ class SkeletonShimmerStructureTest {
         return blocks
     }
 
+    /**
+     * A14（2026-10-13，上游 v0.3.6 同步）：评论区首屏骨架的**槽位数**与**微光门控**。
+     *
+     * ## 两条缺口（都已核对是本仓真实缺口，不是照搬上游）
+     *
+     * **A14 槽位数**：原 `INIT_SKELETON_COUNT = 4` 写死。骨架铺在**真实 `LazyColumn`**
+     * 里就地替换（`animateItem`），铺不够时数据到达会把列表撑长 → 位移；铺多了屏外
+     * 槽位不会被组合、无成本。上游判据：`ceil(视口高度 / 130dp).coerceIn(3, 8)`。
+     *
+     * **A15 微光门控**：`CommentCardSkeleton` 自带幂等 provider，但"没人提供时自己起
+     * 一条无限动画" —— 4~8 个槽位就是 4~8 条 `rememberInfiniteTransition`，正是本类
+     * 开头说的"调用点数不变、实例数失控"盲区。容器级 provider 把它收敛成 1 条。
+     *
+     * 纯函数本身的边界断言在 `:feature:comment` 自己的
+     * `CommentSkeletonSlotPolicyTest`（本测试在 designsystem，模块依赖方向不允许反向引用）。
+     */
+    @Test
+    fun commentSkeletonSlotCountIsDerivedAndShimmerIsContainerScoped() {
+        val panelFile = mainSources
+            .firstOrNull { it.path.endsWith("comment${File.separator}CommentPanel.kt") }
+            ?: throw AssertionError("找不到 feature/comment 的 CommentPanel.kt —— 此时断言无意义。")
+        val panel = panelFile.readLines()
+
+        assertTrue(
+            "A14：首屏骨架槽位数必须由 resolveCommentSkeletonSlotCount(...) 推导，" +
+                "且 `INIT_SKELETON_COUNT` 这个写死常量不得回来（铺不够会让列表被撑长）。",
+            panel.any { it.contains("resolveCommentSkeletonSlotCount(viewportHeightDp)") } &&
+                panel.none { it.trimStart().startsWith("private const val INIT_SKELETON_COUNT") }
+        )
+
+        val providerAt = panel.indexOfFirst { it.trimStart().startsWith("ProvideSkeletonShimmer(enabled =") }
+        val lazyAt = panel.indexOfFirst { it.contains("LazyColumn(") }
+        assertTrue(
+            "A15：CommentPanel 必须有容器级 `ProvideSkeletonShimmer(enabled = …)`" +
+                "（把 N 个骨架槽位的无限动画收敛成 1 条共享时钟）。",
+            providerAt >= 0
+        )
+        assertTrue(
+            "A15：provider 必须在 LazyColumn **外层**（provider@$providerAt lazy@$lazyAt）" +
+                "—— 包在 item 体内等于每项各起一条无限动画。",
+            providerAt in 0 until lazyAt
+        )
+        assertTrue(
+            "A15：门控条件必须是「本屏此刻真的有骨架在场」（首屏骨架 or 翻页骨架），" +
+                "否则常驻列表会永挂一条无限动画（待机空转同样是缺陷）。" +
+                "⚠️ 必须覆盖**两种**骨架态：只门首屏的话，翻页那 2 条骨架仍是各起一条（未收敛）。",
+            panel.any { it.contains("ProvideSkeletonShimmer(enabled = hasSkeletonOnScreen)") } &&
+                panel.any { it.contains("val hasSkeletonOnScreen = isInitLoading || uiState.loadingMore") }
+        )
+    }
+
     /** 从 [start]（含）起按花括号配平找到闭合行（多行签名在 depth=0 时继续读）。 */
     private fun braceBalancedEnd(lines: List<String>, start: Int): Int {
         var depth = 0

@@ -26,15 +26,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.ImSessionItem
 import com.naaammme.bbspace.feature.im.component.ImSessionCard
 import kotlinx.coroutines.flow.distinctUntilChanged
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +52,11 @@ fun ImScreen(
             TopAppBar(
                 title = { Text("消息") },
                 actions = {
-                    IconButton(onClick = onOpenMsgFeed) {
+                    IconButton(
+                        onClick = onOpenMsgFeed,
+                        // 全局拖拽反馈（第 34 轮 T2）：消息页顶栏"通知评论"图标钮。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(Icons.Default.Notifications, contentDescription = "通知评论")
                     }
                 }
@@ -68,7 +73,7 @@ fun ImScreen(
             if (!state.isLoggedIn) {
                 StateMessageCard(
                     text = "请先登录后查看消息",
-                    modifier = Modifier.fillMaxSize().padding(16.dp)
+                    modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg)
                 )
                 return@BiliPullToRefreshBox
             }
@@ -95,7 +100,7 @@ fun ImScreen(
                         !state.errorMessage.isNullOrBlank() -> {
                             StateMessageCard(
                                 text = state.errorMessage.orEmpty(),
-                                modifier = Modifier.fillMaxSize().padding(16.dp),
+                                modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg),
                                 isError = true
                             )
                         }
@@ -103,7 +108,7 @@ fun ImScreen(
                         else -> {
                             StateMessageCard(
                                 text = "暂无消息",
-                                modifier = Modifier.fillMaxSize().padding(16.dp)
+                                modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg)
                             )
                         }
                     }
@@ -136,8 +141,11 @@ fun ImScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(
+                    horizontal = BiliSpacing.md,
+                    vertical = BiliSpacing.md
+                ),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
             ) {
                 item(key = "im_tabs") {
                     FilledTabRow(
@@ -166,7 +174,7 @@ fun ImScreen(
                     item(key = "im_error_footer") {
                         StateMessageCard(
                             text = state.errorMessage.orEmpty(),
-                            modifier = Modifier.padding(vertical = 8.dp),
+                            modifier = Modifier.padding(vertical = BiliSpacing.sm),
                             isError = true
                         )
                     }
@@ -180,7 +188,7 @@ fun ImScreen(
                     item(key = "im_load_more_error") {
                         StateMessageCard(
                             text = state.loadMoreError.orEmpty(),
-                            modifier = Modifier.padding(vertical = 8.dp),
+                            modifier = Modifier.padding(vertical = BiliSpacing.sm),
                             isError = true,
                             actionText = "重试",
                             onAction = vm::loadMore
@@ -199,7 +207,7 @@ private fun ImLoadingMore(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = BiliSpacing.sm),
         contentAlignment = Alignment.Center
     ) {
         CircularProgressIndicator()

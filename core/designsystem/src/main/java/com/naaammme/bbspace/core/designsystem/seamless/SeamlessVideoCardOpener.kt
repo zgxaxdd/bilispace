@@ -148,15 +148,26 @@ class SeamlessCardOpener(
      * 卡片大小区域的截取在实测中是毫秒级，用户只会看到按压反馈。
      *
      * @param onCaptured 截屏结果回调（主线程）。失败时传 null，调用方应走降级装饰。
+     * @param anchorState 锚点状态（可选）。传了就按**真实显示矩形**（含全局拖拽反馈的
+     *   `graphicsLayer` 缩放/平移）截图，而不是 `View.getLocationInWindow` 的布局矩形。
+     *   不传时行为与改动前完全一致。
+     *
+     *   ## 为什么截图也必须用显示矩形
+     *
+     *   这张位图会成为锚点的 `background`/`foreground`（框架"绘制 view 内容"时取的就是
+     *   它）。若按布局矩形截图，而屏幕上那张卡片此刻正被按压放大/拖偏，截到的就是
+     *   **卡片旁边的像素**——过渡画面里会出现半张封面 + 一条信息区错位的画面。
+     *   与 `BUNDLE_RECT` 是同一个根因，必须一起修，否则只是把错位从几何挪到了内容。
      */
-    fun captureCardBitmap(anchor: View, onCaptured: (Bitmap?) -> Unit) {
+    fun captureCardBitmap(
+        anchor: View,
+        /** 见上方参数注释。**必须放在 `onCaptured` 之前**：Kotlin 的尾随 lambda 只能
+         *  对应最后一个参数，若把它排在 onCaptured 之后，所有调用点都得放弃
+         *  `captureCardBitmap(view) { captured -> … }` 的写法。 */
+        anchorState: SeamlessAnchorState? = null,
+        onCaptured: (Bitmap?) -> Unit,
+    ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            onCaptured(null)
-            return
-        }
-        val w = anchor.width
-        val h = anchor.height
-        if (w <= 1 || h <= 1) {
             onCaptured(null)
             return
         }
@@ -165,16 +176,49 @@ class SeamlessCardOpener(
             onCaptured(null)
             return
         }
-        // 锚点在窗口中的位置：PixelCopy 的 srcRect 用的是**窗口坐标**
-        val loc = IntArray(2)
-        anchor.getLocationInWindow(loc)
-        val srcRect = Rect(loc[0], loc[1], loc[0] + w, loc[1] + h)
+        // 优先按真实显示矩形截（含形变）；拿不到再退回布局矩形。
+        // PixelCopy 的 srcRect 用**窗口坐标**，而 displayRectPx 给的是屏幕坐标，两者
+        // 相差一个窗口原点；这里用锚点自身两套 API 的差值反推该偏移。
+        val display = anchorState?.displayRectPx()
+        val locScreen = IntArray(2)
+        val locWindow = IntArray(2)
+        anchor.getLocationOnScreen(locScreen)
+        anchor.getLocationInWindow(locWindow)
+        val winDx = locScreen[0] - locWindow[0]
+        val winDy = locScreen[1] - locWindow[1]
+        val srcRect: Rect
+        val outW: Int
+        val outH: Int
+        if (display != null) {
+            srcRect = Rect(
+                display.left - winDx,
+                display.top - winDy,
+                display.right - winDx,
+                display.bottom - winDy
+            )
+            outW = display.width()
+            outH = display.height()
+        } else {
+            val w = anchor.width
+            val h = anchor.height
+            if (w <= 1 || h <= 1) {
+                onCaptured(null)
+                return
+            }
+            srcRect = Rect(locWindow[0], locWindow[1], locWindow[0] + w, locWindow[1] + h)
+            outW = w
+            outH = h
+        }
+        if (outW <= 1 || outH <= 1) {
+            onCaptured(null)
+            return
+        }
         // 必须用软件配置位图：系统返回阶段用软件画布快照，硬件位图会抛异常
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         runCatching {
             PixelCopy.request(window, srcRect, bitmap, { result ->
                 if (result == PixelCopy.SUCCESS) {
-                    DiagnosticLog.i(TAG, "PixelCopy captured ${w}x$h for anchor content")
+                    DiagnosticLog.i(TAG, "PixelCopy captured ${outW}x$outH for anchor content")
                     onCaptured(bitmap)
                 } else {
                     DiagnosticLog.w(TAG, "PixelCopy failed result=$result -> fallback decoration")
@@ -277,6 +321,28 @@ class SeamlessCardOpener(
          * 锚点是裸 `FrameLayout`，框架只能拿到我们喂进去的内容；封面位图与合成灰底
          * 都不含文字（见 [freezeCardBitmap] 注释）。
          */
+        /**
+         * 锚点状态（可选）。传了就优先用它算出的**真实显示矩形**（含全局拖拽反馈的
+         * `graphicsLayer` 缩放/平移）作为 `BUNDLE_RECT`，而不是 `View.getLocationInWindow`
+         * 返回的**布局矩形**。
+         *
+         * ## 为什么必须这么做（用户第 34 轮反馈「oppo 无缝动画出现 bug，尤其是排行界面的
+         * 动画」的机制性根因）
+         *
+         * 全局拖拽反馈的形变发生在 `Modifier.graphicsLayer`（**绘制期**）：像素被缩放
+         * 平移了，布局尺寸没变。于是"锚点现在长在哪"有两个答案，而 OPPO 框架只认 View
+         * 那一套 —— 它拿的是**未变形**矩形。用户按住卡片（卡片正被放大 2% 并被手指拖着
+         * 偏移若干像素）时点开视频，框架就按那个已经不存在的矩形起飞：
+         *
+         * - 打开时画面从**偏移/大小都不对**的矩形长出来（"动画错位"）；
+         * - 返回时又飞回那个旧矩形，卡片此刻若已复位则又是一次跳变。
+         *
+         * 排行页最明显：卡片在瀑布流里，点击前常带一次未走完的按压回弹。
+         *
+         * 修法是把真实显示矩形显式喂给框架（官方 `BUNDLE_RECT` 的语义就是「view 在
+         * 屏幕上显示的区域」，本就是为此存在），**而不是**为了动画去关掉拖拽反馈。
+         */
+        anchorState: SeamlessAnchorState? = null,
         cardBitmap: Bitmap? = null,
     ): Boolean {
         if (anchor == null || target == null) return false
@@ -361,7 +427,12 @@ class SeamlessCardOpener(
             listCoverBottomRatio = listCover?.second,
             // 取景矩形：调用方显式传入"封面区域"时用它，否则退回整个锚点矩形。
             // 卡片场景必须传封面区域，否则封面位图会被拉伸铺满整卡（见参数注释）。
-            contentRect = contentRect ?: anchor.screenRect(),
+            //
+            // 优先级：显式 contentRect > 真实显示矩形（含拖拽形变）> 布局矩形。
+            // 中间那一档是"OPPO 动画错位"的修法，理由见 anchorState 参数注释。
+            contentRect = contentRect
+                ?: anchorState?.displayRectPx()
+                ?: anchor.screenRect(),
             // 卡片都在列表里：返回时 view 位置相较打开时几乎必然变化，按官方文档
             // 改为 alpha 淡出（无回弹），避免 leash 回弹到已滚走的旧位置
             alphaOutOnPositionChange = true,
@@ -379,16 +450,16 @@ class SeamlessCardOpener(
             return false
         }
         DiagnosticLog.i(TAG, "registerOpenTransition ok, seamless open pending")
-        // 诊断：锚点矩形。锚点铺满整卡后比例应接近 1:1（封面 4:3 + 简介区），
-        // 若仍是 0.75 左右说明锚点又退回只覆盖封面，"简介没被带上"会复现。
+        // 诊断：锚点矩形。优先打**真实显示矩形**（含拖拽形变），再打布局矩形，
+        // 两者不一致正是"按住卡片点开时动画错位"的直接证据。
         if (Logger.isDebug) {
-            anchor.screenRect()?.let { r ->
-                DiagnosticLog.d(
-                    TAG,
-                    "anchor rect=${r.width()}x${r.height()} " +
-                        "ratio=${"%.2f".format(r.height().toFloat() / r.width())}"
-                )
-            }
+            val display = anchorState?.displayRectPx()
+            val layout = anchor.screenRect()
+            DiagnosticLog.d(
+                TAG,
+                "anchor rect display=${display?.let { "${it.width()}x${it.height()}" } ?: "null"} " +
+                    "layout=${layout?.let { "${it.width()}x${it.height()}" } ?: "null"}"
+            )
         }
         SeamlessTransitionState.resetClosing()
         SeamlessTransitionState.beginOpen()

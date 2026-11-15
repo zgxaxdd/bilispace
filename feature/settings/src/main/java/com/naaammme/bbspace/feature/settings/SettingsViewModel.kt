@@ -14,6 +14,11 @@ import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedColorSpec
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedContrastLevel
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedPaletteStyle
+import com.naaammme.bbspace.core.model.PlayerSettingsState
+import com.naaammme.bbspace.core.model.player.CdnRegionPolicy
 import com.naaammme.bbspace.core.sponsorblock.SbCategory
 import com.naaammme.bbspace.core.sponsorblock.SbSkipType
 import com.naaammme.bbspace.core.sponsorblock.SponsorBlockClient
@@ -224,6 +229,38 @@ class SettingsViewModel @Inject constructor(
         false
     )
 
+    // ===== CDN 智能选线（实验，W4 数据链路的 UI 入口）=====
+    /**
+     * 播放偏好快照：CDN 插件四项（属地优选/目标 host/自定义规则/严格模式）都从这里读。
+     *
+     * 不再拆四条独立 Flow：这四项在设置页**同屏编辑**，四条 Flow = 四个状态源，
+     * 开关与文本写入后的回显会各自晚一帧、互相打架。单一快照的初值取
+     * [PlayerSettingsState] 的出厂默认（全部关闭/为空），与 `AppSettings.state`
+     * 的默认值一致，首帧不会出现"先亮一下再关掉"的开关滑动。
+     */
+    val playerSettings = appSettings.state.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        PlayerSettingsState()
+    )
+
+    fun updateCdnRegionEnabled(enabled: Boolean) {
+        viewModelScope.launch { appSettings.setCdnRegionEnabled(enabled) }
+    }
+
+    /** 严格只用自定义线路：见 `PlayerPlaybackPrefs.cdnStrictCustomCdn`。 */
+    fun updateCdnStrictCustomCdn(enabled: Boolean) {
+        viewModelScope.launch { appSettings.setCdnStrictCustomCdn(enabled) }
+    }
+
+    fun updateCdnRegionHosts(hosts: List<String>) {
+        viewModelScope.launch { appSettings.setCdnRegionHosts(hosts) }
+    }
+
+    fun updateCdnCustomRules(rules: List<CdnRegionPolicy.CustomRule>) {
+        viewModelScope.launch { appSettings.setCdnCustomRules(rules) }
+    }
+
     val useSystemDns = appSettings.useSystemDns.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
@@ -320,6 +357,38 @@ class SettingsViewModel @Inject constructor(
     fun updatePaletteStyle(style: PaletteStyle) {
         viewModelScope.launch {
             appSettings.updatePaletteStyle(style)
+        }
+    }
+
+    // ── 种子配色三维度（22 风格 / 色彩标准 / 对比度）──────────────────────────
+    fun updateSeedPaletteStyle(style: SeedPaletteStyle) {
+        viewModelScope.launch {
+            appSettings.updateSeedPaletteStyle(style)
+        }
+    }
+
+    fun updateSeedColorSpec(spec: SeedColorSpec) {
+        viewModelScope.launch {
+            appSettings.updateSeedColorSpec(spec)
+        }
+    }
+
+    fun updateSeedContrastLevel(level: SeedContrastLevel) {
+        viewModelScope.launch {
+            appSettings.updateSeedContrastLevel(level)
+        }
+    }
+
+    /**
+     * 全局拖拽反馈开关（上游 BiliPai 同名功能）。
+     *
+     * 关掉后按钮/胶囊**仍会鼓起**，只是不再跟随手指沿受力方向拉伸 ——
+     * 形变由 `press` 与 `position` 两个独立分量驱动，本开关只门控后者
+     * （见 `core:designsystem` 的 `motion/AppElasticPress.kt`）。
+     */
+    fun updateGlobalDragFeedback(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.updateGlobalDragFeedback(enabled)
         }
     }
 

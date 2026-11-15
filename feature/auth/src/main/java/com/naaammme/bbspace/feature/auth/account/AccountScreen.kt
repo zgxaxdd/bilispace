@@ -37,18 +37,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.IOSAlertDialog
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.model.LoginCredential
 import com.naaammme.bbspace.core.model.User
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixActionTone
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixButton
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +71,7 @@ fun AccountScreen(
             TopAppBar(
                 title = { Text("账号管理") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -81,7 +84,7 @@ fun AccountScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp)
+                .padding(BiliSpacing.lg)
         ) {
             accounts.forEach { account ->
                     AccountCard(
@@ -92,7 +95,7 @@ fun AccountScreen(
                         onRemove = { pendingRemoveAccount = account },
                         onLogout = { pendingRemoveAccount = account }
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(BiliSpacing.sm))
                 }
 
                 GuestCard(
@@ -100,14 +103,14 @@ fun AccountScreen(
                     onSwitch = { viewModel.switchToGuest(); onSwitched() }
                 )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.lg))
 
             Button(
                 onClick = onAddAccount,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().appElasticPress()
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(BiliSpacing.sm))
                 Text("添加账号")
             }
         }
@@ -151,12 +154,19 @@ fun AccountScreen(
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = confirm) {
-                        Text("确认")
-                    }
+                    // 2026-10-18（W9）：破坏性确认走 `AppMiuixActionTone.Danger`。
+                    // 依据不是"想用一下 Danger"：同一弹窗的 **iOS 分支上方就写着 `destructive = true`**
+                    // （本仓对"退出/删除账号"的既有定性就是破坏性），而 Material 分支此前是普通
+                    // `TextButton` —— 两档语义不一致。这里只换渲染层，`onClick = confirm` 与
+                    // 二次确认流程逐字未动。
+                    AppMiuixButton(
+                        text = "确认",
+                        onClick = confirm,
+                        tone = AppMiuixActionTone.Danger
+                    )
                 },
                 dismissButton = {
-                    TextButton(onClick = cancel) {
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = cancel) {
                         Text("取消")
                     }
                 }
@@ -181,7 +191,7 @@ private fun GuestCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(BiliSpacing.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AvatarImage(
@@ -197,12 +207,11 @@ private fun GuestCard(
                     )
                 }
             )
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(BiliSpacing.md))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "游客",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
+                    style = MaterialTheme.typography.bodyLarge
                 )
                 if (isCurrent) {
                     Icon(
@@ -216,7 +225,7 @@ private fun GuestCard(
             if (!isCurrent) {
                 OutlinedButton(
                     onClick = onSwitch,
-                    modifier = Modifier.padding(end = 4.dp)
+                    modifier = Modifier.padding(end = BiliSpacing.xs).appElasticPress()
                 ) {
                     Text("切换", style = MaterialTheme.typography.labelSmall)
                 }
@@ -270,7 +279,7 @@ private fun AccountCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(BiliSpacing.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 头像
@@ -288,17 +297,16 @@ private fun AccountCard(
                 }
             )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(BiliSpacing.md))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
                 ) {
                     Text(
                         text = userInfo?.name ?: "UID: ${account.mid}",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -339,13 +347,13 @@ private fun AccountCard(
             if (!isCurrent) {
                 OutlinedButton(
                     onClick = onSwitch,
-                    modifier = Modifier.padding(end = 4.dp)
+                    modifier = Modifier.padding(end = BiliSpacing.xs).appElasticPress()
                 ) {
                     Text("切换", style = MaterialTheme.typography.labelSmall)
                 }
             }
 
-            IconButton(onClick = if (isCurrent) onLogout else onRemove) {
+            IconButton(modifier = Modifier.appElasticPress(), onClick = if (isCurrent) onLogout else onRemove) {
                 Icon(
                     Icons.Default.Delete,
                     contentDescription = if (isCurrent) "退出登录" else "移除",

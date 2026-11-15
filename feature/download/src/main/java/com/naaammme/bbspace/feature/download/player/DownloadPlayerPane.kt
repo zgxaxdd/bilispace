@@ -45,11 +45,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.core.designsystem.component.DanmakuSettingsSection
 import com.naaammme.bbspace.infra.player.PlayerViewTargetBinder
@@ -59,6 +62,7 @@ import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.PlayerSettingsState
 import kotlinx.coroutines.delay
 import java.util.Locale
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 private val downloadSpeedOptions = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
 
@@ -166,18 +170,18 @@ internal fun DownloadPlayerPane(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(BiliSpacing.md),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBackClick) {
+                IconButton(modifier = Modifier.appElasticPress(), onClick = onBackClick) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
                         tint = Color.White
                     )
                 }
-                IconButton(
+                IconButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         showControls = true
                         showSettingsSheet = true
@@ -225,7 +229,7 @@ internal fun DownloadPlayerPane(
                 },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs)
             )
         }
     }
@@ -302,15 +306,15 @@ private fun DownloadPlayerControls(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp)
+                    .padding(horizontal = BiliSpacing.xsPlus)
                     .heightIn(min = 24.dp)
             )
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(horizontal = BiliSpacing.xsPlus),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 DownloadControlButton(
@@ -353,9 +357,13 @@ private fun DownloadControlButton(
     Box(
         modifier = modifier
             .heightIn(min = 28.dp)
-            .background(Color.White.copy(alpha = 0.14f), MaterialTheme.shapes.small)
+            .background(Color.White.copy(alpha = 0.14f), DownloadControlChipShape)
+            // 全局拖拽反馈：下载播放器控制条的胶囊钮（播放/弹幕/倍速/全屏四个共用本函数）。
+            // `highlightShape` 传 `DownloadControlChipShape`：胶囊底是圆端，
+            // 默认 50% 圆角在 28dp 高的扁条上会把光斑裁成椭圆。
+            .appElasticPress(highlightShape = DownloadControlChipShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+            .padding(horizontal = BiliSpacing.xsPlus, vertical = BiliSpacing.xs),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -384,7 +392,7 @@ private fun DownloadSpeedDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSelect(speed) }
-                            .padding(12.dp),
+                            .padding(BiliSpacing.md),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -404,7 +412,7 @@ private fun DownloadSpeedDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onDismiss) {
                 Text("关闭")
             }
         }
@@ -435,8 +443,8 @@ private fun DownloadPlayerSettingsSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             DownloadSwitchCard(
                 title = "后台播放",
@@ -463,13 +471,13 @@ private fun DownloadSwitchCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(BiliSpacing.lg),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
             ) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -510,3 +518,6 @@ internal fun formatDownloadSpeed(value: Float): String {
     }
     return "${formatted}x"
 }
+
+/** 控制件小 chip 圆角：badge token（8dp），不再取随 CornerStyle 漂移的 shapes.small。 */
+private val DownloadControlChipShape = RoundedCornerShape(BiliRadius.badge)

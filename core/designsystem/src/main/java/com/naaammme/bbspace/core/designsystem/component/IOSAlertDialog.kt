@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.BiliColorRoles
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
@@ -185,6 +186,15 @@ private fun AlertButton(
     Box(
         modifier = modifier
             .height(44.dp)
+            // ## 全局拖拽反馈（2026-10-18 第十九轮，**原语层**接入）
+            //
+            // 接在 `AlertButton` 上：警告框的**每一个动作项**（单确认 / 取消+确认
+            // 两按钮）都经由本函数渲染，一处覆盖全部。位置在 `clickable` 之前，
+            // 形变作用于整块 44dp 命中区而不是只让文字缩放。
+            //
+            // 高度 44dp 同时被 `IOSComponentStructureTest.alertSpec` 钉住
+            //（`height(44.dp)`），本改动不动该值 —— 与 task-9 C 的"行内控件等高"一致。
+            .appElasticPress()
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {

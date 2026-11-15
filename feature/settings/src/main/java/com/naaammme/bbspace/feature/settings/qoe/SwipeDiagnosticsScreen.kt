@@ -39,6 +39,8 @@ import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeEventType
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeHub
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeMath
 import com.naaammme.bbspace.core.swipe.qoe.SwipeQoeSnapshot
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 /**
  * 「刷视频诊断」页（任务书 §4.8 / SW-06）：本机 QoE 指标的只读出口。
@@ -63,12 +65,12 @@ fun SwipeDiagnosticsScreen(
             TopAppBar(
                 title = { Text("刷视频诊断") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = {
                         val clipboard =
                             context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(
@@ -78,7 +80,7 @@ fun SwipeDiagnosticsScreen(
                     }) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "导出文本")
                     }
-                    IconButton(onClick = { SwipeQoeHub.clear() }) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = { SwipeQoeHub.clear() }) {
                         Icon(Icons.Default.Delete, contentDescription = "清空诊断数据")
                     }
                 },

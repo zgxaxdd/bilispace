@@ -34,6 +34,10 @@ import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoGridCardSkeleton
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.article.ArticleRecommendItem
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 fun HomeArticlePage(
@@ -59,10 +63,10 @@ fun HomeArticlePage(
         errorMessage = state.errorMessage,
         loadMoreEnabled = isActive,
         contentPadding = PaddingValues(
-            start = 4.dp,
+            start = BiliSpacing.xs,
             top = topContentPadding,
-            end = 4.dp,
-            bottom = 4.dp
+            end = BiliSpacing.xs,
+            bottom = BiliSpacing.xs
         ),
         key = { _, item -> item.id },
         loadingContent = {
@@ -94,7 +98,8 @@ private fun ArticleRecommendCard(
 ) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth()
+        // 全局拖拽反馈（第 34 轮 T2）：整卡可点，按压/跟手形变。
+        modifier = Modifier.fillMaxWidth().appElasticPress()
     ) {
         Column {
             CoverImage(
@@ -106,8 +111,8 @@ private fun ArticleRecommendCard(
                     .aspectRatio(16f / 10f)
             )
             Column(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
             ) {
                 val statLine = remember(
                     item.viewCount,
@@ -150,7 +155,7 @@ private fun ArticleRecommendCard(
                             Spacer(modifier = Modifier.weight(1f))
                         }
                         item.categoryName?.let { category ->
-                            Spacer(modifier = Modifier.size(6.dp))
+                            Spacer(modifier = Modifier.size(BiliSpacing.xsPlus))
                             Text(
                                 text = category,
                                 style = MaterialTheme.typography.labelSmall,
@@ -158,9 +163,9 @@ private fun ArticleRecommendCard(
                                 modifier = Modifier
                                     .background(
                                         color = MaterialTheme.colorScheme.secondaryContainer,
-                                        shape = MaterialTheme.shapes.extraSmall
+                                        shape = ArticleBadgeShape
                                     )
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -195,7 +200,7 @@ private fun ArticleAuthorRow(
             modifier = Modifier.size(20.dp),
             fallbackText = item.authorName?.take(1)
         )
-        Spacer(modifier = Modifier.size(6.dp))
+        Spacer(modifier = Modifier.size(BiliSpacing.xsPlus))
         Box(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.authorName ?: "专栏作者",
@@ -206,12 +211,17 @@ private fun ArticleAuthorRow(
                 modifier = if (route == null) {
                     Modifier
                 } else {
-                    Modifier.clickable { onOpenSpace(route) }
+                    // 全局拖拽反馈（第 34 轮 T2）：**UP 主名文字**是卡片内的独立小件
+                    // （点进空间）。卡片容器本身不在这里挂（原语 + 无缝锚点的铁律），
+                    // 这一处是文字叶子的 clickable，安全。
+                    Modifier
+                        .appElasticPress()
+                        .clickable { onOpenSpace(route) }
                 }
             )
         }
         item.publishTimeText?.let { time ->
-            Spacer(modifier = Modifier.size(6.dp))
+            Spacer(modifier = Modifier.size(BiliSpacing.xsPlus))
             Text(
                 text = time,
                 style = MaterialTheme.typography.labelSmall,
@@ -229,3 +239,7 @@ private fun buildStatLine(item: ArticleRecommendItem): String? {
         if (item.replyCount > 0) add("${item.replyCount} 评论")
     }.takeIf { it.isNotEmpty() }?.joinToString("  ")
 }
+
+// 角标圆角单一来源（此前 `MaterialTheme.shapes.extraSmall` 随 CornerStyle 漂移）：
+// 提成文件级常量，避免在调用点内联 `RoundedCornerShape(...)`（形状分配棘轮）。
+private val ArticleBadgeShape = RoundedCornerShape(BiliRadius.badge)

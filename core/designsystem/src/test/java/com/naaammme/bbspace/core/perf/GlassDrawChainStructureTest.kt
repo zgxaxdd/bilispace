@@ -58,7 +58,11 @@ class GlassDrawChainStructureTest {
             // 2026-09-29：playerControlGlass 改 internal（会话覆盖层重构中曾短暂暴露给
             // pager，现已收回 pane；可见性放宽本身不改变 remember 契约，守卫跟着改签名）。
             "player${File.separator}VideoPlayerPane.kt" to "internal fun Modifier.playerControlGlass(",
-            "video${File.separator}HomeVideoPage.kt" to "private fun Modifier.glassBadgeSurface(",
+            // 2026-10-18（W11 Alt-1）：`HomeVideoPage.glassBadgeSurface` **已删除** ——
+            // 每卡角标玻璃是首页滚动路径上最大的一块非必要开销（默认单列 ≈2.3 Mpx/帧录制），
+            // 按用户"减少模糊使用面积"的诉求收口到非玻璃分支（黑 62% + 白字）。
+            // 这里**移除目标而不是放宽断言**：链已经不存在，没有"是否 remember"可验。
+            // 想加回来时它会重新需要被 remember，届时把这一行加回 targets 即可。
             "glass${File.separator}LiquidBackdrop.kt" to "fun Modifier.liquidGlassSurface("
         )
         for ((suffix, signature) in targets) {
@@ -146,6 +150,56 @@ class GlassDrawChainStructureTest {
         assertTrue(
             "Brush 必须在缓存块内构造（应早于 onDrawWithContent）：brush@$brushAt draw@$drawAt",
             brushAt in 0 until drawAt
+        )
+    }
+
+    /**
+     * B8-d：`hazeBlur(` 那一处（FROSTED 路径）的 `style` / `performanceMode` 必须由
+     * `remember` 派生，且早于 `hazeBlur(`。
+     *
+     * 前三处 `drawBackdrop(` 由 [glassModifierChainsAreRemembered] 钉住（整条链一个
+     * remember），但 haze 这一处**形状不同**：`hazeBlur` 的入参里
+     * `HazeInput.Sources(state)` 必须保持新鲜（采样源会换），所以不能把整条链 remember
+     * 掉 —— 可复用的只有 `style`（渲染参数载体）与 `performanceMode`（采样档位）。
+     * 这两样不在 remember 里，就等于每次重组新建对象；上游 B8-d 修的是同一类问题
+     * （`BlurEffect` / `RoundedCornerShape` 按量化半径复用），本仓的等价物就是这两个
+     * remember。
+     *
+     * 判据同样按**顺序**：remember 派生必须早于 `hazeBlur(`。
+     */
+    @Test
+    fun hazeBlurStyleAndPerformanceModeAreRemembered() {
+        val body = blockBody(
+            sourceOf("glass${File.separator}GlassEffect.kt"),
+            "fun Modifier.glassEffect("
+        )
+        val hazeAt = body.indexOfFirst { it.contains("hazeBlur(") }
+        assertTrue(
+            "glassEffect 里找不到 hazeBlur( —— 改名/删除了？那本断言无意义，请改锚点。",
+            hazeAt >= 0
+        )
+        val styleRememberAt = body.indexOfFirst { it.contains("val style = remember(") }
+        val perfRememberAt = body.indexOfFirst { it.contains("val performanceMode = remember(") }
+        assertTrue(
+            "style 必须由 remember 派生且早于 hazeBlur(（style@$styleRememberAt haze@$hazeAt）—— " +
+                "haze 的 Style 是渲染参数载体，每次重组新建就等于每帧重建渲染决策。",
+            styleRememberAt in 0 until hazeAt
+        )
+        assertTrue(
+            "performanceMode 必须由 remember 派生且早于 hazeBlur(" +
+                "（perf@$perfRememberAt haze@$hazeAt）—— 滚动/转场降档靠它，新建对象会让降档失效。",
+            perfRememberAt in 0 until hazeAt
+        )
+        // 反假绿：确认 remember 块里真的在算东西，不是 remember { 某个常量 } 的空壳
+        val styleWindow = body.subList(styleRememberAt, hazeAt)
+        assertTrue(
+            "style 的 remember 块里必须调 styleFor(...)（否则可能是 remember 住一个常量，白记一场）。",
+            styleWindow.any { it.contains("styleFor(") }
+        )
+        assertTrue(
+            "performanceMode 的 remember 块必须读 budget.allowRealtime —— " +
+                "否则「滚动/转场期间降档」这条逻辑被绕过，守卫就成了假绿。",
+            styleWindow.any { it.contains("budget.allowRealtime") }
         )
     }
 

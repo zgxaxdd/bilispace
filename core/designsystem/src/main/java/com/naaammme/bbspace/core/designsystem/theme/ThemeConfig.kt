@@ -2,6 +2,9 @@ package com.naaammme.bbspace.core.designsystem.theme
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedColorSpec
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedContrastLevel
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedPaletteStyle
 
 @Immutable
 data class ThemeConfig(
@@ -37,7 +40,33 @@ data class ThemeConfig(
     val glassMaterial: com.naaammme.bbspace.core.designsystem.glass.GlassMaterial =
         com.naaammme.bbspace.core.designsystem.glass.GlassMaterial.FROSTED,
     // 液态玻璃统一强度倍率（0.5–2.0）：缩放全部玻璃表面的模糊与折射
-    val glassStrength: Float = 1f
+    val glassStrength: Float = 1f,
+    // ── 种子配色维度（上游 22 风格 HCT 体系；默认值 = 现状）──────────────────
+    //
+    // 三个字段默认都落在"沿用既有管线"的一档：Standard / SPEC_2021 / Default。
+    // `createSeedColorScheme(...)` 的旧实现仍是 Standard 的产出（工厂对 Standard 返回
+    // null，由 `Theme.kt` 回落旧实现），所以**默认观感逐值不变**。
+    // 仅当用户显式选了非 Standard 风格时，才由 SeedColorSchemeFactory 用 HCT 产出
+    // （并跳过 applyPaletteStyle 这一层后处理，避免二次调色）。
+    /** 种子风格（22 档，见 SeedPaletteStyle）；Standard = 沿用既有手写配色管线。 */
+    val seedPaletteStyle: SeedPaletteStyle = SeedPaletteStyle.Standard,
+    /** 色彩标准（2021 / 2025）；2025 只对 4 个 dynamic 风格生效，其余回落 2021。 */
+    val seedColorSpec: SeedColorSpec = SeedColorSpec.SPEC_2021,
+    /** 对比度档（Reduced / Default / Medium / High），映射到 MCU 的 contrastLevel。 */
+    val seedContrastLevel: SeedContrastLevel = SeedContrastLevel.Default,
+    /**
+     * **全局拖拽反馈**（上游 BiliPai 同名功能，2026-10-17 新增）。
+     *
+     * 上游设置项文案逐字为：「统一控制按钮与胶囊的拖动形变，关闭后保留按压反馈」。
+     * 语义拆开就是本字段的两个消费面：
+     * - **开**：按下时按钮/胶囊鼓起，且跟随手指位移**沿受力方向**拉伸 + 跟手平移；
+     * - **关**：**仍会鼓起**（按压反馈不受影响），只是不再跟随手指拉伸 ——
+     *   因为形变由 `press` 与 `position` 两个独立分量驱动，本字段只门控后者
+     *   （见 `motion/AppElasticPress.kt` 的 `effectiveDragEnabled`）。
+     *
+     * 默认 **true**：与上游一致，也是用户第一次装上就该看到的手感。
+     */
+    val globalDragFeedbackEnabled: Boolean = true
 )
 
 const val DEFAULT_PULL_REFRESH_DISTANCE_DP = 80f
@@ -95,6 +124,13 @@ enum class FrameRateMode(val value: Float) {
     RATE_144(144f)
 }
 
+/**
+ * 持久化主题色的**下标索引**（20 项，含哔哩粉/哔哩蓝与黑色；名称是短名）。
+ *
+ * ⚠️ 顺序即已保存主题的下标契约，**不要重排**。它与
+ * `theme/scheme/SeedPresetColors`（19 项种子预设）内容不同、契约不同，**不合并**：
+ * 去重结论与差异对照见 `docs/2026-10-18-B组-未接线符号接线步骤.md` §4。
+ */
 val PresetColors = listOf(
     Color(0xFFFB7299) to "哔哩粉",
     Color(0xFF00A1D6) to "哔哩蓝",

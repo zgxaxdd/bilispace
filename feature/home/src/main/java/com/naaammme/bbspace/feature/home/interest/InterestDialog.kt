@@ -26,11 +26,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import androidx.compose.ui.graphics.Color
 import com.naaammme.bbspace.core.model.InterestChoose
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -83,47 +84,51 @@ fun InterestDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = BiliSpacing.lg)
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
             Text(data.title, style = MaterialTheme.typography.titleLarge)
             Text(data.subTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(BiliSpacing.lg))
 
             if (data.genders.isNotEmpty()) {
                 Text(data.genderTitle, style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(BiliSpacing.sm))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                     data.genders.forEach { g ->
                         FilterChip(
                             selected = selectedGenderId == g.id,
                             onClick = { selectedGenderId = if (selectedGenderId == g.id) null else g.id },
+                            // 全局拖拽反馈（第 34 轮 T2）：兴趣选择弹层里的性别/年龄芯片。
+                            // `FilterChip` 自身仅颜色态、无形变 ⇒ 挂外层不双抖。
+                            modifier = Modifier.appElasticPress(),
                             label = { Text(g.title) }
                         )
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(BiliSpacing.lg))
             }
 
             if (data.ages.isNotEmpty()) {
                 Text(data.ageTitle, style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(BiliSpacing.sm))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                     data.ages.forEach { a ->
                         FilterChip(
                             selected = selectedAgeId == a.id,
                             onClick = { selectedAgeId = if (selectedAgeId == a.id) null else a.id },
+                            modifier = Modifier.appElasticPress(),
                             label = { Text(a.title) }
                         )
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(BiliSpacing.lg))
             }
 
             Text("你想看什么", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             data.items.forEach { item ->
-                Text(item.name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(vertical = 4.dp))
+                Text(item.name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(vertical = BiliSpacing.xs))
                 if (item.subItems.isEmpty()) {
                     val key = "${item.id}"
                     FilterChip(
@@ -131,10 +136,11 @@ fun InterestDialog(
                         onClick = {
                             selected.value = if (key in selected.value) selected.value - key else selected.value + key
                         },
+                        modifier = Modifier.appElasticPress(),
                         label = { Text(item.name) }
                     )
                 } else {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                         item.subItems.forEach { sub ->
                             val key = "${item.id}.${sub.id}"
                             FilterChip(
@@ -142,23 +148,27 @@ fun InterestDialog(
                                 onClick = {
                                     selected.value = if (key in selected.value) selected.value - key else selected.value + key
                                 },
+                                modifier = Modifier.appElasticPress(),
                                 label = { Text(sub.name) }
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(BiliSpacing.sm))
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(BiliSpacing.lg))
             Button(
                 onClick = { onConfirm(data.uniqueId, buildInterestResult(), interestPosIds) },
                 enabled = canConfirm,
-                modifier = Modifier.fillMaxWidth()
+                // 全局拖拽反馈 + `enabled` 透传（未选够时按钮禁用，形变同步关掉）。
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .appElasticPress(enabled = canConfirm)
             ) {
                 Text(data.confirmText.ifEmpty { "确认" })
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
         }
     }
 }

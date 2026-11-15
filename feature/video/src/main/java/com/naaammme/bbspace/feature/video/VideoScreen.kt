@@ -92,6 +92,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.media3.common.util.UnstableApi
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.BiliImageVariant
@@ -99,6 +100,7 @@ import com.naaammme.bbspace.core.designsystem.component.VideoDetailInfoSkeleton
 import com.naaammme.bbspace.core.designsystem.component.topSolidProgressiveFade
 import com.naaammme.bbspace.core.designsystem.color.VideoCardCoverColorStore
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
+import com.naaammme.bbspace.core.designsystem.theme.BiliDetailLayout
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
@@ -113,6 +115,7 @@ import com.naaammme.bbspace.core.model.VideoDownloadOption
 import com.naaammme.bbspace.core.model.VideoDownloadOptions
 import com.naaammme.bbspace.core.model.VideoDownloadRequest
 import com.naaammme.bbspace.feature.video.detail.VideoDetailPage
+import com.naaammme.bbspace.feature.video.player.PlaybackPageMode
 import com.naaammme.bbspace.feature.video.player.PortraitSwipePager
 import com.naaammme.bbspace.feature.video.player.VideoPlayerPane
 import kotlinx.coroutines.delay
@@ -192,6 +195,25 @@ fun VideoScreen(
 ) {
     val videoState by viewModel.videoState.collectAsStateWithLifecycle()
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle(initialValue = PlayerSettingsState())
+
+    // ── 页面所有权（#892 / 上游 40690bd19，B 级适配；差异表见 PlaybackPageOwnership）──
+    // 1) 页面组合期间持有"这台播放器"的引用，销毁即释放。本仓播放器是进程级单例、
+    //    页面没有释放权，所以这里是**引用登记**而不是释放授权：它只回答
+    //    "这一页还活着吗"，用来挡住已销毁页面的迟到协程。
+    // 2) 页内导航栈为空而会话在播（无缝预热打开 / 从胶囊展开覆盖层）时，认领会话
+    //    身份为页身份 —— 否则从相关推荐返回时父视频不在栈里，`popPage()` 只能关页；
+    //    全屏上下滑也会因空栈 early-return（用户症状："卡死 / 串播"）。
+    val activePlayer by viewModel.player.collectAsStateWithLifecycle()
+    DisposableEffect(activePlayer) {
+        val retained = activePlayer
+        if (retained != null) viewModel.retainPlaybackPage(retained)
+        onDispose {
+            if (retained != null) viewModel.releasePlaybackPage(retained)
+        }
+    }
+    LaunchedEffect(activePlayer, videoState.ids, videoState.biz) {
+        viewModel.adoptPlaybackSessionPage()
+    }
     val act = LocalActivity.current
     val context = LocalContext.current
     // 播放器容器在窗口坐标系中的矩形与收尾圆角（垫底形变终点），三个布局分支各自上报
@@ -216,11 +238,32 @@ fun VideoScreen(
     val isLandscapeWindow =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val themeUsesDarkSystemBarIcons = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    var isFull by rememberSaveable { mutableStateOf(storyMode) }
+    // ── 页面模式：**单一真源**（2026-10-19 第 34 轮重构）────────────────────────
+    //
+    // 重构前这里是 5 个互相推导的可变布尔：
+    //   `isFull`(239) / `swipeSessionActive`(372) / `swipeModeRequested`(376) /
+    //   `swipeLandscape`(463) / `storyMode`(184)，
+    // 再由它们派生出 `fullOn` / `effectiveStoryMode` / `portraitSwipeActive` / `pagerActive`。
+    // 问题是**合成态不可约束**：`isFull=true & swipeSessionActive=false` 的那一拍会让
+    // pager 分支塌回单视频播放页（用户看到的"画面忽然跳回去"）。
+    //
+    // 现在整件事是一个 sealed 状态 [PlaybackPageMode]，所有派生量都是它的**只读属性**；
+    // 页面只能通过它的迁移函数改状态（`enterFullscreen` / `requestSwipeSession` /
+    // `resolveSwipeSession` / `exitFullscreen` / `toggleLandscape` / `onVideoChanged`）。
+    // 迁移语义与四条路径的单测见 `PlaybackPageModeTest`。
+    var pageMode by rememberSaveable(stateSaver = PlaybackPageMode.Saver) {
+        mutableStateOf(PlaybackPageMode.initial(storyMode))
+    }
     var downloadSheetOn by rememberSaveable { mutableStateOf(false) }
-    val fullOn = hostExpanded && isFull
-    // 刷视频模式是常驻全屏（isFull 初始即 true），swipe 会话也常驻
-    val effectiveStoryMode = storyMode && hostExpanded
+    val fullOn = hostExpanded && pageMode.isFull
+    // 刷视频模式是常驻全屏（Story 态恒真），swipe 会话也常驻
+    val effectiveStoryMode = pageMode.isStory && hostExpanded
+    // 供页面内各处读的派生量：**一律从这里取**，不再各自推导。
+    // （第 35 轮核对删掉了一行零读者的 `val isFull = pageMode.isFull` —— 页面读的是
+    //  `fullOn` 或 `pageMode.isFull`；留着它会让后来者以为 isFull 是页面自维护的量。）
+    val swipeSessionActive = pageMode.swipeSessionActive
+    val swipeModeRequested = pageMode.swipeModeRequested
+    val swipeLandscape = pageMode.landscapeForced
     // Activity 无缝路径：详情本体**立即组合**（打开动画期间被纯背景色遮罩盖住，
     // 首帧组合在动画内完成），动画结束（或 1.2s 超时兜底）后遮罩直接淡出——
     // 简介与详情随视频画面同步出现，不再有「动画结束→组合→再淡入」的串行等待。
@@ -299,11 +342,13 @@ fun VideoScreen(
     val enterFullscreen: () -> Unit = {
         scope.launch {
             fullscreenMorph.animateTo(1f, morphSpec)
-            isFull = true
+            // 状态迁移走 sealed 状态（「全屏」钮路径**不**带刷视频请求，R3）
+            pageMode = pageMode.enterFullscreen()
         }
     }
     val exitFullscreen: () -> Unit = {
-        isFull = false
+        // 迁移：详情全屏 / story → Compact（story 退出后露出当前这支的详情页）
+        pageMode = pageMode.exitFullscreen()
         scope.launch {
             if (isExpandedWidthState.value) {
                 fullscreenMorph.snapTo(0f)
@@ -322,17 +367,54 @@ fun VideoScreen(
         { target: VideoTarget -> viewModel.switchEpisode(target) }
     }
     val downloadClick = remember { { downloadSheetOn = true } }
-    val handleBack = {
-        when {
-            // 刷视频模式没有紧凑态：返回 = 关闭页面（finishWithHostState，
-            // 系统按成对返回动画收起）
-            effectiveStoryMode -> onBack()
-            fullOn -> exitFullscreen()
-            else -> if (!viewModel.popPage()) {
-                onBack()
+    // ── 「主出口」：全屏钮 / 还原钮 / story 退出**同一个出口**（第 34 轮收敛）──────
+    //
+    // 重构前这个动作在 pager 分支与 pane 分支**各写一遍** if 链，同时承担
+    // 「退出全屏 / 退出 story / 退出 swipe」三种语义（用户："完全无法正常使用"的
+    // 主要命中点之一：点全屏却退了页面、或点还原没反应）。
+    // 现在语义由 [PlaybackPageMode] 决定：
+    // - Story  → 退出 story 模式，露出**当前这支**的详情页（需求 3；无宿主出口时退化关页）
+    // - DetailFullscreen → 形变回缩到详情页
+    // - Compact → 无动作（本不该被调用）
+    //
+    // 2026-10-19（第 35 轮核对）**修掉一个真缺陷**：Story 分支原先只调 `onExitStoryMode()`
+    // （宿主把 `storyMode` 置回 false），**没有迁移 pageMode**。而 `pageMode` 的初值是
+    // `rememberSaveable { mutableStateOf(initial(storyMode)) }` —— 初值表达式只在首次组合
+    // 求值，之后 `storyMode` 参数变化**不会**再算一遍。于是：
+    //   pageMode 仍停在 `Story()` ⇒ `fullOn` 仍为真 ⇒ 页面照旧全屏，
+    //   用户点了「还原」看到的是"没反应"（正是交接书里那条未闭环的症状）。
+    // 修法：有宿主出口时先走状态机迁移（`Story` → `Compact`，`exitFullscreen()` 的 KDoc
+    // 就是需求 3 的语义），再通知宿主；**没有**宿主出口时保持老行为（直接 `onBack()`
+    // 关页，不做形变回缩 —— 那会与无缝返回动画打架）。
+    val primaryExit: () -> Unit = {
+        if (pageMode.isStory) {
+            val hostExit = onExitStoryMode
+            if (hostExit != null) {
+                // 需求 3：露出当前这支的详情页（Story → Compact）
+                exitFullscreen()
+                // 同时通知宿主把 storyMode 置回 false —— 阻止它再次 bootstrap story 会话
+                //（本页的模式已由状态机决定，不再依赖那个参数）
+                hostExit()
             } else {
-                Unit
+                // 覆盖层等无宿主出口的路径：退化成老行为（关闭整页）
+                onBack()
             }
+        } else if (pageMode.isFull) {
+            exitFullscreen()
+        }
+    }
+
+    // 返回键：优先级由 [PlaybackPageMode.backAction] 一处给出（重构前这里与 pager 的
+    // BackHandler 各排一遍 `effectiveStoryMode` / `fullOn`，两套判据容易分叉）。
+    val handleBack = {
+        when (pageMode.backAction()) {
+            // story 没有紧凑态：返回 = 关闭页面（finishWithHostState，系统按成对返回动画收起）
+            PlaybackPageMode.BackAction.ClosePage -> onBack()
+            // 详情全屏：形变回缩到详情页
+            PlaybackPageMode.BackAction.ExitFullscreen -> exitFullscreen()
+            // 紧凑态：交给宿主的栈
+            PlaybackPageMode.BackAction.PassThrough ->
+                if (!viewModel.popPage()) onBack() else Unit
         }
     }
 
@@ -342,39 +424,36 @@ fun VideoScreen(
     // 会话；以 swipeAnchor == null 为判据，刷视频过程中 detail 不断变化也不会重置锚点
     // ——锚点必须稳定在「进入全屏那一刻的视频」，翻回页 0 才能回到起点。
     // 启用判据与画幅无关（横屏视频也能进，会话内锁竖屏 → letterbox 呈现），但**必须
-    // 携带简介区的显式下滑请求**（swipeModeRequested）：「全屏」按钮只进全屏、不开会话；
-    // 简介区顶边下滑提交（pullDownToFullscreen 的 commit 分支）才是唯一入口。
+    // 携带简介区的显式下滑请求**（pageMode.swipeModeRequested）：「全屏」按钮只进全屏、
+    // 不开会话；简介区顶边下滑提交（pullDownToFullscreen 的 commit 分支）才是唯一入口。
     // 队列为空（相关推荐没有可刷的）时不启用，保持单视频全屏的现状。
     //
-    // 刷视频模式（effectiveStoryMode）下本 effect 全程不接管会话：锚点/队列由
-    // VideoDetailActivity 的 bootstrapStorySession（story 流）负责，swipeSessionActive
-    // 常驻 true。
-    var swipeSessionActive by rememberSaveable { mutableStateOf(storyMode) }
-    // 「用户明确要刷视频」的一次性请求：仅由简介区边缘下滑提交置位，离开全屏即复位。
-    // 放在本层而不是 VM：它描述的是"这次进全屏的来路"，与 VM 里跨全屏往返的锚点/队列
-    // 生命周期本来就不同——按钮进全屏不得复用上一次手势的请求。
-    var swipeModeRequested by rememberSaveable { mutableStateOf(false) }
+    // 刷视频模式（Story 态）下本 effect 全程不接管会话：锚点/队列由
+    // VideoDetailActivity 的 bootstrapStorySession（story 流）负责，会话恒激活。
+    //
+    // 2026-10-19（第 34 轮）：本 effect 只做**两件事** —— 建锚点、把
+    // `swipeRequested && queueNotEmpty` 折进状态。状态本身由 [PlaybackPageMode] 持有，
+    // 这里不再直接写 `swipeSessionActive` / `swipeModeRequested` 两个裸布尔。
     LaunchedEffect(fullOn, videoState.detail) {
         if (!fullOn) {
-            swipeSessionActive = false
+            // 离开全屏：清会话 + 模式回 Compact（迁移函数自带幂等）
             viewModel.clearSwipeSession()
-            swipeModeRequested = false
+            pageMode = pageMode.exitFullscreen()
             return@LaunchedEffect
         }
-        if (effectiveStoryMode) {
-            swipeSessionActive = true
-            return@LaunchedEffect
-        }
+        // story 态：会话常驻，锚点由 bootstrapStorySession 负责，本 effect 不接管
+        if (pageMode.isStory) return@LaunchedEffect
         if (viewModel.swipeAnchor.value == null) {
             viewModel.beginSwipeSession()
             // 启用判据：**显式请求 && 队列非空**。画幅不参与——横屏视频同样可进，
-            // 会话内仍锁竖屏 → letterbox 呈现，需要满屏时顶栏还有手动「横屏」胶囊；
+            // 会话内仍锁竖屏 → letterbox 呈现，需要满屏时顶栏还有手动「横屏」圆钮；
             // 「全屏」按钮不携带请求 → 只进全屏（R3）。队列为空仍不启用，保持单视频全屏。
-            swipeSessionActive = swipeModeRequested && viewModel.swipeQueue.value.isNotEmpty()
+            val queueNotEmpty = viewModel.swipeQueue.value.isNotEmpty()
+            pageMode = pageMode.resolveSwipeSession(queueNotEmpty = queueNotEmpty)
             DiagnosticLog.i(
                 "PortraitSwipe",
-                "activate: requested=$swipeModeRequested portrait=$isPortraitVideo " +
-                    "queue=${viewModel.swipeQueue.value.size} active=$swipeSessionActive"
+                "activate: requested=${pageMode.swipeModeRequested} portrait=$isPortraitVideo " +
+                    "queue=${viewModel.swipeQueue.value.size} active=${pageMode.swipeSessionActive}"
             )
         }
     }
@@ -435,14 +514,19 @@ fun VideoScreen(
     // 2. 刷到真的是横屏的视频时同样触发。
     // 会话期间第一分支短路，这两条都不会再发生（锁是 PORTRAIT 而不是 UNSPECIFIED：
     // 用户此刻要的是"连播"，方向由 pager 说了算，不听传感器）。
-    val portraitSwipeActive = swipeSessionActive || effectiveStoryMode
-    // 用户显式要横屏（刷视频会话里点"横屏"胶囊）：只对**当前这一支**视频生效——
+    // 会话（含"已请求但会话尚未激活"的空窗）期间锁竖屏。判据在
+    // [PlaybackPageMode.locksPortrait] 一处给出 —— 重构前这里是
+    // `swipeSessionActive || effectiveStoryMode`，**漏了 swipeModeRequested**，
+    // 正是"先横屏、再切回刷视频"闪跳的来源。
+    val portraitSwipeActive = pageMode.locksPortrait
+    // 用户显式要横屏（刷视频会话里点"横屏"圆钮）：只对**当前这一支**视频生效——
     // 切到下一条（ids 变化）或离开会话就收回，于是连播始终是竖屏节奏，
     // 只有用户点名的那条视频会满屏。对齐 BiliPai 的做法
     // （`onRotateToLandscape` → `setPortraitFullscreen(false)` + SENSOR_LANDSCAPE）。
-    var swipeLandscape by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(videoState.ids, swipeSessionActive) {
-        swipeLandscape = false
+    // 状态迁移统一走 [PlaybackPageMode.toggleLandscape] / [PlaybackPageMode.onVideoChanged]。
+    LaunchedEffect(videoState.ids) {
+        // 切视频 → 收回横屏（只对点名的那一支生效）
+        pageMode = pageMode.onVideoChanged()
     }
     DisposableEffect(
         act,
@@ -457,15 +541,12 @@ fun VideoScreen(
             // 手动横屏优先于竖屏锁：用户点名要看满屏，就给满屏
             swipeLandscape && portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            // 下滑请求在场时**不走**「单视频全屏自动横屏」：会话激活比 fullOn 晚一拍
-            // （fullOn 先翻真，swipeSessionActive 要等下一次重组才翻真），这个空窗里
-            // 若转到横屏、会话激活后又锁回竖屏，就是真机看到的「先横屏、再切回刷视频」
-            // 闪跳。请求在场保持 UNSPECIFIED（紧凑态本来就是竖持，方向无变化），
-            // 随后 portraitSwipeActive 接管锁竖屏。
-            fullOn &&
+            // 「单视频全屏自动横屏」：判据收进 [PlaybackPageMode.allowsAutoLandscape]
+            // （= 全屏 && 未锁竖屏）。重构前这里是 `!swipeModeRequested` 单独一项，
+            // 与会话激活是两个各自推导的布尔，空窗期必然闪跳（见 locksPortrait 的 KDoc）。
+            pageMode.allowsAutoLandscape &&
                 settingsState.playback.autoRotateFullscreen &&
-                !isPortraitVideo &&
-                !swipeModeRequested -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                !isPortraitVideo -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         // **必须在离开组合时复位**。这个 effect 的 key 里有 fullOn，但 VideoScreen
@@ -483,8 +564,8 @@ fun VideoScreen(
         modifier = Modifier.fillMaxSize()
     ) {
         val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        val playerTopPad = 16.dp
-        val playerGap = 16.dp
+        val playerTopPad = BiliSpacing.lg
+        val playerGap = BiliSpacing.lg
         val compactVideoH = maxWidth * (9f / 16f)
         val compactPlayerSpaceH = statusTop + compactVideoH
         val expandedContentW = (maxWidth - (playerTopPad * 2) - playerGap).coerceAtLeast(0.dp)
@@ -572,7 +653,13 @@ fun VideoScreen(
                         }
                 ) {
                     val anchor = swipeAnchor
-                    if (swipeSessionActive && anchor != null) {
+                    // 第 35 轮核对：这里原本又写了一遍 `swipeSessionActive && anchor != null`
+                    // —— 与上面 `pagerActive`（本分支开头）**逐字同一个判据**，只是换了变量名。
+                    // 两处并行推导就是重构前的老毛病（改一处、另一处不同步 ⇒
+                    // "pagerActive 说没渲染、pager 分支却进了"这类分叉）。
+                    // 现在只读 `pagerActive`；`anchor != null` 那一半保留是因为
+                    // `PortraitSwipePager(anchor = anchor)` 需要**智能转换**成非空类型。
+                    if (pagerActive && anchor != null) {
                         // 竖屏全屏上下滑（BiliPai 同款）：页 0 锚点 + 接力队列。
                         // 播放器唯一，只有当前播放的 bvid 所在页组合 VideoPlayerPane。
                         PortraitSwipePager(
@@ -587,18 +674,11 @@ fun VideoScreen(
                             detailLoading = videoState.detailLoading,
                             viewModel = viewModel,
                             isFull = fullOn,
-                            onToggleFull = {
-                                // 刷视频模式没有「退出全屏」态：
-                                // - story 入口（顶栏直开）→ 退出 story 模式、露出**当前这支**的详情页
-                                //   （需求 3；`onExitStoryMode` 为 null 时退化回关闭整页）
-                                // - 详情全屏路径 → 形变回缩到详情页（本来就是对的）
-                                if (effectiveStoryMode) {
-                                    val exit = onExitStoryMode
-                                    if (exit != null) exit() else onBack()
-                                } else if (fullOn) {
-                                    exitFullscreen()
-                                }
-                            },
+                            // ── 2026-10-19（第 34 轮）：三种语义收敛成一个出口 ─────────
+                            // 重构前这里与下面 pane 分支各写一遍 `effectiveStoryMode / fullOn`
+                            // 的 if 链（"退出全屏 / 退出 story / 退出 swipe"混在一个回调里）。
+                            // 现在统一走 [primaryExit]：它按 [PlaybackPageMode] 决定动作。
+                            onToggleFull = primaryExit,
                             onBackClick = handleBack,
                             onGoHome = onGoHome,
                             // SW-20：会话内头像/@名 → UP 空间（与详情页同一出口）
@@ -612,7 +692,7 @@ fun VideoScreen(
                             tailState = swipeTail,
                             // 会话锁竖屏 → 横屏视频要给一个"手动横屏"的出口（见方向 effect）
                             landscapeForced = swipeLandscape,
-                            onToggleLandscape = { swipeLandscape = !swipeLandscape },
+                            onToggleLandscape = { pageMode = pageMode.toggleLandscape() },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -621,14 +701,8 @@ fun VideoScreen(
                             viewModel = viewModel,
                             videoTitle = videoState.detail?.title,
                             isFull = fullOn,
-                            onToggleFull = {
-                                // 刷视频模式流未就绪时暂以单视频全屏呈现，行为同上
-                                if (effectiveStoryMode) {
-                                    onBack()
-                                } else if (fullOn) {
-                                    exitFullscreen()
-                                }
-                            },
+                            // story 引导期（锚点未到）与详情全屏共用同一个出口
+                            onToggleFull = primaryExit,
                             onBackClick = handleBack,
                             onGoHome = onGoHome,
                             // story 入口在 bootstrapStorySession 返回之前锚点还是 null，
@@ -658,9 +732,13 @@ fun VideoScreen(
                         modifier = Modifier
                             .width(expandedPlayerW)
                             .height(expandedPlayerH)
-                            // 省电模式（SurfaceView）下不能套 Compose clip（裁剪层会挖空 surface ⇒ 全黑）：
-                            // 圆角由 PlayerView 的 outline 裁剪保证，视觉一致。
-                            .then(if (surfacePowersave == true) Modifier else Modifier.clip(expandedPlayerShape))
+                            // **不再挂 `clip(expandedPlayerShape)`**（2026-10-11 审查）：
+                            // `ExpandedPlayerShape` 就是 `RectangleShape`，而 `clip(RectangleShape)`
+                            // 在 Compose 里退化成 `clipToBounds` —— 它既没有圆角裁剪效果，
+                            // **又照样创建一个 RenderNode 离屏层**（`Clip.kt` → `graphicsLayer(shape, clip=true)`）。
+                            // 也就是说这一行在**两条渲染路径上都是纯浪费**：TextureView 路径白付一层
+                            // 离屏合成；省电模式路径还得靠 `if (surfacePowersave)` 把它摘掉，
+                            // 否则图层会挖空独立 surface。直接删掉，两条路径同时干净。
                             .onGloballyPositioned {
                                 coverBackdropFrame = BackdropFrame(
                                     it.boundsInWindow(),
@@ -670,7 +748,8 @@ fun VideoScreen(
                         viewModel = viewModel,
                         videoTitle = videoState.detail?.title,
                         isFull = false,
-                        onToggleFull = { isFull = true },
+                        // 平板/折叠屏展开态：全屏钮 → 走统一迁移（不带刷视频请求，R3）
+                        onToggleFull = enterFullscreen,
                         onBackClick = handleBack,
                         onGoHome = onGoHome
                     )
@@ -879,13 +958,15 @@ fun VideoScreen(
                             onSettle = { commit ->
                                 scope.launch {
                                     if (commit) {
-                                        // 简介区顶边下滑提交 = 刷视频模式的唯一显式入口：
-                                        // 置位请求再进全屏，会话启用交给上面的 effect；
+                                        // 简介区顶边下滑提交 = 刷视频模式的**唯一显式入口**：
+                                        // 置一次性请求再进全屏，会话激活交给上面的 effect；
                                         // 「全屏」按钮不经过这里，因此只进全屏（R3）。
-                                        swipeModeRequested = true
+                                        // 状态迁移：requestSwipeSession() 已含"进全屏"语义，
+                                        // 一次赋值同时表达"全屏 + 带请求"，不会出现
+                                        // "先 isFull=true、下一拍才置请求"的空窗（闪跳来源）。
+                                        pageMode = pageMode.requestSwipeSession()
                                         DiagnosticLog.i("PortraitSwipe", "enter: via=introPull")
                                         fullscreenMorph.animateTo(1f, morphSpec)
-                                        isFull = true
                                     } else {
                                         fullscreenMorph.animateTo(0f, morphSpec)
                                     }
@@ -979,21 +1060,27 @@ fun VideoScreen(
                             // SX-01：把"当前是不是简介页"接进上面的手势门控。
                             onIntroPageVisibleChange = { detailIntroPageVisible = it },
                             // 与画面之间的呼吸间距：给在**内容自身**（而不是把整块内容推下去，
-                            // 那样中间会露出没有背景的一段黑）。取状态栏高度 = 与改动前同量级。
-                            contentTopPad = statusTop
+                            // 那样中间会露出没有背景的一段黑）。
+                            //
+                            // 2026-10-12：取值从 `statusTop`（状态栏高度）改为设计常量
+                            // [BiliDetailLayout.INTRO_TOP_GAP] —— 见该常量的 KDoc。核心是
+                            // 两点：① "画面与正文之间留多少白"不该由系统 inset 决定
+                            // （换机型就变）；② 骨架屏看不到 statusTop，两侧永远差 ≈40dp，
+                            // 详情到达时整块内容向下跳一格（用户反馈的「骨架需要同步调整」）。
+                            introTopGap = BiliDetailLayout.INTRO_TOP_GAP
                         )
                     }
-                    // 播放带：黑底 + 底部圆角，高度随形变插值（= 状态栏内缩 + 画面高度 ⇒ 带底 == 画面底）
+                    // 播放带：黑底 + 高度随形变插值（= 状态栏内缩 + 画面高度 ⇒ 带底 == 画面底）
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
                             .playerMorphHeight(bandMorphHeightPx)
-                            // 先画背景再谈裁剪：省电模式（SurfaceView）下**不能**用 Compose clip
-                            // （裁剪层会把独立 surface 挖空 ⇒ 画面全黑），改成"按形状绘制黑底"
-                            // （background(color, shape) 不建图层）；画面的圆角由 PlayerView 的
-                            // outline 裁剪负责，视觉一致。
-                            .then(if (surfacePowersave == true) Modifier else Modifier.clip(compactPlayerShape))
+                            // **不再挂 `clip(compactPlayerShape)`**（2026-10-11 审查，同上面
+                            // 展开分支的理由）：`CompactPlayerShape` 是 `RectangleShape`，
+                            // `clip(RectangleShape)` 等价于 `clipToBounds` —— 无裁剪效果却照样
+                            // 建一层 RenderNode 离屏层，而这里正是**播放器每帧都在的那个 Box**。
+                            // 黑底本来就靠 `background(color, shape)` 按形状绘制（不建图层）。
                             .background(Color.Black, compactPlayerShape)
                             .onGloballyPositioned {
                                 // 形变期间不上报垫底帧：终点矩形只在静止态有意义，
@@ -1104,14 +1191,39 @@ fun VideoScreen(
         // 直接是个透明层 —— 打开动画期间播放器区域露出黑帧。
         // 用 ids 而不是 coverUrl 归键，正是为了"连续打开同源封面视频"这种
         // URL 相同、但应当重新走一遍垫底流程的情况。
+        //
+        // ── 刷视频会话内**必须整块不画**（2026-10-11 修「每次刷视频会出现闪预览图」）──
+        //
+        // 上面那条 `key(videoIdsKey)` 与"会话内翻页"是**直接冲突**的，这正是用户
+        // 反复反馈的"闪预览图"的真凶：
+        //  · `videoIdsKey = videoState.ids`，而**会话内每翻一页 `ids` 都会整体换新**
+        //    （`openSwipeTarget` 里 `_targetStack` 换成新目标 ⇒ `applyDetailResult` 覆盖 ids）；
+        //  · key 一变 ⇒ `CoverSettleBackdrop` 重新挂载 ⇒ `dismissed=false`、`alpha=1f`；
+        //  · 它画的 `coverBackdropUrl` 是**进入详情时那个 Intent 里的封面**（`pendingCoverUrl`），
+        //    会话内**从不变** —— 于是每一次翻页都会把**最开始那一支视频的封面**
+        //    以全屏尺寸、alpha=1 盖在**新视频**上，再等首帧到了才淡出。
+        //  用户看到的"闪一下预览图"就是它（而且闪的还是不相干的那张图）。
+        //
+        // 门的判据用 `pagerActive`（= `swipeSessionActive && swipeAnchor != null`，
+        // 与本文件上面那条进全屏动效的判据**逐字同一个**）：它正是"pager 真的在渲染
+        // 刷视频流"的时刻。之所以不用更宽的 `swipeSessionActive`：story 入口在
+        // `bootstrapStorySession` 返回之前 `swipeAnchor == null`（pager 分支不成立），
+        // 那一段的封面垫底**必须留着**（否则首屏是黑底），而那时它画的封面也确实是
+        // 当前这一支的封面，不构成"闪"。
+        //
+        // 会话内翻页的垫底由 `SwipeWaitVeil` 负责 —— 它拿的是**当前页**的封面
+        // （`entry.cover`）且自带淡入/淡出时序。两者职责重叠，同时在场必然打架。
+        val pagerActive = swipeSessionActive && swipeAnchor != null
         key(videoIdsKey) {
-            coverBackdropUrl?.let { url ->
-                CoverSettleBackdrop(
-                    coverUrl = url,
-                    coverLarge = coverBackdropLarge,
-                    frame = coverBackdropFrame,
-                    firstFrameRendered = videoState.hasRenderedFirstFrame
-                )
+            if (!pagerActive) {
+                coverBackdropUrl?.let { url ->
+                    CoverSettleBackdrop(
+                        coverUrl = url,
+                        coverLarge = coverBackdropLarge,
+                        frame = coverBackdropFrame,
+                        firstFrameRendered = videoState.hasRenderedFirstFrame
+                    )
+                }
             }
         }
     }
@@ -1458,19 +1570,21 @@ private fun DownloadTaskSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text("下载", style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                 FilterChip(
                     selected = kind == VideoDownloadKind.VIDEO,
                     onClick = { kind = VideoDownloadKind.VIDEO },
+                    modifier = Modifier.appElasticPress(),
                     label = { Text("下载视频") }
                 )
                 FilterChip(
                     selected = kind == VideoDownloadKind.AUDIO,
                     onClick = { kind = VideoDownloadKind.AUDIO },
+                    modifier = Modifier.appElasticPress(),
                     label = { Text("下载音频") }
                 )
             }
@@ -1490,18 +1604,18 @@ private fun DownloadTaskSheet(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)
             ) {
                 OutlinedButton(
                     onClick = onOpenCache,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).appElasticPress()
                 ) {
                     Text("查看缓存")
                 }
                 Button(
                     onClick = { onStart(kind, videoQuality, audioQuality) },
                     enabled = canStartDownload,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).appElasticPress(enabled = canStartDownload)
                 ) {
                     Text(if (kind == VideoDownloadKind.VIDEO) "下载视频" else "下载音频")
                 }
@@ -1518,17 +1632,18 @@ private fun DownloadOptionGroup(
     selected: Int,
     onSelect: (Int) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             options.forEach { option ->
                 FilterChip(
                     selected = option.value == selected,
                     onClick = { onSelect(option.value) },
+                    modifier = Modifier.appElasticPress(),
                     label = { Text(option.label) }
                 )
             }

@@ -28,6 +28,7 @@ import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
 import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonBreath
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.rememberSkeletonBreathOrNull
@@ -37,6 +38,7 @@ import com.naaammme.bbspace.feature.history.component.HistoryItemCard
 import com.naaammme.bbspace.feature.history.component.HistoryListLoading
 import com.naaammme.bbspace.feature.history.component.LOAD_MORE_SKELETON_COUNT
 import com.naaammme.bbspace.feature.history.component.LoadMoreTrigger
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,7 +71,7 @@ fun HistoryScreen(
             TopAppBar(
                 title = { Text("历史记录") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -77,7 +79,7 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { onSearch(state.tab) }) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = { onSearch(state.tab) }) {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "搜索历史记录"
@@ -137,8 +139,11 @@ fun HistoryScreen(
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            contentPadding = PaddingValues(
+                                horizontal = BiliSpacing.md,
+                                vertical = BiliSpacing.md
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
                         ) {
                             items(
                                 items = state.items,

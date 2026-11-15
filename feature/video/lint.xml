@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A2 迁移基线（2026-10-13 第 10 轮）。见 app/lint.xml 的完整说明。
+
+  BbspaceAnimateAsState 已由 FrameBudgetLintTest.animateAsState_isFrozen 数文本棘轮
+  （上限 10）迁移到 ci-lint/AnimateAsStateDetector；切换前做过等价性证明（10/10 行号一致）。
+  本模块原有 2 处（同文件）。
+
+  BbspaceHardcodedAnimationDuration 由 AnimationTokenRatchetTest 数文本棘轮迁移而来
+  （第 11 轮）。本模块有 3 处 —— **全部是文本棘轮从来报不到的形态**：
+  · VideoDetailSummary.kt:596 与 VideoScreen.kt:283：多行 `spring(`，首参在下一行；
+  · VideoPlayerPane.kt:2731：`durationMillis = SMOOTH_WINDOW_MS.toInt()`，
+    字面量藏在**伴生常量**里（`private const val SMOOTH_WINDOW_MS = 500L`），
+    逐行正则只看到标识符、看不到数值。
+    检测器用 `UExpression.evaluate()` 做**常量求值**，所以能穿透常量看到 500。
+
+  ⚠️ 第 14 轮补登：这三个点在第 11 轮迁移时就该被登记 —— 当时我按"旧棘轮找到的 8 处"
+  打了基线，没有按"检测器的报告"打。**检测器比旧守卫更严是迁移的目的，
+  那就一定会多出需要登记的点。** 教训：基线只认检测器的输出。
+-->
+<lint>
+    <issue id="BbspaceAnimateAsState">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/video/detail/VideoDetailSummary.kt" />
+    </issue>
+    <issue id="BbspaceHardcodedAnimationDuration">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/video/detail/VideoDetailSummary.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/video/VideoScreen.kt" />
+    </issue>
+</lint>

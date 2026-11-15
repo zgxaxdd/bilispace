@@ -25,10 +25,13 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 import com.naaammme.bbspace.core.designsystem.theme.biliColorRoles
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 @Composable
 fun <T> CapsuleGroup(
@@ -89,7 +92,25 @@ fun CapsuleListItem(
     }
     Card(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // ## 全局拖拽反馈（2026-10-18 第十九轮，**原语层**接入）
+            //
+            // 接在 `CapsuleListItem` 而不是每个调用点：本行是设置页分组列表
+            // （`SettingCategory`）/ 搜索结果分组 / 隐私与播放记录等列表的**唯一行出口**，
+            // 一处挂载覆盖全部消费方。
+            //
+            // **整行宽控件**用 `feedbackStrength = 0.6f`（与 `AppMiuixListItem`、
+            // `appSearchElasticPress` 同一克制档）：满强度会让一整行在按下时明显横移，
+            // 读作"页面在晃"而不是"这一行被按到"。
+            //
+            // `highlightShape = shape` 让光斑裁在本行自己的分组圆角内
+            //（首行上圆/末行下圆/中间直角，见 [capsuleGroupShape]）；
+            // 不传时默认是 50% 胶囊形，中间行（RectangleShape）会被裁成椭圆。
+            .appElasticPress(
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f),
+                highlightShape = shape
+            ),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = resolvedColor),
         border = biliDarkHairlineBorder(resolvedColor)
@@ -98,12 +119,12 @@ fun CapsuleListItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = if (isIOS) 48.dp else 84.dp)
-                .padding(horizontal = 16.dp, vertical = if (isIOS) 10.dp else 14.dp),
+                .padding(horizontal = BiliSpacing.lg, vertical = if (isIOS) BiliSpacing.smPlus else 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (leadingContent != null) {
                 Box(
-                    modifier = Modifier.padding(end = 16.dp),
+                    modifier = Modifier.padding(end = BiliSpacing.lg),
                     contentAlignment = Alignment.Center
                 ) {
                     leadingContent()
@@ -112,7 +133,7 @@ fun CapsuleListItem(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
             ) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 if (subtitle != null) {
@@ -126,7 +147,7 @@ fun CapsuleListItem(
 
             if (trailingContent != null) {
                 Box(
-                    modifier = Modifier.padding(start = 12.dp),
+                    modifier = Modifier.padding(start = BiliSpacing.md),
                     contentAlignment = Alignment.Center
                 ) {
                     trailingContent()
@@ -198,7 +219,7 @@ fun BiliGroupHeader(text: String, modifier: Modifier = Modifier) {
         text = text,
         style = MaterialTheme.typography.labelLarge,
         color = biliColorRoles().groupHeader,
-        modifier = modifier.padding(start = 16.dp, top = 12.dp, bottom = 6.dp)
+        modifier = modifier.padding(start = BiliSpacing.lg, top = BiliSpacing.md, bottom = BiliSpacing.xsPlus)
     )
 }
 
@@ -211,6 +232,6 @@ fun BiliGroupFooter(text: String, modifier: Modifier = Modifier) {
         text = text,
         style = MaterialTheme.typography.bodySmall,
         color = biliColorRoles().groupFooter,
-        modifier = modifier.padding(start = 16.dp, top = 6.dp, bottom = 12.dp)
+        modifier = modifier.padding(start = BiliSpacing.lg, top = BiliSpacing.xsPlus, bottom = BiliSpacing.md)
     )
 }

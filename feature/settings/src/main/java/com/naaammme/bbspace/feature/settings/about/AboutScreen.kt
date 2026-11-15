@@ -26,7 +26,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -41,17 +40,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.AppUpdateDialog as CoreAppUpdateDialog
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
 import com.naaammme.bbspace.feature.settings.components.SettingSwitch
 import com.naaammme.bbspace.feature.settings.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,7 +73,9 @@ fun AboutScreen(
             TopAppBar(
                 title = { Text("关于") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    // 设置页批 3：顶栏返回改用 Miuix 图标按钮原语（iOS 档唯一出口，
+                    // 44dp 命中区由原语统一给；语义仍是 onBack，无状态变化）。
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -84,18 +87,18 @@ fun AboutScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 16.dp)
+                .padding(horizontal = BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md),
+            contentPadding = PaddingValues(vertical = BiliSpacing.lg)
         ) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(20.dp),
+                            .padding(BiliSpacing.xl),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                     ) {
                         Image(
                             painter = painterResource(id = R.drawable.about_banner),
@@ -116,15 +119,15 @@ fun AboutScreen(
 
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().appElasticPress(),
                     onClick = vm::checkUpdate,
                     enabled = updateState != UpdateState.Checking
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(BiliSpacing.lg),
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                     ) {
                         Text("检查更新", style = MaterialTheme.typography.titleMedium)
                         when (val s = updateState) {
@@ -245,14 +248,14 @@ private fun LinkCard(
         }
     }
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().appElasticPress(),
         onClick = resolvedOnClick,
         enabled = enabled
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(BiliSpacing.lg)
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
@@ -270,7 +273,7 @@ private fun SupportDevDialog(onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     Dialog(onDismissRequest = onDismiss) {
         Box(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(BiliSpacing.lg),
             contentAlignment = Alignment.Center
         ) {
             Card(

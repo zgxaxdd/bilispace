@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.core.model
 
 import androidx.compose.runtime.Immutable
+import com.naaammme.bbspace.core.model.player.CdnRegionPolicy
 
 @Immutable
 enum class PlayerBufferProfile(
@@ -149,6 +150,29 @@ data class PlayerPlaybackPrefs(
      * 只在 Wi‑Fi/以太网下做（蜂窝不预取，避免偷跑流量）；缓冲变薄立即取消。
      */
     val cdnAdaptivePrefetch: Boolean = true,
+    /**
+     * **CDN 属地优选**（W4，对照 BiliPai `CdnRegionPluginCache` 的 selectedHosts /
+     * `experimentalRewriteEnabled`）。
+     *
+     * 开：把服务端返回的候选 URL 按属地目录改写 host（详见 `CdnRegionPolicy.mergeCandidates`），
+     * 用作主/备线路；关（默认）：候选与排序**逐字节保持现状**。
+     *
+     * ⚠️ 属地来自 IP 归属地接口，本仓网络层暂无该接口 ⇒ 目前由 [cdnRegionHosts] 手动/上层注入；
+     * 自动定位属于后续接线（见 task 报告）。
+     */
+    val cdnRegionEnabled: Boolean = false,
+    /** 属地优选的目标 host（空 = 无候选，插件自然退回原序）。 */
+    val cdnRegionHosts: List<String> = emptyList(),
+    /**
+     * **自定义 CDN 改写规则**（对照 BiliPai `CdnCustomRule`）：按顺序匹配完整播放 URL，
+     * 首条命中即停；替换结果必须仍指向 B 站域（`CdnRegionPolicy.applyCustomRules`）。
+     */
+    val cdnCustomRules: List<CdnRegionPolicy.CustomRule> = emptyList(),
+    /**
+     * **严格只用自定义线路**（对照 BiliPai `strictCustomCdn`）：有自定义候选就只用它，
+     * 健康度再差也排第一；规则全没命中时完整回退（不会锁死播放）。
+     */
+    val cdnStrictCustomCdn: Boolean = false,
     /** 双击画面点赞：关闭时双击为暂停（默认） */
     val doubleTapLike: Boolean = false,
     /** ColorOS 系统级无缝过渡动画（首页卡片 → 全屏详情）：关闭则退回应用内覆盖层路径 */

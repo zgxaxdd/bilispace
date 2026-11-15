@@ -38,6 +38,9 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.MotionTierPolicy
+import com.naaammme.bbspace.core.designsystem.motion.rememberMotionTier
+import com.naaammme.bbspace.core.designsystem.theme.BiliDetailLayout
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
@@ -92,6 +95,10 @@ private val SkeletonBarShape: Shape = RoundedCornerShape(percent = 50)
 @Composable
 fun rememberSkeletonBreath(): State<Float> {
     val anim = LocalAnimations.current
+    // W3：设备动效分档（纯逻辑见 MotionTierPolicy）。中端机把呼吸周期拉长到 1.4 倍
+    // ——同样的明暗变化、更低的重绘频率；低端机由 [ProvideSkeletonShimmer] 直接
+    // 不提供时钟（走静止分支），这里拿到的倍率恒为 1。
+    val cycleMultiplier = MotionTierPolicy.breathCycleMultiplier(rememberMotionTier())
     val transition = rememberInfiniteTransition(label = "skeletonBreath")
     return transition.animateFloat(
         initialValue = 0f,
@@ -100,7 +107,7 @@ fun rememberSkeletonBreath(): State<Float> {
             // 按用户动画速度缩放；速度设为「关闭」时 medium 退化为 1，这里仍有下限，
             // 视觉上等价静止（与旧 shimmer 的处理一致）
             animation = tween(
-                durationMillis = (SKELETON_BREATH_CYCLE_MS * anim.medium / 200f)
+                durationMillis = (SKELETON_BREATH_CYCLE_MS * anim.medium * cycleMultiplier / 200f)
                     .toInt().coerceAtLeast(1),
                 easing = FastOutSlowInEasing
             ),
@@ -126,6 +133,8 @@ fun ProvideSkeletonShimmer(
     enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    // W3：设备动效分档（**无条件**调用，保证组合槽位稳定；内部有进程级缓存）。
+    val motionTier = rememberMotionTier()
     if (LocalSkeletonBreath.current != null) {
         content()
         return
@@ -133,7 +142,12 @@ fun ProvideSkeletonShimmer(
     // FL-01 ③：动效设为「关闭」（reduceMotion）时不 provide —— LocalSkeletonBreath
     // 保持 null，SkeletonBlock 走完全静止分支。关闭动效 = 不启动常驻动画
     // （与玻璃预算 E-02 / AP-28 同一口径），性能与无障碍双收。
-    if (!enabled || LocalAnimations.current.reduceMotion) {
+    // W3 追加：**低端机同口径** —— 设备能力不够时也不起常驻无限动画（判据来源不同，
+    // 结果一致：不给时钟 ⇒ 骨架静止）。
+    if (!enabled ||
+        LocalAnimations.current.reduceMotion ||
+        !MotionTierPolicy.enablesAmbientMotion(motionTier)
+    ) {
         content()
         return
     }
@@ -245,8 +259,8 @@ fun VideoListSkeletonList(
     ProvideSkeletonShimmer {
         LazyColumn(
             modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = BiliSpacing.md, vertical = BiliSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             items(
                 count = count,
@@ -271,22 +285,22 @@ fun VideoGridCardSkeleton(modifier: Modifier = Modifier) {
             // 否则加载完成时形状会突变（此前这里是默认直角，而真实卡片是圆角）。
             shape = SkeletonBarShape
         )
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.sm)) {
             SkeletonBlock(
                 modifier = Modifier
                     .fillMaxWidth(0.9f)
                     .height(16.dp),
                 shape = MaterialTheme.shapes.extraSmall
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.xsPlus))
             SkeletonBlock(
                 modifier = Modifier
                     .fillMaxWidth(0.6f)
                     .height(14.dp),
                 shape = MaterialTheme.shapes.extraSmall
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(modifier = Modifier.height(BiliSpacing.sm))
+            Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                 SkeletonBlock(
                     modifier = Modifier
                         .width(60.dp)
@@ -315,8 +329,8 @@ fun VideoListCardSkeleton(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = MaterialTheme.shapes.large
             )
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(BiliSpacing.smPlus),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         SkeletonBlock(
             modifier = Modifier
@@ -326,7 +340,7 @@ fun VideoListCardSkeleton(modifier: Modifier = Modifier) {
         )
         Column(
             modifier = Modifier.weight(0.62f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             SkeletonBlock(
                 modifier = Modifier
@@ -341,7 +355,7 @@ fun VideoListCardSkeleton(modifier: Modifier = Modifier) {
                 shape = MaterialTheme.shapes.extraSmall
             )
             Spacer(modifier = Modifier.height(2.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                 SkeletonBlock(
                     modifier = Modifier
                         .width(72.dp)
@@ -366,7 +380,7 @@ fun CommentHeaderSkeleton(modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = BiliSpacing.xs),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -390,12 +404,12 @@ fun CommentCardSkeleton(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = MaterialTheme.shapes.large
             )
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(BiliSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             verticalAlignment = Alignment.Top
         ) {
             SkeletonBlock(
@@ -409,7 +423,7 @@ fun CommentCardSkeleton(modifier: Modifier = Modifier) {
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                 ) {
                     SkeletonBlock(
                         modifier = Modifier
@@ -417,7 +431,7 @@ fun CommentCardSkeleton(modifier: Modifier = Modifier) {
                             .height(18.dp),
                         shape = MaterialTheme.shapes.extraSmall
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
                         SkeletonChip(width = 52.dp)
                         SkeletonChip(width = 68.dp)
                     }
@@ -427,7 +441,7 @@ fun CommentCardSkeleton(modifier: Modifier = Modifier) {
         }
         Column(
             modifier = Modifier.padding(start = 56.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             SkeletonBlock(
                 modifier = Modifier
@@ -445,7 +459,7 @@ fun CommentCardSkeleton(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)) {
                     SkeletonBlock(
                         modifier = Modifier
                             .width(56.dp)
@@ -501,13 +515,19 @@ fun VideoDetailInfoSkeleton(modifier: Modifier = Modifier) {
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                // 与 LazyColumn 的 contentPadding.top = infoTopPad 对齐
-                .padding(top = BiliSpacing.lg),
+                // 与 LazyColumn 的 contentPadding.top = introTopGap 对齐。
+                //
+                // 2026-10-12：改为**直接引用同一个常量** [BiliDetailLayout.INTRO_TOP_GAP]。
+                // 上一版这里写的是 `(BiliSpacing.lg - TITLE_LIFT)`，被 coerce 夹到 0，
+                // 而真实内容那侧是 `16dp + statusTop - TITLE_LIFT` = 32dp —— 骨架看不到
+                // `statusTop`（它是系统 inset），于是加载态比真实内容高 32dp，详情一到达
+                // 整块内容就往下跳一格。现在两侧都是"一个常量、零算术"，不可能再漂移。
+                .padding(top = BiliDetailLayout.INTRO_TOP_GAP),
             // 与 VideoSummarySection 的 spacedBy(BiliSpacing.md) 保持一致
             verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             // ── 标题块：标题（最多 3 行）+ 作者行 ──────────────────────────
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)) {
                 SkeletonBlock(
                     modifier = Modifier
                         .fillMaxWidth(0.94f)
@@ -533,7 +553,7 @@ fun VideoDetailInfoSkeleton(modifier: Modifier = Modifier) {
                     )
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
                     ) {
                         SkeletonBlock(
                             modifier = Modifier
@@ -579,26 +599,39 @@ fun VideoDetailInfoSkeleton(modifier: Modifier = Modifier) {
                 }
             }
 
-            // ── 简介：折叠态两行 + "展开"提示 ─────────────────────────────
-            Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)) {
-                SkeletonBlock(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(13.dp),
-                    shape = SkeletonBarShape
-                )
-                SkeletonBlock(
-                    modifier = Modifier
-                        .fillMaxWidth(0.86f)
-                        .height(13.dp),
-                    shape = SkeletonBarShape
-                )
-                SkeletonBlock(
-                    modifier = Modifier
-                        .fillMaxWidth(0.18f)
-                        .height(11.dp),
-                    shape = SkeletonBarShape
-                )
+            // ── 简介：折叠态两行 + 右对齐的「展开全文」胶囊 ──────────────────
+            //
+            // 2026-10-11：与真实内容的 `DescBlock` 对齐 —— 动作入口从"正文最后一行
+            // 小字"改成了**右对齐的主色胶囊**（带箭头）。骨架也必须同形同宽同位置，
+            // 否则加载态与真实内容之间会"第三行小字 → 右侧一颗胶囊"地跳一下。
+            Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)) {
+                Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)) {
+                    SkeletonBlock(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(13.dp),
+                        shape = SkeletonBarShape
+                    )
+                    SkeletonBlock(
+                        modifier = Modifier
+                            .fillMaxWidth(0.86f)
+                            .height(13.dp),
+                        shape = SkeletonBarShape
+                    )
+                }
+                // 动作胶囊：右对齐、高度与 `DescToggleChip`（labelMedium + 上下 xsPlus
+                // 内边距 + 图标 16dp）的实测高度对齐。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    SkeletonBlock(
+                        modifier = Modifier
+                            .width(BiliSpacing.xxxl * 3.5f)
+                            .height(BiliSpacing.xxxl),
+                        shape = MaterialTheme.shapes.extraLarge
+                    )
+                }
             }
         }
     }
@@ -614,8 +647,8 @@ fun VideoRelateCardSkeleton(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = MaterialTheme.shapes.large
             )
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(BiliSpacing.md),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
         verticalAlignment = Alignment.Top
     ) {
         SkeletonBlock(
@@ -626,7 +659,7 @@ fun VideoRelateCardSkeleton(modifier: Modifier = Modifier) {
         )
         Column(
             modifier = Modifier.weight(0.62f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             SkeletonBlock(
                 modifier = Modifier

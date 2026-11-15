@@ -18,9 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.feature.user.collage.rememberUserCollageState
 import com.naaammme.bbspace.feature.user.collage.UserCollageSection
@@ -28,6 +28,7 @@ import com.naaammme.bbspace.feature.user.collage.rememberUserCollagePalette
 import com.naaammme.bbspace.feature.user.collage.rememberUserCollageBackgroundBrush
 import com.naaammme.bbspace.feature.user.component.AccountExpiredDialog
 
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 enum class UserDest {
     History,
     Favorite,
@@ -61,19 +62,31 @@ fun UserScreen(
                     scrolledContainerColor = Color.Transparent
                 ),
                 actions = {
-                    IconButton(onClick = collageState::reset) {
+                    // 全局拖拽反馈（第 34 轮 T2）："我的"顶栏三颗图标钮。
+                    // 三者共处一个 actions Row、命中区同为 M3 IconButton 的 48dp
+                    // ⇒ 天生等高，这里只需保证手感一致（同一个挂载）。
+                    IconButton(
+                        onClick = collageState::reset,
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = "重置布局"
                         )
                     }
-                    IconButton(onClick = onNavigateToSettings) {
+                    IconButton(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = "设置"
                         )
                     }
-                    IconButton(onClick = onNavigateToAccount) {
+                    IconButton(
+                        onClick = onNavigateToAccount,
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             Icons.Default.Person,
                             contentDescription = "账号管理"
@@ -95,7 +108,7 @@ fun UserScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md)
         )
     }
 

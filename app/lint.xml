@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A2 迁移基线（2026-10-13 第 10 轮）。
+
+  BbspaceAnimateAsState 由 Lint 检测器执行（ci-lint/AnimateAsStateDetector），
+  取代原先的 FrameBudgetLintTest.animateAsState_isFrozen 数文本棘轮（上限 10）。
+  切换前做过**等价性证明**：检测器在 5 个模块里找到的正是同样那 10 处、行号一致。
+
+  下面每一条 <ignore> 对应一处**已存在的**调用点，不是"以后可以随便加"的许可。
+  要新增第 11 处，先把这处改造成 Animatable + graphicsLayer{}/drawBehind{} 读 value ——
+  检测器是 ERROR 级，新增会直接让 lint 失败（这正是棘轮原来的作用，且带文件:行）。
+-->
+<lint>
+    <issue id="BbspaceAnimateAsState">
+        <ignore path="src/main/java/com/naaammme/bbspace/navigation/AppNavHost.kt" />
+    </issue>
+</lint>

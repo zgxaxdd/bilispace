@@ -11,14 +11,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.settings.FeedApiType
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixSwitch
 import com.naaammme.bbspace.feature.settings.SettingsViewModel
 import kotlin.math.roundToInt
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,7 +49,7 @@ fun FeedSettingsScreen(
             TopAppBar(
                 title = { Text("推荐设置") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
@@ -59,8 +61,8 @@ fun FeedSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -105,20 +107,20 @@ fun FeedSettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("首页布局", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(BiliSpacing.xs))
                             Text(
                                 "开启后首页使用单列大图，关闭为双列网格；也可在首页顶栏切换",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
+                        AppMiuixSwitch(
                             checked = homeSingleColumn,
                             onCheckedChange = viewModel::updateHomeFeedSingleColumn
                         )
@@ -130,13 +132,13 @@ fun FeedSettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("HD 推荐模式", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(BiliSpacing.xs))
                             Text(
                                 if (hdFeedAvailable) {
                                     "切换 HD 推荐接口，每页返回更多条目"
@@ -147,7 +149,7 @@ fun FeedSettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
+                        AppMiuixSwitch(
                             checked = hdFeed,
                             enabled = hdFeedAvailable,
                             onCheckedChange = viewModel::updateHdFeed
@@ -160,20 +162,20 @@ fun FeedSettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("个性化推荐", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(BiliSpacing.xs))
                             Text(
                                 "基于观看历史推荐内容，关闭后随机推荐",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
+                        AppMiuixSwitch(
                             checked = personalizedRcmd,
                             onCheckedChange = viewModel::updatePersonalizedRcmd
                         )
@@ -185,20 +187,20 @@ fun FeedSettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("课堂推荐模式", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(BiliSpacing.xs))
                             Text(
                                 "只推荐学习相关视频",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
+                        AppMiuixSwitch(
                             checked = lessonsMode,
                             onCheckedChange = viewModel::updateLessonsMode
                         )
@@ -210,7 +212,7 @@ fun FeedSettingsScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .padding(BiliSpacing.lg)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -219,19 +221,19 @@ fun FeedSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("未成年推荐", style = MaterialTheme.typography.titleMedium)
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(BiliSpacing.xs))
                                 Text(
                                     "按指定年龄请求未成年推荐内容",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Switch(
+                            AppMiuixSwitch(
                                 checked = teenagersMode,
                                 onCheckedChange = viewModel::updateTeenagersMode
                             )
                         }
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(BiliSpacing.md))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -272,18 +274,18 @@ fun FeedSettingsScreen(
             item {
                 Card(
                     onClick = onNavigateToInterest,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().appElasticPress()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(BiliSpacing.lg),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("内容偏好调节", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(BiliSpacing.xs))
                             Text(
                                 "查看和调整你的内容兴趣标签",
                                 style = MaterialTheme.typography.bodySmall,

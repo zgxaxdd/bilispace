@@ -32,11 +32,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.CommentSort
 import com.naaammme.bbspace.feature.comment.component.CommentReplyAction
 import com.naaammme.bbspace.feature.comment.component.ThreadReplyCard
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 internal fun CommentThreadPane(
@@ -142,7 +146,11 @@ private fun CommentThreadContent(
                 )
             },
             navigationIcon = {
-                IconButton(onClick = onDismiss) {
+                IconButton(
+                    onClick = onDismiss,
+                    // 全局拖拽反馈（第 34 轮 T2）：楼中楼面板顶栏返回钮。
+                    modifier = Modifier.appElasticPress()
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回"
@@ -151,7 +159,11 @@ private fun CommentThreadContent(
             },
             actions = {
                 if (isDetailMode) {
-                    IconButton(onClick = { onReplyAction(CommentReplyAction.OpenOriginalContent(state.root)) }) {
+                    IconButton(
+                        onClick = { onReplyAction(CommentReplyAction.OpenOriginalContent(state.root)) },
+                        // 全局拖拽反馈：顶栏"前往原内容"图标钮，与返回钮同排同档。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                             contentDescription = "前往原内容"
@@ -168,11 +180,11 @@ private fun CommentThreadContent(
                 .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                bottom = 16.dp + bottomPadding
+                start = BiliSpacing.lg,
+                end = BiliSpacing.lg,
+                bottom = BiliSpacing.lg + bottomPadding
             ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             item(
                 key = "reply_root",
@@ -268,14 +280,17 @@ private fun ThreadInfoBar(
         if (canSwitchSort) {
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = ThreadSortChipShape,
                 onClick = onToggleSort
             ) {
                 Text(
                     text = "按${threadSortText(sort)}",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    modifier = Modifier.padding(
+                        horizontal = BiliSpacing.md,
+                        vertical = BiliSpacing.xsPlus
+                    )
                 )
             }
         } else {
@@ -294,3 +309,6 @@ private fun threadSortText(sort: CommentSort): String {
         CommentSort.TIME -> "时间"
     }
 }
+
+/** 楼层面板排序 chip 圆角：分组 token（16dp），不再取随 CornerStyle 漂移的 shapes.extraLarge。 */
+private val ThreadSortChipShape = RoundedCornerShape(BiliRadius.groupedList)

@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,12 +35,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.asBold
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_LIVE_DANMAKU
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_VIDEO_DANMAKU
 import com.naaammme.bbspace.core.model.LiveRoute
@@ -57,6 +59,8 @@ import com.naaammme.bbspace.feature.comment.CommentPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.component.BiliTouchTargets
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -167,16 +171,25 @@ fun BbSpaceScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = handleBack) {
+                        IconButton(modifier = Modifier.appElasticPress(), onClick = handleBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                         }
                     },
                     actions = {
                         if (page == BbSpacePage.PUBLISHED_RECORD) {
+                            // ## 视觉对齐（task-9 C1：同一顶栏内可点件等高）
+                            // 返回钮是 IconButton（48dp 命中区），M3 TextButton 默认 40dp ——
+                            // 同一行内矮 8dp。统一到 `BiliTouchTargets.comfortable`
+                            //（= 48dp，由 BiliSpacing 推导，零新增 dp 字面量），"导入/导出"
+                            // 两颗共用同一取值 ⇒ 彼此也必然等高。
+                            val actionHeight = Modifier.defaultMinSize(
+                                minHeight = BiliTouchTargets.comfortable
+                            )
                             TextButton(
                                 onClick = {
                                     importLauncher.launch(arrayOf("application/json", "text/*"))
-                                }
+                                },
+                                modifier = actionHeight.appElasticPress()
                             ) {
                                 Text("导入")
                             }
@@ -193,7 +206,8 @@ fun BbSpaceScreen(
                                         }
                                     }
                                 },
-                                enabled = !publishedRecordState.isLoading
+                                enabled = !publishedRecordState.isLoading,
+                                modifier = actionHeight.appElasticPress()
                             ) {
                                 Text("导出")
                             }
@@ -222,7 +236,7 @@ fun BbSpaceScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = BiliSpacing.lg)
                     )
                 }
                 BbSpacePage.PUBLISHED_RECORD -> {
@@ -233,7 +247,7 @@ fun BbSpaceScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = BiliSpacing.lg)
                     )
                 }
                 BbSpacePage.COMMENT_DETAIL -> {
@@ -253,7 +267,7 @@ fun BbSpaceScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = BiliSpacing.lg)
                     )
                 }
             }
@@ -269,8 +283,8 @@ private fun BbSpaceHomePane(
     onOpenCommentSearch: () -> Unit
 ) {
     Column(
-        modifier = modifier.padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = modifier.padding(horizontal = BiliSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         BbSpaceEntryCard(
             title = "播放历史",
@@ -305,13 +319,13 @@ private fun BbSpaceEntryCard(
     onClick: () -> Unit
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.appElasticPress(),
         onClick = onClick
     ) {
         Row(
             modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = BiliSpacing.lg, vertical = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -324,8 +338,7 @@ private fun BbSpaceEntryCard(
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleMedium.asBold()
                 )
                 Text(
                     text = subtitle,

@@ -5,10 +5,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,13 +31,30 @@ import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedColorSpec
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedContrastLevel
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedPaletteStyle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedSegmentOption
+import com.naaammme.bbspace.core.designsystem.theme.scheme.resolveColorContrastOptions
+import com.naaammme.bbspace.core.designsystem.theme.scheme.resolveColorContrastSubtitle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.resolveColorSpecDescription
+import com.naaammme.bbspace.core.designsystem.theme.scheme.resolveColorSpecSubtitle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.resolveSeedPaletteStyleOptions
+import com.naaammme.bbspace.core.designsystem.theme.scheme.supportsSeedSpec2025
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.component.BiliTopBar
+import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixListItem
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixSlider
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixSwitch
 import com.naaammme.bbspace.core.designsystem.component.rememberBiliLargeTitleScrollState
 import com.naaammme.bbspace.core.designsystem.component.BiliGroupHeader
 import com.naaammme.bbspace.feature.settings.components.SettingSwitch
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import kotlin.math.roundToInt
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,8 +78,8 @@ fun AppearanceSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
         ) {
             item(key = "hdr_风格") {
                 if (isIOS) {
@@ -105,6 +122,34 @@ fun AppearanceSettingsScreen(
                 PaletteStyleSelector(
                     selected = config.paletteStyle,
                     onSelect = viewModel::updatePaletteStyle,
+                    enabled = !isIOS
+                )
+            }
+
+            // ── 22 风格 HCT 体系（种子配色维度）──────────────────────────────
+            // 三组只在"关掉动态取色 + MATERIAL + 非 MONOCHROME"时才真正参与出色；
+            // 其它情况保留设置值（与上游"置灰保留值"同款语义），并给一行提示。
+            item {
+                SeedPaletteStyleSelector(
+                    selected = config.seedPaletteStyle,
+                    onSelect = viewModel::updateSeedPaletteStyle,
+                    enabled = !isIOS
+                )
+            }
+
+            item {
+                SeedContrastSelector(
+                    selected = config.seedContrastLevel,
+                    onSelect = viewModel::updateSeedContrastLevel,
+                    enabled = !isIOS
+                )
+            }
+
+            item {
+                SeedColorSpecSelector(
+                    selected = config.seedColorSpec,
+                    seedStyle = config.seedPaletteStyle,
+                    onSelect = viewModel::updateSeedColorSpec,
                     enabled = !isIOS
                 )
             }
@@ -249,6 +294,21 @@ fun AppearanceSettingsScreen(
                 )
             }
 
+            // 全局拖拽反馈（上游 BiliPai 同名功能，2026-10-17）。
+            //
+            // 位置刻意紧跟「动画速度」：两者都是"动效手感"旋钮，且本开关**只影响
+            // 拖拽形变、不影响按压反馈**，与"动画速度"（整体时长）不冲突。
+            item {
+                GlobalDragFeedbackToggle(
+                    enabled = config.globalDragFeedbackEnabled,
+                    onToggle = viewModel::updateGlobalDragFeedback,
+                    // 复用本函数已经算好的那一处判定（:66），**不在子 composable 里再判一次**：
+                    // `UiStyleDecisionRatchetTest.scatterIsNotGrowing` 按文件登记 UiStyle 判定数，
+                    // 多一处就会红 —— 而那条棘轮的意图正是"不要在别处再散一份风格判定"。
+                    isIOS = isIOS
+                )
+            }
+
             item {
                 CornerStyleSelector(
                     selected = config.cornerStyle,
@@ -273,27 +333,27 @@ private fun UiStyleSelector(
     onSelect: (UiStyle) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text("界面风格", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 FilterChip(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).appElasticPress(),
                     selected = selected == UiStyle.MATERIAL,
                     onClick = { onSelect(UiStyle.MATERIAL) },
                     label = { Text("Material", maxLines = 1) }
                 )
                 FilterChip(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).appElasticPress(),
                     selected = selected == UiStyle.IOS,
                     onClick = { onSelect(UiStyle.IOS) },
                     label = { Text("iOS", maxLines = 1) }
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             Text(
                 when (selected) {
                     UiStyle.IOS ->
@@ -315,16 +375,16 @@ private fun ThemeModeSelector(
     onSelect: (ThemeMode) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text("主题模式", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 ThemeMode.entries.forEach { mode ->
                     FilterChip(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).appElasticPress(),
                         selected = selected == mode,
                         onClick = { onSelect(mode) },
                         label = {
@@ -350,13 +410,13 @@ private fun ColorPaletteSelector(
     onSelect: (Color) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text("主题色", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             ) {
                 // P1-6：颜色名**本来就在** `PresetColors` 里（"哔哩粉"/"蓝色"…），
                 // 这里此前用 `_` 把它丢掉了，于是色板块是个没有名字的按钮。
@@ -389,6 +449,11 @@ private fun ColorItem(
                 if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 else Modifier
             )
+            // 全局拖拽反馈：色板是纯色圆盘可点件，按压手感必须与其余控件一致。
+            // `highlightShape = CircleShape` 与上面 `clip(CircleShape)` 同源，
+            // 光斑才裁在圆内（默认 RoundedCornerShape(50) 对 48dp 正方恰好等价，
+            // 但显式绑同一个形状，日后改尺寸不会静默错位）。
+            .appElasticPress(highlightShape = CircleShape)
             .clickable(onClick = onClick)
             // P1-6（无障碍）：这块只有纯色 + 选中对勾，**没有任何文字**，
             // 不给名字的话读屏用户听到的是一个无名按钮，分不清"哔哩粉"和"蓝色"。
@@ -416,7 +481,7 @@ private fun PaletteStyleSelector(
     enabled: Boolean = true
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text(
                 "调色盘风格",
                 style = MaterialTheme.typography.titleMedium,
@@ -426,7 +491,7 @@ private fun PaletteStyleSelector(
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 }
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             PaletteStyle.entries.forEach { style ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -436,7 +501,7 @@ private fun PaletteStyleSelector(
                     TextButton(
                         onClick = { onSelect(style) },
                         enabled = enabled,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text(
                             text = paletteStyleLabel(style),
@@ -455,6 +520,257 @@ private fun PaletteStyleSelector(
                     }
                 }
             }
+        }
+    }
+}
+
+// ── 22 风格 HCT 体系（种子配色维度）──────────────────────────────────────────
+//
+// 三组设置的真实生效条件是：MATERIAL + 关闭动态取色 + paletteStyle != MONOCHROME。
+// 其它情况保留用户选择（与上游"置灰保留值"同款语义），避免"切回来发现设置丢了"。
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SeedPaletteStyleSelector(
+    selected: SeedPaletteStyle,
+    onSelect: (SeedPaletteStyle) -> Unit,
+    enabled: Boolean = true
+) {
+    val options = remember { resolveSeedPaletteStyleOptions() }
+    var showSheet by remember { mutableStateOf(false) }
+    val current = options.firstOrNull { it.value == selected }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 全局拖拽反馈：整张"色彩风格"卡是可点件（点开 22 档弹层），
+            // 位置在 `clickable` 之前 ⇒ 形变与按压光斑覆盖整卡。
+            .appElasticPress(enabled = enabled)
+            .clickable(enabled = enabled) { showSheet = true }
+    ) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
+            Text(
+                "色彩风格",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
+            Spacer(Modifier.height(BiliSpacing.xs))
+            Text(
+                text = seedPaletteStyleDisplayLabel(selected),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+                }
+            )
+            val description = current?.description
+            if (description != null) {
+                // 微间距 2dp：BiliSpacing 最小是 xs=4dp，硬套 token 会改变布局，故保留字面量。
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // 微间距 2dp：BiliSpacing 最小是 xs=4dp，硬套 token 会改变布局，故保留字面量。
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "共 ${options.size} 档 · 点按展开列表；Standard = 沿用现有配色（默认）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
+    if (showSheet) {
+        // 22 档用**弹层列表**而不是横排按钮：横排会挤成两行小方块、也塞不下描述。
+        ModalBottomSheet(
+            onDismissRequest = { showSheet = false },
+            dragHandle = { BiliSheetGrabber() }
+        ) {
+            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                items(options) { option ->
+                    AppMiuixListItem(
+                        title = seedPaletteStyleDisplayLabel(option.value),
+                        subtitle = option.description,
+                        trailing = if (option.value == selected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                        onClick = {
+                            onSelect(option.value)
+                            showSheet = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 列表里的显示名：Standard 明确标"默认"，其余用上游文案。 */
+private fun seedPaletteStyleDisplayLabel(style: SeedPaletteStyle): String =
+    if (style == SeedPaletteStyle.Standard) "Standard（默认 · 沿用现有配色）" else style.label
+
+/** 单选项一行（对比度 4 档 / 色彩标准 2 档共用；支持置灰）。 */
+@Composable
+private fun <T> SeedRadioRow(
+    option: SeedSegmentOption<T>,
+    selected: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 全局拖拽反馈：单选项整行可点（对比度 4 档 / 色彩标准 2 档共用）。
+            // 用 0.6 克制档：这是**整行宽**控件，满强度按下时整行会明显横移。
+            .appElasticPress(
+                enabled = enabled,
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f)
+            )
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = BiliSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                option.label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    selected -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface
+                }
+            )
+            val description = option.description
+            if (description != null) {
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                        alpha = if (enabled) 1f else 0.38f
+                    )
+                )
+            }
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.38f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SeedContrastSelector(
+    selected: SeedContrastLevel,
+    onSelect: (SeedContrastLevel) -> Unit,
+    enabled: Boolean = true
+) {
+    val options = remember { resolveColorContrastOptions() }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
+            Text(
+                "对比度",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
+            Spacer(Modifier.height(BiliSpacing.xs))
+            options.forEach { option ->
+                SeedRadioRow(
+                    option = option,
+                    selected = option.value == selected,
+                    enabled = enabled,
+                    onClick = { onSelect(option.value) }
+                )
+            }
+            // 当前值回显 + Reduced 的无障碍提示（只有这一档需要额外说明）
+            Text(
+                resolveColorContrastSubtitle(selected),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+            if (selected == SeedContrastLevel.Reduced) {
+                // 微间距 2dp：BiliSpacing 最小是 xs=4dp，硬套 token 会改变布局，故保留字面量。
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "低于无障碍建议：正文对比度可能不足，建议仅在个人偏好下使用",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeedColorSpecSelector(
+    selected: SeedColorSpec,
+    seedStyle: SeedPaletteStyle,
+    onSelect: (SeedColorSpec) -> Unit,
+    enabled: Boolean = true
+) {
+    // 两档都列出来：2025 在不支持的风格上**置灰并说明已回落**，而不是直接消失
+    //（用户偏好保留在设置里，切到兼容风格后自动恢复 —— 上游同款语义）。
+    val options = remember {
+        SeedColorSpec.entries.map { spec ->
+            SeedSegmentOption(spec, spec.name, resolveColorSpecDescription(spec))
+        }
+    }
+    val supports2025 = remember(seedStyle) { supportsSeedSpec2025(seedStyle) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
+            Text(
+                "色彩标准",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                }
+            )
+            Spacer(Modifier.height(BiliSpacing.xs))
+            options.forEach { option ->
+                val is2025 = option.value == SeedColorSpec.SPEC_2025
+                SeedRadioRow(
+                    option = option,
+                    selected = option.value == selected,
+                    enabled = enabled && (!is2025 || supports2025),
+                    onClick = { onSelect(option.value) }
+                )
+            }
+            if (!supports2025) {
+                // 微间距 2dp：BiliSpacing 最小是 xs=4dp，硬套 token 会改变布局，故保留字面量。
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "当前风格不支持 2025，已按 2021 生效（偏好已保留）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                resolveColorSpecSubtitle(selected),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
         }
     }
 }
@@ -486,7 +802,7 @@ private fun FontScaleSelector(
     // 拖动只更新本地刻度，松手才提交：字体缩放会写 DataStore 并触发全局重组
     var sliderIdx by remember(scale) { mutableIntStateOf(idx) }
     Card {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -498,13 +814,15 @@ private fun FontScaleSelector(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            Slider(
+            Spacer(Modifier.height(BiliSpacing.sm))
+            // 设置页批 3：字体大小改用 Miuix Slider 原语。拖动只改本地 sliderIdx、
+            // 松手才 onScaleChange 的既有语义完全保留；valueRange/steps 逐字一致。
+            AppMiuixSlider(
                 value = sliderIdx.toFloat(),
                 onValueChange = { sliderIdx = sliderIndex(it, FONT_SCALES.lastIndex) },
                 onValueChangeFinished = {
                     val newScale = FONT_SCALES[sliderIdx]
-                    if (kotlin.math.abs(newScale - scale) < 0.01f) return@Slider
+                    if (kotlin.math.abs(newScale - scale) < 0.01f) return@AppMiuixSlider
                     onScaleChange(newScale)
                 },
                 valueRange = 0f..(FONT_SCALES.size - 1).toFloat(),
@@ -534,7 +852,7 @@ private fun UiScaleSelector(
     }
     var sliderIdx by remember(scale) { mutableIntStateOf(idx) }
     Card {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -553,7 +871,7 @@ private fun UiScaleSelector(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             Slider(
                 value = sliderIdx.toFloat(),
                 onValueChange = { sliderIdx = sliderIndex(it, UI_SCALES.lastIndex) },
@@ -581,7 +899,7 @@ private fun RoundScreenSafePaddingSelector(
     }
     var sliderIdx by remember(scale) { mutableIntStateOf(idx) }
     Card {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -600,7 +918,7 @@ private fun RoundScreenSafePaddingSelector(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             Slider(
                 value = sliderIdx.toFloat(),
                 onValueChange = {
@@ -630,7 +948,7 @@ private fun PullRefreshDistanceSelector(
     }
     var sliderIdx by remember(distanceDp) { mutableIntStateOf(idx) }
     Card {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -649,7 +967,7 @@ private fun PullRefreshDistanceSelector(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             Slider(
                 value = sliderIdx.toFloat(),
                 onValueChange = {
@@ -681,16 +999,16 @@ private fun TransitionStyleSelector(
     onSelect: (TransitionStyle) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text("过渡动画", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(BiliSpacing.xs))
             Text(
                 "作用于二级页面的推入/返回（设置、空间、搜索、历史等）；" +
                     "视频页开合走无缝过渡（见播放设置）、底栏 Tab 切换为固定淡入淡出，均不受此项影响。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             TransitionStyle.entries.forEach { style ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -699,7 +1017,7 @@ private fun TransitionStyleSelector(
                 ) {
                     TextButton(
                         onClick = { onSelect(style) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text(
                             text = transitionStyleLabel(style),
@@ -731,6 +1049,51 @@ private fun transitionStyleLabel(style: TransitionStyle): String = when (style) 
     TransitionStyle.SLIDE -> "滑动"
 }
 
+/**
+ * 全局拖拽反馈开关（上游 BiliPai 同名功能）。
+ *
+ * ## 副标题为什么用上游原话
+ * 「统一控制按钮与胶囊的拖动形变，关闭后保留按压反馈」—— 这句话把**两种反馈的
+ * 边界**说清楚了，而这正是最容易误解的地方：用户会以为关掉之后按钮就没反应了。
+ * 实测行为是"仍会鼓起、只是不再跟手拉伸"，副标题必须把这个承诺写出来。
+ */
+@Composable
+private fun GlobalDragFeedbackToggle(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    /** 由调用方传入（调用方已经算过一次，见 `UiStyleDecisionRatchetTest` 的散点棘轮）。 */
+    isIOS: Boolean
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(BiliSpacing.lg),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("全局拖拽反馈", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(BiliSpacing.xs))
+                Text(
+                    "统一控制按钮与胶囊的拖动形变，关闭后保留按压反馈",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(BiliSpacing.md))
+            // 与全站其它开关同一出口：iOS 档走 `AppMiuixSwitch`（原语内部已挂
+            // `appElasticPress()`，外层**不要**再挂 —— 叠加会双抖）。
+            // 这里此前是裸 M3 `Switch`：用户档位是 IOS，于是整页只有这一颗开关
+            // 是 Material 观感（第 34 轮 D8「弹层/控件语言并存」的同类问题）。
+            if (isIOS) {
+                AppMiuixSwitch(checked = enabled, onCheckedChange = onToggle)
+            } else {
+                Switch(checked = enabled, onCheckedChange = onToggle)
+            }
+        }
+    }
+}
+
 private fun paletteStyleLabel(style: PaletteStyle): String = when (style) {
     PaletteStyle.TONAL_SPOT -> "特调"
     PaletteStyle.EXPRESSIVE -> "表现力"
@@ -745,16 +1108,16 @@ private fun AnimationSpeedSelector(
     onSelect: (AnimationSpeed) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text("动画速度", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 AnimationSpeed.entries.forEach { s ->
                     FilterChip(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).appElasticPress(),
                         selected = speed == s,
                         onClick = { onSelect(s) },
                         label = {
@@ -782,7 +1145,7 @@ private fun CornerStyleSelector(
     enabled: Boolean = true
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text(
                 "圆角风格",
                 style = MaterialTheme.typography.titleMedium,
@@ -792,14 +1155,14 @@ private fun CornerStyleSelector(
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 }
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 CornerStyle.entries.forEach { s ->
                     FilterChip(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).appElasticPress(),
                         selected = selected == s,
                         onClick = { onSelect(s) },
                         enabled = enabled,
@@ -828,7 +1191,7 @@ private fun PlayerControlsMaterialSelector(
     enabled: Boolean = true
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text(
                 "播放页控件质感",
                 style = MaterialTheme.typography.titleMedium,
@@ -838,21 +1201,21 @@ private fun PlayerControlsMaterialSelector(
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 }
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(BiliSpacing.xs))
             Text(
                 "磨砂 = 均匀雾面，画面上最稳；液态 = 强折射 + 高光边，质感更重",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 // 只给这两档：OFF 由上面的「播放页控件模糊」开关表达，避免两处开关语义重叠
                 listOf(GlassMaterial.FROSTED, GlassMaterial.LIQUID).forEach { m ->
                     FilterChip(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).appElasticPress(),
                         selected = selected == m,
                         onClick = { onSelect(m) },
                         enabled = enabled,
@@ -878,7 +1241,7 @@ private fun GlassSection(
     onStrengthChange: (Float) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text(
                 "液态玻璃",
                 style = MaterialTheme.typography.titleMedium,
@@ -888,20 +1251,20 @@ private fun GlassSection(
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 }
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             Text(
                 "仅 iOS 风格下生效：Dock、首页顶栏与播放胶囊使用背板模糊材质（minSdk 33，全设备完整生效）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 GlassMaterial.entries.forEach { m ->
                     FilterChip(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).appElasticPress(),
                         selected = material == m,
                         onClick = { onMaterialChange(m) },
                         enabled = isIOS,
@@ -919,7 +1282,7 @@ private fun GlassSection(
                 }
             }
             if (material == GlassMaterial.LIQUID) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(BiliSpacing.md))
                 Text(
                     "统一强度（Dock / 顶栏 / 胶囊 / 角标 / 播放控件）",
                     style = MaterialTheme.typography.bodySmall,

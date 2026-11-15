@@ -159,6 +159,53 @@ class VideoLogicGuardTest {
         )
     }
 
+    /**
+     * **刷视频会话内封面垫底必须让位给 veil**（2026-10-11，修用户反复反馈的
+     * 「每次刷视频会出现闪预览图」）。
+     *
+     * ## 缺陷机制（两条各自正确的设计撞在一起）
+     * 1. `CoverSettleBackdrop` 按 `key(videoIdsKey)` 归键（上面那条守卫要求的）；
+     * 2. `videoIdsKey = videoState.ids`，而**会话内每翻一页 ids 都会整体换新**
+     *    （`openSwipeTarget` 把 `_targetStack` 换成新目标 ⇒ `applyDetailResult` 覆盖 ids）。
+     *
+     * 两者叠加 ⇒ 每次翻页都重新挂载垫底（`dismissed=false` / `alpha=1f`），
+     * 而它画的 `coverBackdropUrl` 是**进入详情时那个 Intent 里的封面**（会话内不变）
+     * ⇒ 把**最开始那一支视频的封面**全屏盖在新视频上，等首帧到了才淡出。
+     * 用户看到的就是"闪一下预览图"（而且是张不相干的图）。
+     *
+     * ## 判据
+     * pager 真的在渲染刷视频流时（`pagerActive`，与进全屏动效判据**逐字同一个**），
+     * 垫底整块不画；会话内翻页的垫底由 `SwipeWaitVeil` 负责（它拿的是**当前页**的
+     * `entry.cover`，且自带淡入/淡出时序）。story 入口在 `swipeAnchor == null` 的
+     * 引导期仍要保留垫底（那时画的确实是当前这一支的封面）。
+     */
+    @Test
+    fun coverBackdropStandsDownInsideSwipeSession() {
+        val lines = codeOf("VideoScreen.kt")
+        assertTrue(
+            "封面垫底必须以 `pagerActive` 为门（= swipeSessionActive && swipeAnchor != null）：" +
+                "否则会话内每次翻页都会把**进入详情时那一支**的封面重新盖到新视频上" +
+                "（用户反馈的「每次刷视频会出现闪预览图」）。",
+            countMatching(lines, """if \(!pagerActive\) \{""") == 1
+        )
+        val gateAt = lines.indexOfFirst { it.contains("if (!pagerActive) {") }
+        val callAt = lines.indexOfFirst { it.contains("CoverSettleBackdrop(") }
+        assertTrue(
+            "`if (!pagerActive)` 必须真的**包住** CoverSettleBackdrop 调用点（当前门在调用点之后，等于没门）。",
+            gateAt in 0 until callAt
+        )
+        assertTrue(
+            "门内必须仍然保留 `coverBackdropUrl?.let`：story 引导期（anchor 还是 null）" +
+                "与普通详情打开路径都靠它垫底，删掉会退回「首屏黑底」。",
+            countMatching(lines, """coverBackdropUrl\?\.let \{ url ->""") == 1
+        )
+        assertTrue(
+            "`pagerActive` 的判据必须与进全屏动效那条**逐字一致**" +
+                "（两处对「pager 是否在渲染」的口径不能各算一套）。",
+            countMatching(lines, """val pagerActive = swipeSessionActive && swipeAnchor != null""") == 2
+        )
+    }
+
     // ── D6：dragMs 不得在 dispose 后残留 ─────────────────────────────────────
 
     @Test
@@ -177,6 +224,107 @@ class VideoLogicGuardTest {
             "兜底清理必须经 rememberUpdatedState 取最新回调，否则 DisposableEffect(Unit) " +
                 "捕获的是第一次组合的旧闭包。",
             countMatching(host, """rememberUpdatedState\(""") == 1
+        )
+    }
+
+    // ── D8：控制条那一排必须有"可收缩"的孩子，否则亏空全砸在最后一位 ──────────
+
+    @Test
+    fun controlBarKeepsTrailingIconFromBeingSqueezed() {
+        val lines = codeOf("player${FS}VideoPlayerPane.kt")
+        // ── W27 行号/锚点漂移记录（2026-10-16「滑动/运行卡顿」性能修复批次）──────
+        // 锚点从 `private fun PlayerCtrlBar(` 改为 `private fun RowScope.PlayerTimeTextLeaf(`。
+        //
+        // 原因：进度流（500ms 一跳）此前在 `PlayerCtrlBarHost` 顶部 collect，导致整个
+        // 宿主连同整条控制条每 500ms 重组。现在订阅下沉到两个最小叶子 —— 时间文本与
+        // 进度线 —— 时间文本因此从 `PlayerCtrlBar` 体内**搬到** `PlayerTimeTextLeaf`，
+        // 它的 `.weight(1f)` 与 `overflow = TextOverflow.Ellipsis` 也一并搬走。
+        //
+        // **断言语义一字未改**：守的仍是"这一排必须有一个非 Spacer 的孩子吃 weight
+        // + 时间文本必须显式给 overflow"。只是被守的形态换了个函数承载 ——
+        // 那个函数就是"时间文本"本身，语义上比原先锚在父函数上更准。
+        val bar = blockBody(lines, "private fun RowScope.PlayerTimeTextLeaf(")
+
+        // 这条守的是**形态**，不是外观：Compose 的 Row 先量无权重孩子、空间不够时
+        // 亏损**全部落在最后一个无权重孩子**身上。2026-10-15 真机跨两轮两次实测
+        // （非同一个包）：`2:08`/`480P` 时右下角「全屏」图标字形 41×38px（满尺寸），
+        // 换成 `6:11`/`1080P` 后被压到 **9×9px（22%）**——两次时长都是 4 字符，
+        // 差别只在画质那一位。图标连同触摸区一起缩成一条缝。
+        // 根因是当时整排只有中段 Spacer 有权重，其余 6 个孩子 weight=null。
+        //
+        // 因此这一排**必须至少有一个非 Spacer 的孩子吃 weight**，让可变宽的那一项
+        // （时间文本）承担收缩、把固定尺寸的按钮组完整留给右侧。
+        val weightedNonSpacer = bar.count { line ->
+            line.contains(".weight(") && !line.trimStart().startsWith("Spacer(") &&
+                !line.contains("Spacer(")
+        }
+        assertTrue(
+            "控制条那一排必须有一个**非 Spacer** 的孩子吃 weight —— 否则窄屏下亏空全落在" +
+                "最后的「全屏」图标上（真机实测被压到 9×9px，只剩满尺寸的 22%）。" +
+                "缩的是只读的时间文本，不是可点按钮。",
+            weightedNonSpacer >= 1
+        )
+
+        // 反向：时间文本必须带 overflow，否则长时长（18 字符 ≈113dp）被硬裁成半个字，
+        // 读作"乱码"而不是"被截断"。注意 codeLines 会清空注释行 ⇒ 只能锚参数形态。
+        assertTrue(
+            "时间文本必须显式给 overflow（默认 Clip 会把字符切成一半）。",
+            countMatching(bar, """overflow = TextOverflow\.Ellipsis""") >= 1
+        )
+    }
+
+    // ── D8b：进度行必须随控制层显隐（iOS-2；用户 2026-10-02 口径的可验判据）─────
+
+    /**
+     * **进度行只许渲染在控制层容器内**（`AnimatedVisibility(showCtrl)` 的块体里）。
+     *
+     * ## 为什么需要这条
+     * 用户 2026-10-02 明确否掉过"贴屏幕底边常驻的细进度条"（「把底部细进度条这个功能
+     * 删掉，我不需要」）。2026-10-16 的 UI 现代化那一轮把它搬出容器、常驻贴底 —— 方向错了；
+     * iOS-2 把它收回容器内、随控制条显隐。**"收进去了"必须能被机器验证**，不能靠"我记得改了"。
+     *
+     * ## 为什么是**双向**断言（缺一即假绿）
+     * - 只断"块内有 1 处" ⇒ 挡不住"块内留一份、块外**再加**一份"（外面那份会常驻）；
+     * - 只断"宿主体内总数为 1" ⇒ 挡不住"把唯一那份搬到块外"（总数仍是 1，但已经常驻了）。
+     * ⇒ **两条同时断**才闭合。
+     *
+     * ⚠️ 反向弱判据被明确禁止："数 `AnimatedVisibility(` 出现次数"分不清谁在谁里面 —— 宿主
+     * 里可能有多处 `AnimatedVisibility`，计数相等并不蕴含包含关系。
+     *
+     * ⚠️ 本判据锚的是**语法形态** `PlayerProgressLeaf(`（`codeOf` 会清空注释行，
+     * 锚注释等于锚空气 —— 本仓 W20/W21 教训）。
+     *
+     * 另有 `swipeProgressLineStaysRemoved` 守"旧常驻组件（`SwipeProgressLine` 等）不许回来"，
+     * 两条互不替代。**本条是追加，不是替换。**
+     */
+    @Test
+    fun progressLineIsRenderedOnlyInsideTheControlLayer() {
+        val lines = codeOf("player${FS}VideoPlayerPane.kt")
+        val host = blockBody(lines, "private fun PlayerCtrlBarHost(")
+
+        // 断言①：宿主体内该调用**恰好 1 处**（防"块外再加一份"）。
+        // 定义在另一支顶层函数里，不在本函数体内 ⇒ 不会被算进来。
+        val total = host.count { it.contains("PlayerProgressLeaf(") }
+
+        // 断言②：那一处必须在 `AnimatedVisibility(` 的**块体**内。
+        // 定界方式与 `blockBody` 同款（见过 `{` 才开始、`depth <= 0` 结束），
+        // 差别只是起点由行号给出 —— `blockBody` 只能按签名前缀找，无法用于块内定位。
+        val avAt = host.indexOfFirst { it.contains("AnimatedVisibility(") }
+        assertTrue(
+            "`PlayerCtrlBarHost` 体内找不到 `AnimatedVisibility(` —— 控制层显隐的实现变了？" +
+                "本判据按「控制层包住进度行」来验证，找不到容器就必须改判据而不是放行。",
+            avAt >= 0
+        )
+        val avBody = braceBalancedAt(host, avAt)
+        val insideCount = avBody.count { it.contains("PlayerProgressLeaf(") }
+
+        assertEquals(
+            "进度行必须**只**渲染在控制层容器（`AnimatedVisibility(showCtrl)`）内：" +
+                "宿主体内共 $total 处、容器内 $insideCount 处。要求「容器内 1 处」且「宿主体内总共" +
+                "也是 1 处」—— 容器内 0 处 = 被搬到外面常驻了（违反用户 2026-10-02 口径）；" +
+                "宿主体内 >1 处 = 容器外又加了一份，那份照样常驻。",
+            true,
+            insideCount == 1 && total == 1
         )
     }
 
@@ -386,7 +534,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun portraitSwipePagerStaysSinglePlayerAndStackTopReplace() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val screen = codeOf("VideoScreen.kt")
         val vm = codeOf("VideoViewModel.kt")
         assertTrue(
@@ -415,8 +563,8 @@ class VideoLogicGuardTest {
             "pager 必须从调用方拿到当前播放的 ids（currentBvid / currentAid）——" +
                 "只传一个已经拼好的字符串，等于把「取流前算的 key」和「取流后算的 key」" +
                 "又混成同一个东西，本 bug 会原样复发。",
-            countMatching(pager, """currentBvid:\s*String\?""") == 1 &&
-                countMatching(pager, """currentAid:\s*Long""") == 1 &&
+            countMatching(pager, """currentBvid:\s*String\?""") >= 1 &&
+                countMatching(pager, """currentAid:\s*Long""") >= 1 &&
                 countMatching(screen, """currentAid\s*=\s*videoState\.ids\.aid""") == 1
         )
         assertTrue(
@@ -488,7 +636,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeBackClosesSheetsBeforeLeavingSession() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val policy = codeOf("SwipeBackPolicy.kt")
         assertTrue(
             "会话必须自己接管 back（含系统侧滑返回）：BackHandler 的 enabled 由纯判据决定，" +
@@ -519,7 +667,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeMoreSheetWiresDislikeLoop() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val pane = codeOf("player/VideoPlayerPane.kt")
         val vm = codeOf("VideoViewModel.kt")
         val policy = codeOf("SwipeDislikeRemovalPolicy.kt")
@@ -528,7 +676,7 @@ class VideoLogicGuardTest {
                 "不感兴趣只在 feed 源出现（relate/story 无负反馈通道 → 不做假按钮）。",
             countMatching(pane, """onOpenMore: \(\(\) -> Unit\)\? = null""") == 1 &&
                 countMatching(pane, """onClick = onOpenMore""") == 1 &&
-                countMatching(pager, """canDislike = currentEntry\?\.dislikeContext != null""") == 1
+                countMatching(pager, """if \(currentEntry\?\.dislikeContext != null\) \{""") == 1
         )
         assertTrue(
             "退队必须走 SwipeDislikeRemovalPolicy（摘当前页页号不变=前进一支、锚点不可摘）；" +
@@ -547,19 +695,41 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeMoreSheetShowsOnlyRealEntries() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "「更多」面板的每一项都必须直连既有能力（举报/稍后再看/下载/画质不在会话内新造）：",
-            countMatching(pager, """text = "不感兴趣"""") == 1 &&
-                countMatching(pager, """text = "撤回不感兴趣"""") == 1 &&
-                countMatching(pager, """text = "弹幕开关"""") == 1 &&
-                countMatching(pager, """text = "复制链接"""") == 1 &&
-                countMatching(pager, """text = "系统分享"""") == 1 &&
+            countMatching(pager, """title = "不感兴趣"""") == 1 &&
+                countMatching(pager, """title = "撤回不感兴趣"""") == 1 &&
+                countMatching(pager, """title = "弹幕开关"""") == 1 &&
+                countMatching(pager, """title = "复制链接"""") == 1 &&
+                countMatching(pager, """title = "系统分享"""") == 1 &&
                 // 2026-10-03（PT-06）：拉黑该 UP —— 直连既有 gRPC 拉黑能力（UpBlocker），
                 // ownerMid > 0 才显示；二次确认后才对被拉黑账号实际生效（见 BlockedUpWiringTest）
-                countMatching(pager, """text = "拉黑该 UP 主"""") == 1 &&
-                countMatching(pager, """if \(canUndoDislike\) \{""") == 1 &&
+                countMatching(pager, """title = "拉黑该 UP 主"""") == 1 &&
+                // 撤回入口的门控：只在"有可撤条目"时出现（`swipeDislikeUndoable`）。
+                // **形态更新 · 第 34 轮**：动作清单从死代码 `SwipeMoreSheetContent`
+                // （`if (canUndoDislike) {` 具名形参）改到 pager 内联 `buildList`，
+                // 门控写成 `if (swipeDislikeUndoable) {`。实质约束不变：
+                // 「撤回」这一项必须被条件包住，不能无条件出现。
+                countMatching(pager, """if \(swipeDislikeUndoable\) \{""") == 1 &&
+                // 不做假按钮：举报无接口，会话内不得出现
                 countMatching(pager, """举报""") == 0
+        )
+        assertTrue(
+            "「更多」面板必须走 IOSActionSheet（用户档位 ui_style=IOS），" +
+                "且**不许**再出现 Material 方角的 `AlertDialog(` —— 那是第 34 轮 D8" +
+                "「三套对话框语言并存」的原始形状。\n" +
+                "⚠️ 判据用 `(?<!IOS)AlertDialog\\(`：`IOSAlertDialog(` 是**正确**的那一支" +
+                "（拉黑二次确认），它的名字里含 `AlertDialog(` 子串，裸正则会把正确判成错误。",
+            countMatching(pager, """IOSActionSheet\(""") == 1 &&
+                countMatching(pager, """(?<!IOS)AlertDialog\(""") == 0 &&
+                countMatching(pager, """TextButton\(""") == 0
+        )
+        assertTrue(
+            "`SwipeMoreSheetContent` 是第 34 轮拆分留下的**零调用点死代码**，已删除。" +
+                "若它回来了，说明有人又把动作清单抽成一个 `IOSActionSheet` 接不进去的组件 —— " +
+                "守卫会钉在死代码上而不是真实渲染路径上。",
+            countMatching(pager, """SwipeMoreSheetContent""") == 0
         )
     }
 
@@ -604,7 +774,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipePageTransformIsPolicyDrivenAndDrawPhase() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val policy = codeOf("SwipePageTransformPolicy.kt")
         assertTrue(
             "出页缩放/淡出必须由 SwipePageTransformPolicy 给值（幅度 ≤2% 与交接落定同量级）；" +
@@ -662,8 +832,12 @@ class VideoLogicGuardTest {
         assertTrue(
             "无缝 morph 的内容必须是**锚点真实像素**：点击这一帧先 captureCardBitmap，" +
                 "再把它作为 cardBitmap 交给 tryOpen（与首页卡片同一时序）。" +
-                "退回 decorateAnchor=false 的纯色兜底就又会看到「边框突兀出现/消失」。",
-            countMatching(home, """captureCardBitmap\(anchorView\)""") == 1 &&
+                "退回 decorateAnchor=false 的纯色兜底就又会看到「边框突兀出现/消失」。\n" +
+                "**锚点放宽 · 第 34 轮（跨 agent）**：`captureCardBitmap` 现在多了 " +
+                "`anchorState = storyAnchorState` 实参、调用被拆成多行，" +
+                "旧锚 `captureCardBitmap\\(anchorView\\)` 会失配。改为锚**函数名本身**" +
+                "（意图是「必须先截真实像素」）—— 实质约束（cardBitmap/decorateAnchor 两条）不动。",
+            countMatching(home, """captureCardBitmap\(""") == 1 &&
                 countMatching(home, """cardBitmap = captured""") == 1 &&
                 countMatching(home, """decorateAnchor = captured != null""") == 1
         )
@@ -689,17 +863,84 @@ class VideoLogicGuardTest {
         )
         val screen = codeOf("VideoScreen.kt")
         assertTrue(
-            "story 模式必须常驻全屏（isFull 与 swipeSessionActive 初始即 storyMode），" +
-                "且「全屏」钮与 swipe 分支共三处 effectiveStoryMode 分叉 = 关闭页面/接管会话。",
-            countMatching(screen, """mutableStateOf\(storyMode\)""") == 2 &&
-                countMatching(screen, """swipeSessionActive = true""") == 1 &&
-                countMatching(screen, """if \(effectiveStoryMode\) \{""") == 3
+            "story 模式必须常驻全屏、常驻会话激活，且「全屏/还原」钮与 swipe 分支共用**一个**出口。\n" +
+                "**形态更新 · 第 34 轮**：重构前这里是 `mutableStateOf(storyMode)` 两处 + " +
+                "`swipeSessionActive = true` + 三处 `if (effectiveStoryMode)` 各排一遍 —— " +
+                "同一件事由 5 个布尔互相推导。现在整件事收敛成 sealed 状态：\n" +
+                "- 起步：`PlaybackPageMode.initial(storyMode)`（story 入口直接 `Story()`，恒全屏）；\n" +
+                "- 常驻全屏/会话激活：`Story` 态的 `isFull` / `swipeSessionActive` 恒真（类型保证）；\n" +
+                "- 出口：`primaryExit` **一处**取代原来的三处 `if (effectiveStoryMode)`。\n" +
+                "**语义零放宽**：三条不变式（常驻全屏 / 常驻会话 / 单一出口）全部保留，" +
+                "并额外由 `PlaybackPageModeTest.storyExitLandsOnDetailNotClosed` 钉住迁移结果。",
+            countMatching(screen, """PlaybackPageMode\.initial\(storyMode\)""") == 1 &&
+                countMatching(screen, """mutableStateOf\(storyMode\)""") == 0 &&
+                countMatching(screen, """swipeSessionActive = true""") == 0 &&
+                countMatching(screen, """val primaryExit: \(\) -> Unit = \{""") == 1 &&
+                // 反向：旧的"每个分支各排一遍"必须消失（否则又回到多真值源）
+                countMatching(screen, """if \(effectiveStoryMode\) \{""") == 0
         )
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "补货判据必须经 shouldExtendSwipeQueue 由 pager 触发 onNeedMore。",
             countMatching(pager, """onNeedMore""") >= 2 &&
                 countMatching(pager, """shouldExtendSwipeQueue\(""") == 1
+        )
+    }
+
+    /**
+     * 「还原」/「全屏」出口（`primaryExit`）必须**真的改状态**，不能只通知宿主。
+     *
+     * ## 第 35 轮核对抓到的真缺陷
+     * 第 34 轮把出口收敛成一个 `primaryExit` 时，Story 分支只写了：
+     * ```
+     * if (exit != null) exit() else onBack()   // exit = onExitStoryMode
+     * ```
+     * —— 只调宿主的 `onExitStoryMode()`（`VideoDetailActivity` 里把 `pendingStoryMode`
+     * 置回 false），**完全没有迁移 `pageMode`**。
+     *
+     * 为什么宿主的那个回调救不了它：`pageMode` 的初始化是
+     * `rememberSaveable { mutableStateOf(PlaybackPageMode.initial(storyMode)) }` ——
+     * `rememberSaveable` 的初值表达式**只在首次组合求值**，之后 `storyMode` 参数变化
+     * 不会再算一遍。所以 `pendingStoryMode = false` 之后：
+     * `pageMode` 仍是 `Story()` ⇒ `isFull` 恒真 ⇒ `fullOn` 恒真 ⇒ 页面照旧全屏。
+     * 用户症状正是交接书里那条未闭环的「点还原没反应」（需求 3 未达成）。
+     *
+     * ## 判据
+     * Story 分支里必须出现 `exitFullscreen()`（= `pageMode.exitFullscreen()`，
+     * `Story → Compact`），即状态迁移**先于/伴随**宿主通知；旧写法（只有 `exit()`）必须消失。
+     */
+    @Test
+    fun storyPrimaryExitActuallyMigratesPageMode() {
+        val screen = codeOf("VideoScreen.kt")
+        // 用既有的 blockBody 取函数体（按 `{`/`}` 深度），不手写"找结束行"的脆弱逻辑
+        val body = blockBody(screen, "val primaryExit: () -> Unit = {")
+        // **只取 Story 分支**：函数体里 `else if (pageMode.isFull) { exitFullscreen() }`
+        // 也含同一个调用，若把整个函数体当成判据，这条测试会在缺陷复现时**假绿**。
+        val storyBranchEnd = body.indexOfFirst { it.contains("} else if (pageMode.isFull)") }
+        assertTrue(
+            "找不到 `else if (pageMode.isFull)` 分支边界 —— primaryExit 的结构变了，判据必须重写。",
+            storyBranchEnd > 0
+        )
+        val storyBranch = body.subList(0, storyBranchEnd)
+        assertTrue(
+            "`primaryExit` 的 Story 分支必须调用 `exitFullscreen()`（Story → Compact）。\n" +
+                "没有这一句时，`pageMode` 永远停在 `Story()`，而 `rememberSaveable` 的初值" +
+                "只在首次组合求值 —— 宿主的 `onExitStoryMode()` 改的那个 `storyMode` 参数" +
+                "**不会**重算 pageMode，于是「还原」点了没反应（页面仍 fullOn）。\n" +
+                "（★ 判据只看 Story 分支：`else if (pageMode.isFull)` 分支里也有同一个调用，" +
+                "拿整个函数体做判据会让这条测试在缺陷复现时假绿。）",
+            storyBranch.any { it.contains("exitFullscreen()") }
+        )
+        assertTrue(
+            "Story 分支仍必须通知宿主（`onExitStoryMode`），否则宿主会再次 bootstrap story 会话。",
+            storyBranch.any { it.contains("onExitStoryMode") }
+        )
+        // 反向：`pageMode` 的初值必须仍是 rememberSaveable 的一次性初始化
+        // （写清它是为了让后来的读者不误以为 storyMode 参数变化会自动重算）
+        assertTrue(
+            "pageMode 的初值必须仍是 rememberSaveable 的一次性初始化 —— 这正是上面那条缺陷的成因。",
+            countMatching(screen, """rememberSaveable\(stateSaver = PlaybackPageMode\.Saver\)""") == 1 &&
+                countMatching(screen, """mutableStateOf\(PlaybackPageMode\.initial\(storyMode\)\)""") == 1
         )
     }
 
@@ -710,7 +951,7 @@ class VideoLogicGuardTest {
     @Test
     fun swipeFailureIsClassifiedAndRetryIsDebounced() {
         val vm = codeOf("VideoViewModel.kt")
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
             "失败必须分类（SwipeErrorPolicy.classify）并落到会话状态机（playbackFailed）；" +
@@ -740,13 +981,25 @@ class VideoLogicGuardTest {
      *
      * 1. **R1 不新增控件**：上一轮曾在播放器顶栏加过「刷视频」胶囊（PlayerPillChip），
      *    已按新方案删除——入口一律不得再以控件形态回到播放器 UI；
-     * 2. **R2 唯一触发**：会话启用必须携带 `swipeModeRequested`——简介区顶边下滑提交时
-     *    置位（`pullDownToFullscreen` 的 commit 分支是唯一置位点），离开全屏即复位；
+     * 2. **R2 唯一触发**：会话启用必须携带一次性下滑请求——简介区顶边下滑提交时置位
+     *    （`pullDownToFullscreen` 的 commit 分支是唯一置位点），离开全屏即复位；
      * 3. **R3 全屏按钮不连播**：启用判据 = 显式请求 && 队列非空，且与画幅无关
-     *    （isPortraitVideo 不得回到判据里——它另有顶栏「横屏」胶囊与方向 effect 的用途）；
+     *    （isPortraitVideo 不得回到判据里——它另有顶栏「横屏」圆钮与方向 effect 的用途）；
      * 4. **A7/A8 手势边界**：下滑手势只挂在详情布局上且保留 `canListScrollDown` 让位
      *    判据（简介能滚就不接管，普通滚动不得误进连播）；播放器面板不得挂该手势；
      *    会话内 pager 仍以 swipePagingActive = true 组合播放器（播放器手势语义不变）。
+     *
+     * ## 2026-10-19（第 34 轮重构）：锚点迁移到状态机，**语义一条未放宽**
+     * 重构前这个一次性请求是一个裸 `var swipeModeRequested by rememberSaveable`，
+     * 由页面自己读写；现在它是 `PlaybackPageMode.DetailFullscreen.swipeRequested`，
+     * 页面只通过迁移函数（`requestSwipeSession` / `resolveSwipeSession` /
+     * `exitFullscreen`）改变它。上面 R1~R4 四条**全部保留**，只是换了承载形态：
+     * - R2 唯一触发 → 断言 `requestSwipeSession()` 的唯一调用点在 commit 分支；
+     * - R3 启用判据 → 断言 `resolveSwipeSession(queueNotEmpty = ...)` 由状态机求值，
+     *   且该求值**不引用 isPortraitVideo**；
+     * - 复位 → 断言离开全屏走 `exitFullscreen()`（它把 DetailFullscreen 迁回 Compact，
+     *   请求随之消失；不再有"单独把某个布尔置 false"的写法）。
+     * 单测 `PlaybackPageModeTest` 逐条验证这些迁移的语义。
      */
     @Test
     fun swipeModeEntryIsIntroEdgePullOnly() {
@@ -759,37 +1012,46 @@ class VideoLogicGuardTest {
                 countMatching(pane, """onEnterSwipeMode""") == 0
         )
         assertTrue(
-            "刷视频请求必须是一次性状态（rememberSaveable），仅描述「这次进全屏的来路」。",
-            countMatching(screen, """var\s+swipeModeRequested\s+by\s+rememberSaveable""") == 1
+            "刷视频请求必须是一次性状态，且现在是**状态机的一个字段**" +
+                "（`PlaybackPageMode.DetailFullscreen.swipeRequested`），" +
+                "不是页面里另立的一个裸 `rememberSaveable` 布尔 —— " +
+                "后者正是重构前「两个判据并列」的来源。\n" +
+                "页面侧只允许通过 `requestSwipeSession()` 置位。",
+            countMatching(screen, """var\s+swipeModeRequested\s+by\s+rememberSaveable""") == 0 &&
+                countMatching(screen, """pageMode\.requestSwipeSession\(\)""") == 1
         )
         assertTrue(
             "会话启用判据必须是「显式下滑请求 && 队列非空」（R3：全屏按钮只进全屏），" +
+                "由状态机的 `resolveSwipeSession(queueNotEmpty=…)` **一处**求值，" +
                 "且激活日志要带上 requested 便于真机核对入口来路。",
-            countMatching(
-                screen,
-                """swipeSessionActive\s*=\s*swipeModeRequested\s*&&\s*viewModel\.swipeQueue\.value\.isNotEmpty\(\)"""
-            ) == 1 &&
+            countMatching(screen, """resolveSwipeSession\(queueNotEmpty = queueNotEmpty\)""") == 1 &&
                 countMatching(screen, """activate: requested=""") == 1
         )
         assertTrue(
-            "启用判据那一行不得引用 isPortraitVideo（画幅不参与会话启用，横屏同样可进）。",
-            !screen.first { it.contains("swipeSessionActive = swipeModeRequested") }
+            "启用判据不得引用 isPortraitVideo（画幅不参与会话启用，横屏同样可进）：" +
+                "求值发生在 `PlaybackPageMode.resolveSwipeSession` 里，参数只有 queueNotEmpty。",
+            !screen.first { it.contains("resolveSwipeSession(queueNotEmpty = queueNotEmpty)") }
                 .contains("isPortraitVideo")
         )
         assertTrue(
-            "下滑请求必须一次性：离开全屏（!fullOn 分支）复位，按钮进全屏不得复用上一次手势的请求。",
-            countMatching(screen, """swipeModeRequested = false""") == 1
-        )
-        assertTrue(
-            "唯一置位点必须在简介区下滑手势的提交分支里（R2）：手势只许定义 + 竖排详情布局" +
-                "一处挂载（多挂一个分支就多一个触发点），置位语句与 via=introPull 日志都随 commit 走。",
-            countMatching(screen, """pullDownToFullscreen\(""") == 2 &&
-                countMatching(screen, """swipeModeRequested = true""") == 1 &&
-                countMatching(screen, """enter: via=introPull""") == 1
+            "下滑请求必须一次性：离开全屏（!fullOn 分支）必须把模式迁回 Compact" +
+                "（`exitFullscreen()` 会连带清掉请求），按钮进全屏不得复用上一次手势的请求。\n" +
+                "（`exitFullscreen()` 共两处调用：①`!fullOn` 的复位分支、②全屏钮/还原钮的" +
+                "`primaryExit`。两处都走同一个迁移函数，语义一致 —— 断言的是「存在且只经由它」，" +
+                "不是「只许出现一次」。）",
+            countMatching(screen, """pageMode = pageMode\.exitFullscreen\(\)""") >= 1 &&
+                // 反向：不许再有"单独把请求布尔置 false"的旧写法（那是两个真值源）
+                countMatching(screen, """swipeModeRequested = false""") == 0
         )
         run {
             val gestureAt = screen.indexOfFirst { it.contains(".pullDownToFullscreen(") }
-            val requestAt = screen.indexOfFirst { it.contains("swipeModeRequested = true") }
+            val requestAt = screen.indexOfFirst { it.contains("pageMode.requestSwipeSession()") }
+            assertTrue(
+                "唯一置位点必须在简介区下滑手势的提交分支里（R2）：手势只许定义 + 竖排详情布局" +
+                    "一处挂载（多挂一个分支就多一个触发点），置位语句与 via=introPull 日志都随 commit 走。",
+                countMatching(screen, """pullDownToFullscreen\(""") == 2 &&
+                    countMatching(screen, """enter: via=introPull""") == 1
+            )
             assertTrue(
                 "置位语句必须写在 pullDownToFullscreen 的接线之内（onSettle 的 commit 分支），" +
                     "不能挪到别的入口上。",
@@ -809,7 +1071,7 @@ class VideoLogicGuardTest {
             countMatching(screen, """canListScrollDown\s*=\s*\{""") == 1 &&
                 countMatching(screen, """detailListState\.canScrollBackward""") == 1 &&
                 countMatching(pane, """pullDownToFullscreen""") == 0 &&
-                countMatching(codeOf("player/PortraitSwipePager.kt"), """swipePagingActive = true""") == 1
+                countMatching(swipeSessionSources(), """swipePagingActive = true""") == 1
         )
     }
 
@@ -829,24 +1091,40 @@ class VideoLogicGuardTest {
      * 传感器自动旋转也被 `shouldObservePhoneAutoRotate` 关掉。
      * bbspace 走"会话期间锁竖屏"这一侧（与抖音/B 站官方的竖屏连播一致）。
      */
+    /**
+     * 刷视频会话期间必须锁竖屏。
+     *
+     * ## 2026-10-19（第 34 轮重构）：锚点从"两个布尔或起来"改为**状态机上的一个属性**
+     * 重构前这里是 `portraitSwipeActive = swipeSessionActive || effectiveStoryMode`
+     * —— 两个各自推导的布尔，且**漏了** `swipeModeRequested`（"已请求但会话尚未激活"
+     * 的空窗），正是真机「先横屏、再切回刷视频」闪跳的来源。
+     *
+     * 现在判据收敛到 `PlaybackPageMode.locksPortrait`（= `swipeSessionActive ||
+     * swipeModeRequested || isStory`），本断言随之钉**新形态**，且比旧版更严：
+     * 旧版只要求"两条入口都覆盖"，新版额外要求"空窗也覆盖"（见
+     * `PlaybackPageModeTest.detailSwipeRoundTrip` 的 ★ 断言）。
+     */
     @Test
     fun portraitSwipeSessionLocksOrientation() {
         val screen = codeOf("VideoScreen.kt")
         assertTrue(
             "刷视频会话期间必须锁竖屏（而不是让 isPortraitVideo 的瞬时值决定方向）：" +
-                "一次翻页会转两圈，用户看到的就是「每次下滑都有旋转动画」。" +
-                "SENSOR_LANDSCAPE 共两处：原有「单视频全屏自动横屏」分支 + 会话内" +
-                "「手动横屏」分支（后者优先，见 swipeSessionOffersManualLandscape）。",
+                "一次翻页会转两圈，用户看到的就是「每次下滑都有旋转动画」。\n" +
+                "**形态更新 · 第 34 轮**：判据不再是两个布尔或起来，而是读状态机的 " +
+                "`PlaybackPageMode.locksPortrait`（单一真源，含「已请求未激活」的空窗）。",
             countMatching(screen, """val\s+portraitSwipeActive\s*=""") == 1 &&
+                countMatching(screen, """val portraitSwipeActive = pageMode\.locksPortrait""") == 1 &&
                 countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_PORTRAIT""") == 1 &&
                 countMatching(screen, """ActivityInfo\.SCREEN_ORIENTATION_SENSOR_LANDSCAPE""") == 2
         )
         assertTrue(
-            "竖屏锁判据必须同时覆盖「详情全屏的滑动会话」与「story 常驻全屏」两条入口。",
+            "竖屏锁判据必须来自**状态机**（`pageMode.locksPortrait`），" +
+                "不许再在页面里用 `swipeSessionActive || effectiveStoryMode` 重新推一遍 —— " +
+                "那正是重构前「漏掉 swipeModeRequested 空窗」的写法。",
             countMatching(
                 screen,
                 """portraitSwipeActive\s*=\s*swipeSessionActive\s*\|\|\s*effectiveStoryMode"""
-            ) == 1
+            ) == 0
         )
         val lockAt = screen.indexOfFirst {
             it.trim() == "portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT"
@@ -885,7 +1163,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeWaitsFirstFrameBehindLoadingVeil() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val waitPolicy = codeOf("SwipeWaitPolicy.kt")
         assertTrue(
             "「等首帧」必须是**粘滞**状态：换视频（SW-03 起为类型化 currentId，旧字符串 " +
@@ -934,7 +1212,13 @@ class VideoLogicGuardTest {
                 ) == 1 &&
                 countMatching(pane, """onRetry = onRetrySwipe""") == 1 &&
                 countMatching(pane, """if \(failed\) \{""") == 1 &&
-                countMatching(pane, """TextButton\(onClick = onRetry\)""") == 1 &&
+                // 第 34 轮 T2 起这颗重试按钮也挂了全局拖拽反馈，调用变成多行
+                // （`TextButton(` / `onClick = onRetry,` / `modifier = Modifier.appElasticPress()`），
+                // 而 [countMatching] 是**逐行**匹配，单条正则跨不了行。
+                // 所以拆成两条：文件里恰好只有一个 `TextButton(`、且它的 `onClick` 恰是 onRetry。
+                // 断言本意不变：加载层的失败态里必须真的有一个接好 onRetry 的重试入口。
+                countMatching(pane, """TextButton\(""") == 1 &&
+                countMatching(pane, """onClick = onRetry\b""") == 1 &&
                 countMatching(pane, """BiliParticleLoader\(""") >= 1 &&
                 countMatching(
                     codeOf("VideoScreen.kt"),
@@ -977,12 +1261,12 @@ class VideoLogicGuardTest {
                 countMatching(pane, """contentScale = ContentScale\.Fit""") == 1 &&
                 // 封面页（pager 里）必须用**同一个**变体与取景，否则"封面页一张、加载底另一张"
                 countMatching(
-                    codeOf("player/PortraitSwipePager.kt"),
+                    swipeSessionSources(),
                     """variant = BiliImageVariant\.PlayerPreview"""
                 ) == 1 &&
                 countMatching(pane, """WaitVeilScrimTopColor""") >= 2 &&
                 countMatching(pane, """VEIL_COVER_LOADER_WIDTH_FRACTION""") >= 2 &&
-                countMatching(codeOf("player/PortraitSwipePager.kt"), """swipeCoverUrl = entry\.cover""") == 1 &&
+                countMatching(swipeSessionSources(), """swipeCoverUrl = entry\.cover""") == 1 &&
                 blockBody(pane, "private fun SwipeWaitVeil(")
                     .none { it.contains("pointerInput") }
         )
@@ -1040,7 +1324,7 @@ class VideoLogicGuardTest {
                 veil.any { it.contains("alpha = chromeAlpha.value") }
         )
 
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "上下滑 pager 必须预组合邻居页（beyondViewportPageCount = 1）。",
             countMatching(pager, """beyondViewportPageCount = 1""") == 1
@@ -1096,7 +1380,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeSessionOffersFavorite() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
             "互动栏必须有收藏动作，且宿主不接时整颗不出现（不做假按钮）。",
@@ -1178,10 +1462,19 @@ class VideoLogicGuardTest {
     fun swipeSessionOffersManualLandscape() {
         val screen = codeOf("VideoScreen.kt")
         assertTrue(
-            "手动横屏必须参与方向决策，并在切视频/离开会话时收回。",
+            "手动横屏必须参与方向决策，并在切视频时收回。\n" +
+                "**形态更新 · 第 34 轮**：状态由 [PlaybackPageMode] 独占 ——\n" +
+                "- 横屏态从 `pageMode.landscapeForced` 读（不再有裸 `swipeLandscape` 变量）；\n" +
+                "- 切视频收回走 `pageMode.onVideoChanged()`（对齐 BiliPai：横屏只对点名的那一支生效）；\n" +
+                "- 翻转走 `pageMode.toggleLandscape()`。\n" +
+                "三条的**语义**与重构前逐条一致，只是承载形态从裸布尔换成状态机迁移函数" +
+                "（迁移正确性由 `PlaybackPageModeTest.landscapeOnlySticksToTheNamedVideo` 钉住）。",
             countMatching(screen, """swipeLandscape && portraitSwipeActive""") == 1 &&
-                countMatching(screen, """LaunchedEffect\(videoState\.ids, swipeSessionActive\)""") == 1 &&
-                countMatching(screen, """onToggleLandscape = \{ swipeLandscape = !swipeLandscape \}""") == 1
+                countMatching(screen, """pageMode\.onVideoChanged\(\)""") == 1 &&
+                countMatching(screen, """pageMode\.toggleLandscape\(\)""") == 1 &&
+                // 反向：裸布尔写回必须彻底消失（否则又会出现"状态机一份、页面一份"两个真值源）
+                countMatching(screen, """var\s+swipeLandscape\s+by\s+rememberSaveable""") == 0 &&
+                countMatching(screen, """swipeLandscape = !swipeLandscape""") == 0
         )
         val lockAt = screen.indexOfFirst { it.contains("swipeLandscape && portraitSwipeActive") }
         // 竖屏锁分支：当行就是 `portraitSwipeActive -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT`
@@ -1193,7 +1486,7 @@ class VideoLogicGuardTest {
             "手动横屏分支必须排在竖屏锁分支**之前**（when 取首个命中分支）——写在后面等于没写。",
             lockAt >= 0 && portraitAt >= 0 && lockAt < portraitAt
         )
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "入口只在当前视频是横屏时给（onToggleLandscape.takeIf{!isPortraitVideo}），" +
                 "且与 VideoScreen 的 isPortraitVideo 同源（currentStream）。" +
@@ -1211,9 +1504,19 @@ class VideoLogicGuardTest {
         )
         val pane = codeOf("player/VideoPlayerPane.kt")
         assertTrue(
-            "播放器要把开关渲染成胶囊（与「弹幕」胶囊同一套 chrome），null 时不出现。",
+            "播放器要把横屏开关渲染成**圆钮**（与其余控件同一套 chip，第 33 轮统一），" +
+                "null 时不出现；开/关态用图标变体表达（StayCurrentLandscape/Portrait）。\n" +
+                "**形态更新 · 第 33 轮**：用户口径「控件风格统一为同尺寸圆形」——" +
+                "顶栏原来的「横屏」/「竖屏」文字胶囊（`PlayerPillChip`）已删除，" +
+                "断言从锚文字胶囊改为锚**图标变体 + contentDescription**，意图不变" +
+                "（仍是「开关要有开/关两态、宿主不接就不出现」）。",
             countMatching(pane, """onToggleLandscape\?\.let \{ toggle ->""") == 1 &&
-                countMatching(pane, """landscapeForced\) "竖屏" else "横屏"""") == 1
+                countMatching(
+                    pane,
+                    """contentDescription = if \(landscapeForced\) "退出横屏" else "进入横屏""""
+                ) == 1 &&
+                countMatching(pane, """Icons\.Rounded\.StayCurrentPortrait""") == 1 &&
+                countMatching(pane, """Icons\.Rounded\.StayCurrentLandscape""") == 1
         )
     }
 
@@ -1237,8 +1540,8 @@ class VideoLogicGuardTest {
             "两处等待都必须用同一个粒子组件（观感一致）：播放器页的等首帧遮罩、" +
                 "封面页的加载指示；且封面页不许回退成 CircularProgressIndicator。",
             countMatching(codeOf("player/VideoPlayerPane.kt"), """BiliParticleLoader\(""") == 1 &&
-                countMatching(codeOf("player/PortraitSwipePager.kt"), """BiliParticleLoader\(""") == 1 &&
-                countMatching(codeOf("player/PortraitSwipePager.kt"), """CircularProgressIndicator""") == 0
+                countMatching(swipeSessionSources(), """BiliParticleLoader\(""") == 1 &&
+                countMatching(swipeSessionSources(), """CircularProgressIndicator""") == 0
         )
         val code = loader
             .filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
@@ -1272,6 +1575,30 @@ class VideoLogicGuardTest {
         }
     }
 
+    /**
+     * 刷视频会话的**全部源码**（pager + 第 34 轮拆分出的三个文件）。
+     *
+     * ## 为什么不是只读 `PortraitSwipePager.kt`
+     * 2026-10-19 第 34 轮把主文件从 1517 行拆成 4 个文件：
+     * `PortraitSwipePager.kt`（会话装配 + effect）、`SwipeSessionChrome.kt`（常驻 chrome /
+     * 互动栏 / 评论卡 / 收藏面板）、`SwipeSessionLeaves.kt`（封面页 / 队列尾提示 /
+     * 横屏 FAB）、`SwipeMoreSheet.kt`（更多面板 + 拉黑确认）。
+     *
+     * 本类里那些"钉会话行为"的断言**关心的是行为在不在**，不是"它在哪个文件里"。
+     * 只读主文件会让它们全部变成假红（源码其实是对的，只是搬了家）——
+     * 2026-10-19 接手时实测 15 条假红，全部由拆分引起。
+     *
+     * ⇒ 统一按"会话源码合集"扫描。仍然逐条数、仍然是 `== 1`，不放松任何一条实质约束。
+     * 新增会话文件时**必须**加进这个清单，否则新文件里的行为对守卫不可见。
+     */
+    private fun swipeSessionSources(): List<String> =
+        listOf(
+            "player/PortraitSwipePager.kt",
+            "player/SwipeSessionChrome.kt",
+            "player/SwipeSessionLeaves.kt",
+            "player/SwipeMoreSheet.kt",
+        ).flatMap { codeOf(it) }
+
     /** 取以 [signaturePrefix] 开头的函数体（含签名），按花括号配平定界。 */
     private fun blockBody(lines: List<String>, signaturePrefix: String): List<String> {
         val start = lines.indexOfFirst { it.trimStart().startsWith(signaturePrefix) }
@@ -1296,6 +1623,80 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * 从 [lines] 的 [startIndex] 行起，按花括号配平取"该行所属块"的 body（含起始行）。
+     *
+     * 与 [blockBody] 同款循环（见过 `{` 才开始、`depth <= 0` 结束），**唯一的差别是起点
+     * 由行号给出而不是按签名前缀查找** —— 用于验证"某个调用落在**另一个块**内部"
+     * （如 `PlayerProgressLeaf(` 是否在 `AnimatedVisibility(` 块体内），
+     * 那种场景没法用签名定位。
+     *
+     * ## ⚠️ 必须先跳过参数列表（2026-10-17 修复，一次真实假红）
+     *
+     * 旧实现从起始行直接扫花括号，把**参数列表里的内联 lambda** 当成了块体边界。
+     * 实例如 `AnimatedVisibility(` 的参数里有
+     * `slideInVertically(tween(...)) { it / 16 }` —— 那个 `{ it / 16 }` 会在参数列表中途
+     * 就 `depth` 归零，于是 body 只截到 4 行、根本没进块体，块内那个
+     * `PlayerProgressLeaf(` 被数成 0 ⇒ **守卫假红**（源码其实是对的）。
+     *
+     * 修法：先按**圆括号**配平走过参数列表，出列表后的第一个 `{` 才是块体开头。
+     * 参数列表里允许圆括号/方括号嵌套，但不允许出现块体级花括号 --
+     * 若真出现了（如 `content = { ... }` 这种命名参数直接给 lambda），
+     * 那么在参数列表内就已经见过配平的 `{...}`，此时把它当作块体是**正确**的。
+     */
+    private fun braceBalancedAt(lines: List<String>, startIndex: Int): List<String> {
+        // ── 阶段 1：从起始行往下，先"越过参数列表"，找到块体开括号 `{` 的行/列 ──
+        // 参数列表用圆括号配平计；列表内出现的 `{...}`（lambda 实参）整体跳过。
+        var paren = 0
+        var startLine = -1
+        var startCol = -1
+        outer@ for (i in startIndex until lines.size) {
+            val s = lines[i]
+            var c = 0
+            while (c < s.length) {
+                val ch = s[c]
+                when (ch) {
+                    '(' -> paren++
+                    ')' -> paren--
+                    '{' -> {
+                        if (paren <= 0) { startLine = i; startCol = c; break@outer }
+                        // 参数列表内的 lambda：跳到它配平的 `}` 之后
+                        var d = 0
+                        var ci = c
+                        while (ci < s.length) {
+                            if (s[ci] == '{') d++
+                            if (s[ci] == '}') { d--; if (d == 0) { c = ci; break } }
+                            ci++
+                        }
+                    }
+                }
+                c++
+            }
+        }
+        assertTrue(
+            "从第 ${startIndex + 1} 行起找不到块体开括号 `{` —— 判据的块定位失效，" +
+                "必须改判据而不是放行（W26/W34）。",
+            startLine >= 0
+        )
+
+        // ── 阶段 2：从块体开括号起做花括号配平，取整个块 ──
+        val body = mutableListOf<String>()
+        var depth = 0
+        var opened = false
+        for (i in startLine until lines.size) {
+            body += lines[i]
+            val from = if (i == startLine) startCol else 0
+            for (c in from until lines[i].length) {
+                when (lines[i][c]) {
+                    '{' -> { depth++; opened = true }
+                    '}' -> depth--
+                }
+            }
+            if (opened && depth <= 0) break
+        }
+        return body
+    }
+
+    /**
      * 底部细进度条 / 可拖 seek **已按产品决定删除**（2026-10-02）。
      *
      * 历史：SW-15 曾要求「底部常驻细进度条 + 横向拖动 seek + 时间气泡」，本测试原先钉的
@@ -1314,7 +1715,7 @@ class VideoLogicGuardTest {
     @Test
     fun swipeProgressLineStaysRemoved() {
         val pane = codeOf("player/VideoPlayerPane.kt")
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "底部细进度条已删除：pane 里不许再有该组件定义、pager 不许再调用。",
             countMatching(pane, """SwipeProgressLine""") == 0 &&
@@ -1337,7 +1738,7 @@ class VideoLogicGuardTest {
         assertTrue(
             "会话级底部信息层仍在（标题/UP/标签必须钉在会话层、翻页不动）。",
             countMatching(pager, """SwipeSessionInfoLine\(""") == 1 &&
-                blockBody(pager, "private fun SwipeCoverPage(").none {
+                blockBody(pager, "internal fun SwipeCoverPage(").none {
                     it.contains("displayAuthor") || it.contains("titleMedium")
                 }
         )
@@ -1351,14 +1752,14 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeQueueTailShowsHintOnLastPage() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "尾部提示必须只在**最后一页**且状态非 Idle 时出现（否则会打扰正常浏览）。",
             countMatching(
                 pager,
                 """if \(pagerState\.currentPage >= pages\.lastIndex && tailState != SwipeQueueTail\.Idle\) \{"""
             ) == 1 &&
-                countMatching(pager, """private fun SwipeQueueTailHint\(""") == 1 &&
+                countMatching(pager, """internal fun SwipeQueueTailHint\(""") == 1 &&
                 countMatching(pager, """SwipeQueueTail\.Extending -> "正在为你找更多视频…"""") == 1 &&
                 countMatching(pager, """SwipeQueueTail\.Exhausted -> "已经是最后一个了"""") == 1 &&
                 countMatching(codeOf("VideoScreen.kt"), """tailState = swipeTail""") == 1
@@ -1366,7 +1767,7 @@ class VideoLogicGuardTest {
         assertTrue(
             "提示不许带 pointerInput/clickable（不能吃掉上下滑手势），" +
                 "间距必须走 BiliSpacing token（不新增 dp 字面量，lint 棘轮会判红）。",
-            blockBody(pager, "private fun SwipeQueueTailHint(").let { body ->
+            blockBody(pager, "internal fun SwipeQueueTailHint(").let { body ->
                 body.none { it.contains("pointerInput") || it.contains("clickable") } &&
                     body.none { it.contains(".dp") }
             }
@@ -1382,7 +1783,7 @@ class VideoLogicGuardTest {
     @Test
     fun swipeSessionShowsPersistentInfoLine() {
         val pane = codeOf("player/VideoPlayerPane.kt")
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "常驻信息必须与底部三件套同一门控（会话内 + 不在等首帧），并且真的接了标题与 UP。" +
                 "BiliPai 手法：读本作用域已收集的 state，调用点不得重复 collectAsStateWithLifecycle。\n" +
@@ -1451,7 +1852,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun autoAdvanceConsultsSettingAndIdempotency() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "自动翻页必须走 shouldAutoAdvanceToNextSwipePage，并把「开关 / 单曲循环 / 最后一页 / " +
                 "本支是否已翻过」四个判据都传进去 —— 少任何一个都会退化成旧行为。\n" +
@@ -1489,7 +1890,7 @@ class VideoLogicGuardTest {
     @Test
     fun swipeSessionShowsActionRail() {
         val pane = codeOf("player/VideoPlayerPane.kt")
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "互动栏必须接上真实状态与计数（userState.liked / stat.like）、" +
                 "点赞走 viewModel.toggleLike，分享走 ShareUtils.videoUrl + shareText" +
@@ -1529,15 +1930,19 @@ class VideoLogicGuardTest {
                 ) == 1 &&
                 countMatching(pager, """waitingFirstFrame &&""") == 0 &&
                 countMatching(pager, """onPlaybackSheetVisibilityChange = \{""") == 1 &&
-                countMatching(pager, """playbackSheetVisible = it""") == 1
+                countMatching(pager, """playbackSheetVisible = visible""") == 1
         )
         assertTrue(
             "互动栏计数必须**粘滞**（用户反馈「消失再出现」的计数侧）：换页时 stat 为 null，" +
-                "三个计数一律走 rememberStickyText；liked/faved 仍按真值（粘滞会显示错觉）。",
+                "三个计数一律走 rememberStickyText；liked/faved 仍按真值（粘滞会显示错觉）。\n" +
+                "**形态更新 · A16（2026-10-13）**：点赞/收藏的 label 由 `stickyXxx ?: \"…\"` 改为" +
+                "三态 `if (xxx == null) \"待确认\" else stickyXxx ?: \"…\"` —— 未确认时显示的" +
+                "不再是\"点赞\"（那是把未知画成未点赞）。计数粘滞这条实质约束不变，锚点相应放宽。" +
+                "评论项不受影响，保持原样。",
             countMatching(pane, """private fun rememberStickyText\(""") == 1 &&
-                countMatching(pane, """label = stickyLike""") == 1 &&
-                countMatching(pane, """label = stickyReply""") == 1 &&
-                countMatching(pane, """label = stickyFav""") == 1 &&
+                countMatching(pane, """stickyLike""") >= 1 &&
+                countMatching(pane, """label = stickyReply \?: "评论"""") == 1 &&
+                countMatching(pane, """stickyFav""") >= 1 &&
                 countMatching(pane, """label = likeText""") == 0
         )
         assertTrue(
@@ -1586,7 +1991,10 @@ class VideoLogicGuardTest {
                 "**SX-02 更新**：尺寸表达式多了统一缩放因子 `SwipeRailScale`（0.88）——" +
                 "用户需求②「侧边 UI 控件变小，少挡画面」；断言仍只要求「尺寸走 token 派生」这个" +
                 "形态，不钉具体数值（具体比例与 48dp 热区由 swipeRailShrinksWithoutShrinkingTouchTarget 守）。" +
-                "计数缺失时显示动作名（BiliPai 的 countText fallback）。",
+                "计数缺失时显示动作名（BiliPai 的 countText fallback）。\n" +
+                "**形态更新 · A16（2026-10-13）**：点赞/收藏的 label 现在是三态，中间多了" +
+                "「未确认 → 待确认」一层；断言相应从 `label = stickyXxx ?: \"…\"` 改为" +
+                "「该行确实读了 sticky 值」。fallback 这条实质约束不变。",
             countMatching(pane, """SwipeRailDiscSize""") >= 2 &&
                 countMatching(pane, """SwipeRailIconSize""") >= 2 &&
                 blockBody(pane, "private fun SwipeRailAction(")
@@ -1597,9 +2005,9 @@ class VideoLogicGuardTest {
                     codeOf("TextStyleVariants.kt"),
                     """fun softShadowLabelSmall\("""
                 ) == 1 &&
-                countMatching(pane, """label = stickyLike \?: "点赞"""") == 1 &&
+                countMatching(pane, """stickyLike \?: "点赞"""") == 1 &&
                 countMatching(pane, """label = stickyReply \?: "评论"""") == 1 &&
-                countMatching(pane, """label = stickyFav \?: "收藏"""") == 1
+                countMatching(pane, """stickyFav \?: "收藏"""") == 1
         )
     }
 
@@ -1649,7 +2057,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeCommentCardIsTranslucentAndBlurFree() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "评论卡片必须是**半透明主题面板**：color = colorScheme.surface.copy(alpha = …)、" +
                 "contentColor = onSurface（不强制深色：darkColorScheme 计数为 0）；" +
@@ -1664,7 +2072,7 @@ class VideoLogicGuardTest {
                 countMatching(pager, """darkColorScheme\(""") == 0 &&
                 countMatching(pager, """BiliRadius\.sheetTop""") >= 2 &&
                 countMatching(pager, """val commentCardShape = remember""") == 1 &&
-                countMatching(pager, """private const val COMMENT_CARD_ALPHA = """) == 1
+                countMatching(pager, """const val COMMENT_CARD_ALPHA = """) == 1
         )
         assertTrue(
             "**D-2 硬门禁（结构侧）：评论面板所在文件里不得出现任何模糊入口** —— " +
@@ -1845,21 +2253,25 @@ class VideoLogicGuardTest {
     @Test
     fun swipeRailLikeButtonDistinguishesLikedStateVisually() {
         val pane = codeOf("player/VideoPlayerPane.kt")
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         val vm = codeOf("VideoViewModel.kt")
         assertTrue(
             "SX-09 要点②：点赞图标必须按 liked 在**描边/填充**之间切换（不能只换颜色）——" +
-                "与同栏收藏按钮的 Star/StarBorder 同款语言。",
+                "与同栏收藏按钮的 Star/StarBorder 同款语言。\n" +
+                "**形态更新 · A16（2026-10-13）**：判据由 `if (liked)` 改为 `if (liked == true)`，" +
+                "因为 liked 变成可空三态（null = 未确认，也必须走描边图标）。" +
+                "「描边/填充两态」这条实质约束不变。",
             countMatching(
                 pane,
-                """icon = if \(liked\) Icons\.Rounded\.ThumbUp else Icons\.Outlined\.ThumbUp,"""
+                """icon = if \(liked == true\) Icons\.Rounded\.ThumbUp else Icons\.Outlined\.ThumbUp,"""
             ) == 1
         )
         assertTrue(
-            "颜色维度必须**同时保留**（描边/填充 + 主题色叠加，不是二选一）。",
+            "颜色维度必须**同时保留**（描边/填充 + 主题色叠加，不是二选一）。" +
+                "A16 后主题色分支写在同一处 `when` 里，锚点改为该分支本身。",
             countMatching(
                 pane,
-                """tint = if \(liked\) MaterialTheme\.colorScheme\.primary else Color\.White,"""
+                """true -> MaterialTheme\.colorScheme\.primary$"""
             ) >= 1
         )
         assertTrue(
@@ -1867,9 +2279,12 @@ class VideoLogicGuardTest {
                 "（**形态更新 · VK-01（2026-10-04 真机）**：真值源由 `playbackState.detail.userState` " +
                 "改为 `interaction.userState`。二者不等价：前者是服务器快照、互动写路径从不更新它，" +
                 "用它就会退化成「点赞成功但图标/数字不动」；`_interaction` 与 `videoState.ids` 同源同步，" +
-                "永远对应当前页。守卫意图不变：仍是「单一真值源 + 组件不自持状态」。）",
+                "永远对应当前页。守卫意图不变：仍是「单一真值源 + 组件不自持状态」。）\n" +
+                "**形态更新 · A16（2026-10-13）**：参数类型由 `Boolean` 改为 `Boolean?`（三态）。" +
+                "`null` = 状态未确认，必须画中性态而不是「未选中」。断言随之从 `liked: Boolean,` " +
+                "改为 `liked: Boolean?,`；真值源与「组件不自持状态」两条意图完全不变。",
             countMatching(pager, """liked = interaction\.userState\?\.liked""") == 1 &&
-                countMatching(pane, """liked: Boolean,""") == 1
+                countMatching(pane, """liked: Boolean\?,""") == 1
         )
         assertTrue(
             "SX-09 要点③：数字要跟着变（likeDelta ±1），失败要有用户可见提示。",
@@ -1895,12 +2310,12 @@ class VideoLogicGuardTest {
      */
     @Test
     fun commentCardExpandHasEasedAnimationFromTokens() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "SX-07：面板不能再是 `if (showComments)` 的瞬时出现/消失，必须走 AnimatedVisibility " +
                 "（遮罩 + 卡片两处，都绑 showComments）。",
             countMatching(pager, """AnimatedVisibility\(""") >= 2 &&
-                countMatching(pager, """visible = showComments,""") == 2 &&
+                countMatching(pager, """visible = visible,""") == 2 &&
                 countMatching(pager, """if \(showComments\) \{""") == 0
         )
         assertTrue(
@@ -1908,11 +2323,11 @@ class VideoLogicGuardTest {
                 "进入用 long + 强调曲线，退出与遮罩用 medium + 标准曲线；不许手写 tween 字面量时长。",
             countMatching(
                 pager,
-                """tween\(commentAnimations\.long, easing = commentAnimations\.emphasized\)"""
+                """tween\(animations\.long, easing = animations\.emphasized\)"""
             ) == 2 &&
                 countMatching(
                     pager,
-                    """tween\(commentAnimations\.medium, easing = commentAnimations\.standard\)"""
+                    """tween\(animations\.medium, easing = animations\.standard\)"""
                 ) == 4
         )
         assertTrue(
@@ -1965,7 +2380,7 @@ class VideoLogicGuardTest {
             "SX-05 要点④：竖屏刷视频的常驻信息层不受影响 —— 本项不得动 " +
                 "`PortraitSwipePager` 的 chrome 静置（防烧屏）策略。",
             countMatching(
-                codeOf("player/PortraitSwipePager.kt"),
+                swipeSessionSources(),
                 """SwipeChromeBurnInPolicy\.chromeAlpha\("""
             ) == 1
         )
@@ -1991,7 +2406,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun pagerSnapAnimationIsExplicitTokenDriven() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "SX-08：换页吸附必须显式给 `flingBehavior = PagerDefaults.flingBehavior(...)`。",
             countMatching(pager, """flingBehavior = PagerDefaults\.flingBehavior\(""") == 1 &&
@@ -2020,6 +2435,73 @@ class VideoLogicGuardTest {
     }
 
     /**
+     * A16（2026-10-13）：互动状态的**未知态**不得被折叠成默认值，写路径更不得据此发请求。
+     *
+     * ## 为什么这条是硬缺陷而不是观感问题
+     *
+     * `req_user` 只在服务端愿意回时才出现在详情回包里（`mapUserState` 在
+     * `!reply.hasReqUser()` 时返回 null）。而点赞是**取反**操作 —— 原写法
+     * `val target = !(state.userState?.liked ?: false)` 在未知态下 `?: false` 恒折叠成
+     * 「未点赞」，于是 `target` 恒为 true，**无条件发出 `setLike(true)`**。
+     * 若服务端本来已赞，用户这一下本意是取消，实际却变成重复点赞。
+     * 这是本区间唯一一处「会发错请求」的缺陷（上游 `a614d2eba` 修的就是它）。
+     *
+     * ## 断言锚点（W18/W20/W21：锚在表达式/调用形态上）
+     *
+     * ① 模型层必须有**显式**的 `likeStatusKnown` 字段（不是 `userState != null` 的派生属性
+     *    —— 乐观写回点会把 userState 从 null 造成非 null，派生写法会把门重新打开）；
+     * ② 三个写入口（点赞 / 投币带赞 / 三连）都要先过这道门；
+     * ③ 读侧不得再把未知折叠成 false（`== true` / `?: false` 的旧形态不许回来）。
+     */
+    @Test
+    fun unknownInteractionStateIsNeverFoldedIntoADefaultValue() {
+        val vm = codeOf("VideoViewModel.kt")
+        val pager = swipeSessionSources()
+        val summary = codeOf("detail${FS}VideoDetailSummary.kt")
+        val pane = codeOf("player/VideoPlayerPane.kt")
+
+        assertTrue(
+            "A16 ①：模型必须显式持有 `likeStatusKnown`（不能靠 `userState != null` 派生）。",
+            countMatching(vm, """val likeStatusKnown: Boolean = false""") == 1 &&
+                countMatching(vm, """val likeStatusKnown: Boolean$""") == 1
+        )
+        assertTrue(
+            "A16 ②：三个写入口都必须先门 `likeStatusKnown` —— " +
+                "点赞（取反 ⇒ 未知时必然发错）、投币带赞、三连降级（会补发 setLike(true)）。",
+            countMatching(vm, """if \(!state\.likeStatusKnown\) \{""") == 2 &&
+                countMatching(vm, """if \(withLike && !state\.likeStatusKnown\) \{""") == 1
+        )
+        assertTrue(
+            "A16 ②：**原来那行写回 bug 的形态必须消失** —— " +
+                "`!(state.userState?.liked ?: false)` 就是「未知被折叠成未点赞后直接发请求」。",
+            countMatching(vm, """!\(state\.userState\?\.liked \?: false\)""") == 0
+        )
+        assertTrue(
+            "A16 ③：读侧不得再把未知折叠成「未选中」。详情页三个 chip 用可空判据、游标保留 null。",
+            countMatching(summary, """val liked = userState\?\.liked$""") == 1 &&
+                countMatching(summary, """val faved = userState\?\.faved$""") == 1 &&
+                countMatching(pager, """\?: playbackState\.detail\?\.userState\?\.liked,$""") == 1 &&
+                countMatching(pager, """\?: playbackState\.detail\?\.userState\?\.faved,$""") == 1 &&
+                countMatching(pager, """\?: \(playbackState\.detail\?\.userState\?\.liked == true\)""") == 0 &&
+                countMatching(pager, """\?: \(playbackState\.detail\?\.userState\?\.faved == true\)""") == 0
+        )
+        assertTrue(
+            "A16 ③：竖屏互动栏必须画**三态**（未确认 → 中性灰 + \"待确认\"），" +
+                "而不是把未知画成\"未点赞\"。上游 PortraitInteractionBar.kt:153-155 同款。",
+            countMatching(pane, """null -> "点赞状态待确认"""") == 1 &&
+                countMatching(pane, """label = if \(liked == null\) "待确认" else stickyLike \?: "点赞"""") == 1 &&
+                countMatching(pane, """null -> Color\.White\.copy\(alpha = 0\.38f\)""") >= 2
+        )
+        assertTrue(
+            "A16 ③：详情页未确认时必须是**同尺寸中性占位**（留在原位、不可点、退成灰），" +
+                "不是隐藏 —— 隐藏会让同行 4 个 chip 的 weight(1f) 重新分配、状态到达时横向跳一下。",
+            countMatching(summary, """enabled = liked != null,""") == 1 &&
+                countMatching(summary, """!enabled -> Modifier$""") == 1 &&
+                countMatching(summary, """!enabled -> MaterialTheme\.colorScheme\.onSurfaceVariant\.copy\(alpha = 0\.38f\)""") == 2
+        )
+    }
+
+    /**
      * VK-01（SX-09 的验收补齐）：互动栏的点赞/收藏**显示**必须读**互动状态**。
      *
      * 真机根因（2026-10-04，打点确认）：互动**写**路径只更新 VM 的 `_interaction`
@@ -2034,7 +2516,7 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeRailReadsInteractionStateNotOnlyTheServerSnapshot() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "VK-01：必须订阅互动状态，否则下面的读取没有真值来源。",
             countMatching(
@@ -2043,7 +2525,8 @@ class VideoLogicGuardTest {
             ) == 1
         )
         assertTrue(
-            "VK-01：点赞/收藏的选中态必须优先取互动状态（写路径真正更新的那一份）。",
+            "VK-01：点赞/收藏的选中态必须优先取互动状态（写路径真正更新的那一份）。" +
+                "（A16 后类型是可空三态，锚点仍是这一行。）",
             countMatching(pager, """liked = interaction\.userState\?\.liked""") == 1 &&
                 countMatching(pager, """faved = interaction\.userState\?\.faved""") == 1
         )
@@ -2105,13 +2588,20 @@ class VideoLogicGuardTest {
      */
     @Test
     fun swipeSessionOffersFloatingLandscapeEntryForLandscapeVideos() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
-            "N-1：悬浮入口必须存在，且判据是「横屏视频 && 未手动横屏 && 宽高比已知」。",
+            "N-1：悬浮入口必须存在，且**竖屏方向**的判据是「横屏视频 && 宽高比已知」。" +
+                "\n\nP0-3（第 35 轮真机）：原判据里还有 `!landscapeForced` —— 那让入口在" +
+                "「用户正想转回去」的那一刻恰好消失（`32-land-chrome.png` 里屏幕上没有任何" +
+                "竖屏/还原字样）。现在拆成两件事：是否显示只与画幅/面板有关，" +
+                "当前方向只决定文案（`reversed = true` 时画「竖屏」）。" +
+                "\n\n所以锚点从「单行 if 判据」改为「两分支结构 + 反向形态存在」。",
             countMatching(
                 pager,
-                """if \(!isPortraitVideo && !landscapeForced && currentVideoAspect != null &&"""
-            ) == 1
+                """\} else if \(!isPortraitVideo && landscapeEntryVisible\) \{"""
+            ) == 1 &&
+                countMatching(pager, """if \(landscapeForced && landscapeEntryVisible\) \{""") == 1 &&
+                countMatching(pager, """reversed = true,""") == 1
         )
         assertTrue(
             "N-1：点击必须复用既有通路的 `onToggleLandscape`（顶栏那颗胶囊的同一个回调），" +
@@ -2125,18 +2615,33 @@ class VideoLogicGuardTest {
             "N-1：位置必须贴着**画面下沿** —— 由宽高比算出 letterbox 画面高、" +
                 "再取 (屏高 + 画面高) / 2（真机实测视频在会话里垂直居中）。" +
                 "不许换成固定 dp 或固定 alignment。",
-            countMatching(pager, """minOf\(screenHPx, screenWPx / currentVideoAspect\)""") == 1 &&
-                countMatching(pager, """\(screenHPx \+ imageHPx\) / 2f""") == 1
+            countMatching(pager, """minOf\(screenHPx, screenWPx / aspect\)""") == 1 &&
+                countMatching(pager, """\(screenHPx \+ imageHPx\) / 2f""") == 1 &&
+                // **真机回归防护**（PLC110 实测）：`stream.height` 可能是 0 ⇒
+                // `currentVideoAspect == null`，而 `isPortraitVideo` 用
+                // `width in 1..<height` 在 height=0 时判成"不是竖屏" ⇒
+                // 若显隐判据里还写着 `currentVideoAspect != null`，入口会**静默消失** ——
+                // 那正是 P0-3 要消灭的现象。所以判据只留 `!isPortraitVideo`，
+                // 并在拿不到比例时退化成"屏幕下沿上方一档"。
+                countMatching(pager, """\?: \(screenHPx - with\(density\) \{""") == 1
         )
         assertTrue(
             "N-1：必须与互动栏同一显隐判据（弹层/面板在场时一起收），不许浮在评论面板之上。",
             countMatching(pager, """!playbackSheetVisible && !showComments && !showFavSheet""") >= 2
         )
         assertTrue(
-            "N-1：文案是「横屏」，不是「全屏」—— 两个入口语义不同" +
-                "（这里进手动横屏；SX-03 那颗进全屏形变）。",
-            countMatching(pager, """text = "横屏",""") == 1 &&
-                countMatching(pager, """contentDescription = "进入横屏"""") == 1
+            "N-1：文案是「横屏」/「竖屏」，不是「全屏」—— 两个入口语义不同" +
+                "（这里进手动横屏；SX-03 那颗进全屏形变）。\n\n" +
+                "P0-3 起这颗有两态：竖屏方向画「横屏」、已横屏画「竖屏」（反向入口）。" +
+                "两态都在叶子 `SwipeLandscapeFab` 里，调用点只传 `reversed` —— " +
+                "文案的单一真源必须在叶子上，否则两个调用点会各写一份字符串。",
+            countMatching(pager, """text = if \(reversed\) "竖屏" else "横屏",""") == 1 &&
+                countMatching(
+                    pager,
+                    """contentDescription = if \(reversed\) "退出横屏" else "进入横屏","""
+                ) == 1 &&
+                // 反向：不许出现「全屏」措辞（那是 SX-03 那颗的语义）
+                countMatching(pager, """text = "全屏",""") == 0
         )
         // ── N-1 优化（用户给出抖音「全屏观看」的参照）─────────────────────────
         assertTrue(
@@ -2151,7 +2656,7 @@ class VideoLogicGuardTest {
                 "（亮面 pill 在黑底上像一块白斑，是用户否掉的那版）。" +
                 "线宽必须由 token 推出（`BiliSpacing.xs / 8` = 0.5dp），不许写 dp 字面量" +
                 "（DesignTokenLintTest 的棘轮已无余额）。",
-            countMatching(pager, """val container = Color\.Black\.copy\(alpha = """) == 1 &&
+            countMatching(pager, """color = Color\.Black\.copy\(alpha = """) == 1 &&
                 countMatching(pager, """border = BorderStroke\(BiliSpacing\.xs / 8,""") == 1 &&
                 countMatching(pager, """contentColor = Color\.White,""") == 1
         )
@@ -2165,27 +2670,44 @@ class VideoLogicGuardTest {
      */
     @Test
     fun landscapeInSessionClearsChromeAndBackReturnsToPortrait() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+        val pager = swipeSessionSources()
         assertTrue(
             "①「与点赞的逻辑相同」= 本按钮也是**会话交互**：点击要重置防烧屏计时" +
                 "（与打开评论/收藏同一口径）。",
-            countMatching(pager, """lastChromeInteractionMs = android\.os\.SystemClock\.elapsedRealtime\(\)""") >= 3
+            countMatching(
+                pager,
+                """(lastChromeInteractionMs|lastChromeInteractionMsState) = android\.os\.SystemClock\.elapsedRealtime\(\)"""
+            ) >= 3
         )
         assertTrue(
             "①「加入防烧屏设计」= 与互动栏/底部信息层用**同一个** `applyBurnIn`" +
-                "（静置变暗 + 缓慢像素漂移），不许是个不参与常驻策略的孤件。",
-            countMatching(pager, """\.applyBurnIn\(LocalSwipeChromeBurnIn\.current\)""") == 1 &&
-                countMatching(pager, """\.offset \{\s*$""") >= 1
+                "（静置变暗 + 缓慢像素漂移），不许是个不参与常驻策略的孤件。\n\n" +
+                "P0-3 追加：横屏形态（「竖屏」反向入口）在**转屏后的 3 秒窗口内满亮**" +
+                "（`landscapeHintActive`），窗口过后才并入防烧屏 —— 否则「刚转过去就被压到 " +
+                "0.55 alpha」正好抵消了「3 秒内可发现」这条验收。",
+            countMatching(pager, """\.applyBurnIn\(LocalSwipeChromeBurnIn\.current\)""") == 2 &&
+                countMatching(pager, """\.offset \{\s*$""") >= 1 &&
+                countMatching(pager, """landscapeHintActive""") >= 2 &&
+                countMatching(pager, """SwipeChromePolicy\.LANDSCAPE_EXIT_HINT_MS""") >= 1
         )
         assertTrue(
-            "②「清屏」= 底部信息层与互动栏在横屏整块让位（`if (!landscapeForced)` 两处），" +
-                "且竖屏态行为完全不变（不碰它们的 `visible` 表达式）。",
-            countMatching(pager, """if \(!landscapeForced\) Box\(""") == 1 &&
-                countMatching(pager, """if \(!landscapeForced\) AnimatedVisibility\(""") == 1 &&
+            "②「清屏」= 底部信息层与互动栏整块让位，且**竖屏态行为完全不变**。\n\n" +
+                "第 35 轮 P0-1 起判据从两个 `!landscapeForced` 收敛成**一个**会话级状态" +
+                "（`SwipeChromeOwner`）：横屏 = `None`（清屏），竖屏 = `Story`。" +
+                "两层都必须只读这一个判据 —— 这正是「屏幕上最多一套顶栏、一个 ⋮」的由来" +
+                "（真机 bug 的根因就是两套 chrome 各持一个布尔）。",
+            countMatching(pager, """visible = SwipeChromePolicy\.storyVisible\(chromeOwner\),""") == 1 &&
+                countMatching(
+                    pager,
+                    """if \(SwipeChromePolicy\.storyVisible\(chromeOwner\)\) AnimatedVisibility\("""
+                ) == 1 &&
                 countMatching(
                     pager,
                     """visible = !playbackSheetVisible && !showComments && !showFavSheet,"""
-                ) == 1
+                ) == 1 &&
+                // 反向：旧判据不许回来（两处独立布尔 = 两套 chrome 的根因）
+                countMatching(pager, """visible = !landscapeForced,""") == 0 &&
+                countMatching(pager, """if \(!landscapeForced\) AnimatedVisibility\(""") == 0
         )
         assertTrue(
             "③「侧滑返回切回竖屏」= 横屏态下 back 必须**吃掉**这一次并收掉手动横屏" +
@@ -2200,93 +2722,148 @@ class VideoLogicGuardTest {
     }
 
     /**
-     * 取色光（用户想法）：把详情页的"接缝光晕"复刻到刷视频会话，**上下都洒**。
+     * **P0-1 控制层唯一化**（第 35 轮真机 bug 的直接守卫）。
      *
-     * 三条硬要求：①与详情页**同色源同参**（同一个取色 store + 同一个采样尺寸，
-     * 否则同一个视频在两处光色会不一致）；②上下各一层，向上的那层是同一支 brush
-     * **旋转 180°**（不新增设计系统 API）；③两层都落在**画面矩形之外**（贴画面上下沿向外洒）。
+     * ## 真机证据
+     * `docs/evidence-r35/27-tap-once.png`：竖屏刷视频点一下屏幕，**同时**出现
+     * 详情页播放器那套顶栏/底栏（返回箭头、标题、弹幕、旋转、⋮、暂停、进度条）
+     * 与 story 那套（UP/标题/话题、右侧点赞/评论/收藏/分享/⋮、横屏胶囊）——
+     * 屏幕上两个 ⋮、两套顶部图标、两个"关闭/返回"入口。
+     *
+     * ## 根因
+     * 两套 chrome **各持一个显隐布尔、互不感知**：pane 的 `showCtrl` 只门控它自己，
+     * `swipePagingActive` 只用于手势穿透与中央播放键抑制，**完全不管 chrome**；
+     * 会话层的信息层/互动栏则是"无门控常驻"。没有"此刻只有一套控制层可见"的判据。
+     *
+     * ## 现在的形态（本用例钉住的四条）
+     * ① 会话层持有**唯一**判据 `SwipeChromeOwner`，迁移全部走 `SwipeChromePolicy` 纯函数；
+     * ② 会话层自己的两块（底部信息层 / 互动栏）都只读 `storyVisible(chromeOwner)`；
+     * ③ pane 在会话里**不再自持** `showCtrl`：`sessionChromeVisible` 非空时它是只读投影，
+     *    写操作只经 `onSessionChromeRequest` 上报（两个写入口 = 又回到两套状态）；
+     * ④ pane 的点击与 2 秒自动隐藏都走同一个请求通道（`setShowCtrl`），不各写一遍。
      */
     @Test
-    fun swipeSessionSpillsCoverGlowAboveAndBelowTheVideo() {
-        val pager = codeOf("player/PortraitSwipePager.kt")
+    fun swipeSessionHasExactlyOneChromeOwner() {
+        val pager = swipeSessionSources()
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "① 会话必须持有唯一的控制层归属状态，且初值/方向迁移都走纯策略 —— " +
+                "在页面里现算（if landscapeForced …）就是两套 chrome 的老毛病。",
+            countMatching(pager, """var chromeOwner by remember \{ mutableStateOf\(SwipeChromePolicy\.initial\(landscapeForced\)\) \}""") == 1 &&
+                countMatching(pager, """SwipeChromePolicy\.onOrientationChanged\(landscapeForced\)""") == 1 &&
+                countMatching(pager, """SwipeChromePolicy\.onChromeRequested\(wanted, landscapeForced\)""") == 1
+        )
+        assertTrue(
+            "② 会话层的两块常驻 UI 必须**只**读同一个判据（storyVisible）；" +
+                "任一处置 `!landscapeForced` 之类的独立布尔就会与播放器层重新解耦。",
+            countMatching(pager, """SwipeChromePolicy\.storyVisible\(chromeOwner\)""") == 2
+        )
+        assertTrue(
+            "③ pane 的控制层必须是**受控**的：`sessionChromeVisible` 非空时读它、" +
+                "写只经 `onSessionChromeRequest`。\\n" +
+                "判据钉在 `val showCtrl = sessionChromeVisible ?: localShowCtrl` 这一行 —— " +
+                "它同时说明「非会话宿主（详情页/展开态）行为逐帧不变」。",
+            countMatching(pane, """val showCtrl = sessionChromeVisible \?: localShowCtrl""") == 1 &&
+                countMatching(pane, """onSessionChromeRequest\?\.invoke\(wanted\)""") == 1 &&
+                // 反向：pane 里不许再有裸的 `var showCtrl by remember`
+                countMatching(pane, """var showCtrl by remember""") == 0
+        )
+        assertTrue(
+            "④ 点击与自动隐藏必须走**同一个** write 通道（`setShowCtrl`）：" +
+                "`onToggleControls = { onShowCtrlChange(!showCtrl) }`，" +
+                "自动隐藏那条也是 `onShowCtrlChange(false)` —— 两个都指向受控 setter。",
+            countMatching(pane, """onShowCtrlChange = setShowCtrl,""") == 1 &&
+                countMatching(pane, """onToggleControls = \{ onShowCtrlChange\(!showCtrl\) \}""") == 1 &&
+                countMatching(pane, """onShowCtrlChange\(false\)""") == 1
+        )
+        assertTrue(
+            "⑤ 互斥性本身由纯策略单测覆盖（`SwipeChromePolicyTest`）：源码守卫只管" +
+                "接线形态，两者互不替代。",
+            countMatching(
+                codeOf("SwipeChromeOwner.kt"),
+                """fun storyVisible\(owner: SwipeChromeOwner\): Boolean = owner == SwipeChromeOwner\.Story"""
+            ) == 1
+        )
+    }
+
+    /**
+     * **P0-2 安全区**：全屏顶栏必须让出状态栏、底部控制层必须让出手势条。
+     *
+     * 真机 `docs/evidence-r35/32-land-chrome.png`：横屏时标题「抛开剂量谈毒性的五种产品」
+     * 与系统时间/电量**重叠绘制**，底部进度条压在三条手势条上。
+     *
+     * 判据刻意写成「按 `isFull` 条件化」而不是"无条件加 inset"：
+     * 内嵌播放带与展开态的状态栏内缩已由外层 `VideoScreen` 的 `.padding(top = statusTop)`
+     * 统一承担，再叠一次会让播放带高度算错（2026-10-07 真机 dump 的教训，
+     * 见 `VideoScreen.kt` 那段 `playerMorphHeight` 注释）。
+     */
+    @Test
+    fun playerChromeConsumesSystemBarInsetsOnlyInFullscreen() {
+        val pane = codeOf("player/VideoPlayerPane.kt")
+        assertTrue(
+            "P0-2：顶栏在全屏时必须 `statusBarsPadding()`，否则标题压状态栏（真机叠字）。",
+            countMatching(pane, """\.then\(if \(isFull\) Modifier\.statusBarsPadding\(\) else Modifier\),""") == 1
+        )
+        assertTrue(
+            "P0-2：底部控制层在全屏时必须 `navigationBarsPadding()`，否则进度条压手势条。",
+            countMatching(pane, """\.then\(if \(isFull\) Modifier\.navigationBarsPadding\(\) else Modifier\),""") == 1
+        )
+        val paneRaw = File(
+            repoRoot,
+            "feature/video/src/main/java/com/naaammme/bbspace/feature/video/player/VideoPlayerPane.kt"
+        ).readText()
+        assertTrue(
+            "P0-2：两条 inset 都必须 import（漏 import 会编译失败，但更常见的是" +
+                "有人把 padding 改成硬编码 dp —— 那种改动不报错、只是又压回状态栏）。\n\n" +
+                "注：`codeOf` 会把 import 行清空（它只保留「代码语义行」），" +
+                "所以这一条读**原始文本**。",
+            paneRaw.contains("import androidx.compose.foundation.layout.statusBarsPadding") &&
+                paneRaw.contains("import androidx.compose.foundation.layout.navigationBarsPadding")
+        )
+        assertTrue(
+            "P0-2 反向：pane **不许**自绘时钟/电量。系统状态栏本来就是权威来源，" +
+                "再画一份就是真机看到的叠字（`readPlayerTopMetaText` 已删）。",
+            countMatching(pane, """readPlayerTopMetaText""") == 0 &&
+                countMatching(pane, """BatteryManager""") == 0
+        )
+    }
+
+    /**
+     * **取色光已按用户要求彻底删除**（2026-10-19 真机第 2 条：
+     * 「把刷视频模式中，视频旁边的光晕效果给彻底删掉」）。
+     *
+     * 这条守卫改成**反向**的：宁可它再也不出现，也不要某次"美化"把整条链路悄无声息地
+     * 接回来。删除涉及四处，缺一处都会留半条死链路：
+     * ① 组合调用（`SwipeGlowLayers(...)`）；
+     * ② 取色状态机（`swipeGlowTint` / `glowAspectState` / store 的两次调用）；
+     * ③ 组件本体（`SwipeGlowLayers` 函数）与三个参数常量
+     *    （`SWIPE_GLOW_HEIGHT` / `SWIPE_GLOW_PEAK` / `SwipeGlowSamplePx`）；
+     * ④ 详情页那支 brush 在会话侧的 import（`topSolidProgressiveFade`）。
+     *
+     * 注意：**详情页的接缝光晕（`VideoScreen.kt`）不动** —— 用户只否掉了刷视频会话里的。
+     */
+    @Test
+    fun swipeSessionGlowIsRemovedForGood() {
+        val pager = swipeSessionSources()
         val screen = codeOf("VideoScreen.kt")
         assertTrue(
-            "①：必须用详情页那支 brush（`topSolidProgressiveFade`）与同一个取色 store。",
-            countMatching(pager, """Modifier\.topSolidProgressiveFade\(""") == 1 &&
-                countMatching(pager, """VideoCardCoverColorStore\.requestExtraction\(""") == 1 &&
-                countMatching(pager, """VideoCardCoverColorStore\.getCachedColor\(""") == 1
+            "会话里不许再出现取色光的任何一环（组件/调用/取色状态机/常量/brush import）：当前 " +
+                "SwipeGlowLayers=${countMatching(pager, """SwipeGlowLayers""")}、" +
+                "swipeGlowTint=${countMatching(pager, """swipeGlowTint""")}、" +
+                "SWIPE_GLOW=${countMatching(pager, """SWIPE_GLOW""")}、" +
+                "topSolidProgressiveFade=${countMatching(pager, """topSolidProgressiveFade""")}",
+            countMatching(pager, """SwipeGlowLayers""") == 0 &&
+                countMatching(pager, """swipeGlowTint""") == 0 &&
+                countMatching(pager, """glowAspectState""") == 0 &&
+                countMatching(pager, """SWIPE_GLOW""") == 0 &&
+                countMatching(pager, """SwipeGlowSamplePx""") == 0 &&
+                countMatching(pager, """topSolidProgressiveFade""") == 0
         )
         assertTrue(
-            "①：采样尺寸必须与详情页**逐字一致**（缓存键含尺寸；不一致会走两次提取、" +
-                "还可能算出不同颜色）。",
-            countMatching(pager, """private val SwipeGlowSamplePx = 480 to 360""") == 1 &&
+            "详情页的接缝光晕**保持不变**（用户只否掉了会话里的那两层）：" +
+                "`VideoScreen.kt` 里仍必须有详情页自己那份 brush 与取色调用。",
+            countMatching(screen, """Modifier\.topSolidProgressiveFade\(""") >= 1 &&
                 countMatching(screen, """private val SeamTintSamplePx = 480 to 360""") == 1
-        )
-        assertTrue(
-            "①：峰值固定**深色档** 0.48（会话的光只洒在永远为黑的黑边上，不做主题分支）。",
-            countMatching(pager, """private const val SWIPE_GLOW_PEAK = 0\.48f""") == 1
-        )
-        assertTrue(
-            "②：上下各一层 —— 向上的那层必须是**同一支 brush 旋转 180°**" +
-                "（`graphicsLayer { rotationZ = 180f }` 紧跟在 offset 之后、brush 之前）。",
-            countMatching(pager, """\.then\(swipeGlowModifier\)""") == 2 &&
-                countMatching(pager, """\.graphicsLayer \{ rotationZ = 180f \}""") == 1
-        )
-        assertTrue(
-            "③：两层必须分别贴在**画面下沿向外**与**画面上沿向外**（用同一套 letterbox 几何），" +
-                "不许盖到画面内容上；而且高度必须**夹进黑边里** —— 竖屏视频贴宽后黑边只有 ~270px，" +
-                "160dp 的行程不夹就会糊在画面上（比没有光更糟）。",
-            countMatching(
-                pager,
-                """\.offset \{ IntOffset\(0, glowImageBottomPx\.roundToInt\(\)\) \}"""
-            ) == 1 &&
-                countMatching(
-                    pager,
-                    """\.offset \{ IntOffset\(0, \(glowImageTopPx - glowUpPx\)\.roundToInt\(\)\) \}"""
-                ) == 1 &&
-                countMatching(
-                    pager,
-                    """val glowDownPx = minOf\(glowMaxPx, glowScreenHPx - glowImageBottomPx\)"""
-                ) == 1 &&
-                countMatching(pager, """val glowUpPx = minOf\(glowMaxPx, glowImageTopPx\)""") == 1
-        )
-        assertTrue(
-            "④：光**不分画幅** —— 用户真机反馈「横屏视频有光，竖屏没有」，" +
-                "而竖屏视频在竖屏会话里同样有黑边（1080×1920 贴宽后 ~2261 < 2800）。" +
-                "所以门只能是「宽高比已知」，**不得**再出现 `!isPortraitVideo`。",
-            countMatching(pager, """if \(glowAspect != null\) \{""") == 1 &&
-                countMatching(pager, """glowAspect != null && !isPortraitVideo""") == 0
-        )
-        assertTrue(
-            "⑤：取色的 URL 必须是**变体解析之后**的串（`BiliAsyncImage.kt:98-100` 先 " +
-                "`biliImageUrlForVariant(url, variant)` 再 `.data(...)`，Coil 缓存键由它派生）。" +
-                "喂原始封面 URL ⇒ 每次切页都未命中 ⇒ 去下原图。",
-            countMatching(
-                pager,
-                """\.let \{ biliImageUrlForVariant\(it, BiliImageVariant\.PlayerPreview\) \}"""
-            ) == 1 &&
-                countMatching(pager, """swipeGlowCover = playbackState\.detail\?\.cover""") == 0
-        )
-        assertTrue(
-            "⑥：几何不能被 `currentStream` 的瞬时 null 带走（播放会话每次开播先发 null）——" +
-                "宽高比必须**只记非空值**（sticky），否则翻页过半时光会整块灭掉再回来。" +
-                "同时颜色**不许随翻页清零**（`remember(swipeGlowCover)` 那版会先退纯白再变真色）。",
-            countMatching(
-                pager,
-                """if \(currentVideoAspect != null\) glowAspectState\.value = currentVideoAspect"""
-            ) == 1 &&
-                countMatching(pager, """val glowAspect = glowAspectState\.value""") == 1 &&
-                countMatching(pager, """var swipeGlowTint by remember \{""") == 1 &&
-                countMatching(pager, """mutableStateOf<Color\?>""") == 1 &&
-                countMatching(pager, """remember\(swipeGlowCover\) \{""") == 0
-        )
-        assertTrue(
-            "⑦：自愈 —— store 对「正在飞行中」的同一 key 会静默返回不回调" +
-                "（`VideoCardCoverColorStore.kt:93-94`），落定后必须再读一次缓存补色。",
-            countMatching(
-                pager,
-                """LaunchedEffect\(swipeGlowCover, pagerState\.settledPage\)"""
-            ) == 1
         )
     }
 
@@ -2337,3 +2914,4 @@ class VideoLogicGuardTest {
         return lines.count { it.isNotBlank() && re.containsMatchIn(it) }
     }
 }
+

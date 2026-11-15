@@ -28,6 +28,16 @@ dependencies {
     // 液态玻璃（LIQUID 档）：miuix-blur 背板系统（layerBackdrop 录制 + drawBackdrop 采样），
     // api 因 GlassEffect/LiquidBackdrop 签名暴露 LayerBackdrop。BiliPai 同款实现。
     api(libs.miuix.blur)
+    // Miuix 控件渲染层（W2 批次 1）：本模块的 `component/miuix/AppMiuix*` 原语是唯一
+    // 出口，feature 模块不直接引 miuix —— 但按团队约定用 api，便于 `@Composable`
+    // 默认参数/形状类型在签名上透传（与 miuix.blur 同一处理）。
+    api(libs.miuix.ui)
+    api(libs.miuix.icons)
+    api(libs.miuix.squircle)
+    // HCT 配色体系（Step 2 依赖实探）：MaterialKolor 包装 Material Color Utilities
+    // （HCT/CAM16），用于复刻上游 SeedColorScheme 的种子配色。api 便于将来
+    // `ColorScheme` 工厂签名透传 Hct/Contrast 类型（与 miuix 同一处理）。
+    api(libs.materialKolor)
     // 帧率守卫（GlassGuard）
     implementation(libs.androidx.metrics.performance)
 

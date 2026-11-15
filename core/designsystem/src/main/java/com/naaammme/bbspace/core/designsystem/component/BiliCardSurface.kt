@@ -24,6 +24,10 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.MotionTierPolicy
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberMotionTier
+import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
@@ -53,11 +57,76 @@ fun BiliCardSurface(
      * 传 `null` 时零开销：不会多套一层 Box。
      */
     fullCardOverlay: (@Composable BoxScope.() -> Unit)? = null,
+    /**
+     * 是否挂全局拖拽反馈的整卡形变。**锚点宿主必须传 `false`**。
+     *
+     * ## 为什么必须有这个开关（第 34 轮，OPPO 无缝动画 bug 的真正根因）
+     *
+     * 本组件是首页卡 / 排行卡 / 空间页卡的共同容器，而这三类卡的 OPPO 无缝锚点
+     * （`SeamlessAnchor`）**恰好放在 [fullCardOverlay] 里**（铺满整卡，因为锚点矩形
+     * 就是系统的过渡几何范围）。
+     *
+     * 于是同一张卡上出现了两个互相矛盾的"卡片现在长在哪"：
+     * - 框架取锚点矩形走 `View.getLocationInWindow()` / `getLocationOnScreen()` ——
+     *   **布局期**坐标，看不到 `graphicsLayer` 的形变；
+     * - 本组件的形变是 `Modifier.appElasticPress` → `graphicsLayer` —— **绘制期**变换，
+     *   只改像素落点，不改布局。
+     *
+     * 用户在**按住卡片**（卡片正被放大 ~2% 并被手指拖偏若干像素）时点开视频，
+     * 框架就按"屏幕上已经不存在的矩形"起飞 ⇒ 动画从错误的位置/大小开始。
+     * 排行页最明显：卡片在瀑布流里，点击前常带一次未走完的按压回弹。
+     *
+     * ## 判据
+     * 「本卡是否是系统过渡的锚点宿主」：锚点真组合时（`seamless.active`）整卡形变
+     * **必须让位**给系统过渡；只有不支持无缝的设备（`active=false`，锚点不组合、
+     * 走普通打开）才保留按压反馈 —— 那种情况下没有框架取矩形，形变不会和任何东西打架。
+     *
+     * ⇒ 调用点一律写 `elasticPressEnabled = !seamless.active`（或等价的 `!canSeamless`）。
+     * 守卫：`SeamlessAnchorElasticPressGuardTest` 钉住三个已知调用点。
+     *
+     * ## 为什么不做成"有 fullCardOverlay 就自动关"
+     * 那样会把两件事绑死：`fullCardOverlay` 是**布局槽位**（谁都可以放东西），
+     * 而本参数是**过渡几何的让位判据**。隐式推导会让"以后在覆盖层里放别的装饰"
+     * 悄悄丢掉按压反馈，且读代码的人看不出因果。
+     */
+    elasticPressEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
     // 纯黑深色下的发丝描边（仅默认不透明容器色生效，见函数文档）
     val hairline = biliDarkHairlineBorder(containerColor)
-    val clippedModifier = modifier.clip(shape)
+    // ## 全局拖拽反馈（2026-10-18 第十九轮，**原语层**接入，仅可点分支）
+    //
+    // 本组件是首页卡 / 排行卡 / 空间页卡 / UP 主头部卡的共同容器。任务书
+    // task-9 A 明确"**仅当**可点时挂"——不可点的卡片没有按压目标，挂了只会
+    // 白付一份 pointerInput 节点与形变状态。
+    //
+    // **位置在 `clip(shape)` 之前（更外层）**：`appElasticPress` 的
+    // `graphicsLayer` 必须包住已裁剪的子树，形变才会连卡片形状一起动；
+    // 若挂在 clip 之内，clip 用的是未变换的 bounds，按下时内容会被裁掉一角。
+    //
+    // **长按场景降级为"只按压、不跟手"**（`dragEnabled = onLongClick == null`，
+    // 与上游 BiliPai 同判据）：`onLongClick` 意味着这里有长按手势（复制/选择/更多菜单），
+    // 跟手位移会与"按住不动"的长按意图打架；关掉 position 追踪后仍有按压鼓起，
+    // 手感不丢。这也是 task-9 B 里"长按/滑动行不要挂"的精细版本。
+    //
+    // ⚠️ 与下面既有的 0.97 按压缩放**叠加**（两层 graphicsLayer 相乘）：
+    // 大卡高度 ~200dp 时弹性膨胀 ≈ 2%，净效果 ≈ 0.97 × 1.02 ≈ 0.99，仍是"被按下"的
+    // 缩小方向，观感不变；保留 0.97 是因为它是既有观感，不属本任务改动范围。
+    val pressedModifier = if ((onClick != null || onLongClick != null) && elasticPressEnabled) {
+        modifier.appElasticPress(dragEnabled = onLongClick == null)
+    } else {
+        modifier
+    }
+    val clippedModifier = pressedModifier.clip(shape)
+    // W3：设备动效分档 + 无障碍「动效=关」—— 两者任一命中时**不做按压缩放**。
+    // 为什么放在卡片（而不是每个调用点）：按压缩放是信息流里**每张卡**都会跑的
+    // 常驻形变，低端机上它是"每卡每帧一次图层变换"；不需要时连目标值都不该动。
+    // 注意 animateFloatAsState 调用点本身**保持不动**（守卫棘轮：调用点数只许减），
+    // 这里只改 targetValue。
+    val motionTier = rememberMotionTier()
+    val pressAnimEnabled = MotionTierPolicy.enablesAmbientMotion(motionTier) &&
+        !LocalAnimations.current.reduceMotion
+    val pressScaleGoal = if (pressAnimEnabled) 0.97f else 1f
     // 只有需要覆盖层时才多套一层 Box，避免给所有卡片白加一层布局节点
     val body: @Composable () -> Unit = {
         if (fullCardOverlay != null) {
@@ -73,7 +142,7 @@ fun BiliCardSurface(
         val interactionSource = remember { MutableInteractionSource() }
         val isPressed by interactionSource.collectIsPressedAsState()
         val pressScale by animateFloatAsState(
-            targetValue = if (isPressed) 0.97f else 1f,
+            targetValue = if (isPressed) pressScaleGoal else 1f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioMediumBouncy,
                 stiffness = Spring.StiffnessMedium

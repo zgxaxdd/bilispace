@@ -16,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.appSearchElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
 
@@ -41,7 +43,19 @@ fun SearchCapsuleField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier,
+        // ## 全局拖拽反馈（2026-10-18 第十九轮，**原语层**接入）
+        //
+        // 用 `appSearchElasticPress()`（strength 0.6 宽控件档）而不是满强度：
+        // 搜索框实测宽 300dp+，满强度按下时整条会横移，读作"页面在晃"。
+        //
+        // **为什么给文本框挂也不抢手势**：`appElasticPress` 只在
+        // `PointerEventPass.Final` 观察、从不消费事件；文本选区/光标拖动的
+        // movement 会被 IME/选区识别器先消费（`isConsumed` ⇒ 立即停手），
+        // 父级滚动同理。这正是上游把它用于 search capsule 的原因。
+        //
+        // `highlightShape` 传本框自身的圆角：默认 CircleShape 会把宽框的
+        // 光斑裁成椭圆（见 appSearchElasticPress 的默认值）。
+        modifier = modifier.appSearchElasticPress(highlightShape = shape),
         singleLine = true,
         shape = shape,
         placeholder = { Text(placeholder) },
@@ -58,7 +72,12 @@ fun SearchCapsuleField(
         },
         trailingIcon = {
             if (showClearAction && value.isNotEmpty()) {
-                IconButton(onClick = { onValueChange("") }) {
+                // 全局拖拽反馈（第 34 轮 T2）：搜索框尾部"清空"图标钮。
+                // 输入框本体不挂（原生编辑手势必须独占），只挂这颗独立按钮。
+                IconButton(
+                    onClick = { onValueChange("") },
+                    modifier = Modifier.appElasticPress()
+                ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "清空"

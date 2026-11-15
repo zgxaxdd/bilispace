@@ -33,9 +33,11 @@ import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.UpListRow
 import com.naaammme.bbspace.core.designsystem.component.VideoGridCardSkeleton
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.LiveRecommendItem
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 /**
  * 直播卡容器：与推荐页 `FeedCardShape` / 排行 `RankCardShape` 同源
@@ -69,10 +71,10 @@ fun HomeLivePage(
         errorMessage = state.errorMessage,
         loadMoreEnabled = isActive,
         contentPadding = PaddingValues(
-            start = 4.dp,
+            start = BiliSpacing.xs,
             top = topContentPadding,
-            end = 4.dp,
-            bottom = 4.dp
+            end = BiliSpacing.xs,
+            bottom = BiliSpacing.xs
         ),
         key = { _, item -> item.actionKey() },
         loadingContent = {
@@ -143,16 +145,16 @@ private fun LiveRecommendCard(
                     text = text,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(4.dp)
+                        .padding(BiliSpacing.xs)
                         .background(color = onlineBgColor, shape = LiveBadgeShape)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
 
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.sm)) {
             val spaceRoute = remember(item.ownerMid, item.ownerName) {
                 item.ownerMid?.let { mid ->
                     SpaceRoute(
@@ -169,7 +171,7 @@ private fun LiveRecommendCard(
             )
 
             item.ownerName?.let { ownerName ->
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.xs))
                 Text(
                     text = ownerName,
                     style = MaterialTheme.typography.bodySmall,
@@ -179,13 +181,19 @@ private fun LiveRecommendCard(
                     modifier = if (spaceRoute == null) {
                         Modifier
                     } else {
-                        Modifier.clickable { onOpenSpace(spaceRoute) }
+                        // 全局拖拽反馈（第 34 轮 T2）：**UP 主名文字**是卡片内的独立
+                        // 小件（点进空间）。卡片容器本身走 `BiliCardSurface` 原语
+                        // （它的弹性反馈由原语统一挂，且那条路径与无缝锚点相关，
+                        // 按铁律不能在这里叠加）；这一处是文字叶子的 clickable，安全。
+                        Modifier
+                            .appElasticPress()
+                            .clickable { onOpenSpace(spaceRoute) }
                     }
                 )
             }
 
             item.areaName?.let { areaName ->
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.xs))
                 val areaBgColor = MaterialTheme.colorScheme.secondaryContainer
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -197,7 +205,7 @@ private fun LiveRecommendCard(
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier
                             .background(color = areaBgColor, shape = LiveBadgeShape)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

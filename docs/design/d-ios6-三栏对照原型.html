@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>播放页控制层 · 现状 / 已落地五档 / 目标白线语言</title>
+<style>
+  :root{ --w:363px; --h:800px; --status:40px; --video:204px; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#111318;color:#e9eaee;font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;padding:24px 18px 56px}
+  .wrap{max-width:1180px;margin:0 auto}
+  h1{font-size:19px;font-weight:650}
+  .sub{margin-top:6px;font-size:12.5px;color:#9aa0ab;line-height:1.7}
+  .board{display:flex;gap:20px;align-items:flex-start;justify-content:center;flex-wrap:wrap;margin-top:18px}
+  figure{flex:none;text-align:center}
+  figcaption{margin-top:8px;font-size:12px;color:#9aa0ab;line-height:1.55}
+  figcaption b{color:#e9eaee}
+  .phone{width:var(--w);height:var(--h);border-radius:30px;background:#000;position:relative;overflow:hidden;
+    box-shadow:0 0 0 2px #2a2c33,0 16px 40px rgba(0,0,0,.55)}
+  .video{position:absolute;left:0;right:0;top:0;height:calc(var(--status) + var(--video));overflow:hidden;
+    background:linear-gradient(165deg,#ffe9c9 0%,#f6e9d2 28%,#e8d5bd 52%,#c9b39a 78%,#a98f76 100%)}
+  .video::before{content:"";position:absolute;left:8%;top:14%;width:44%;height:52%;border-radius:50% 40% 55% 45%;
+    background:rgba(255,255,255,.55)}
+  .video::after{content:"";position:absolute;right:6%;top:34%;width:34%;height:40%;border-radius:40% 55% 45% 55%;
+    background:rgba(120,86,60,.30)}
+  .status{position:absolute;top:0;left:0;right:0;height:var(--status);display:flex;align-items:center;
+    justify-content:space-between;padding:0 16px;font-size:12px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5);z-index:6}
+  .page{position:absolute;left:0;right:0;top:calc(var(--status) + var(--video));bottom:0;background:#f2f2f7;color:#1c1c1e;padding:14px}
+  .ptitle{font-size:16px;font-weight:650;line-height:1.35}
+  .pmeta{margin-top:8px;font-size:12.5px;color:#6c6c70}
+  .pcard{margin-top:12px;height:68px;border-radius:16px;background:#fff}
+
+  .scrim{position:absolute;left:0;right:0;bottom:0;height:118px;pointer-events:none}
+  .scrim-old{background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.44) 10%,rgba(0,0,0,.58) 24%,
+      rgba(0,0,0,.68) 44%,rgba(0,0,0,.76) 60%,rgba(0,0,0,.82) 100%)}
+  .scrim-landed{background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.44) 10%,rgba(0,0,0,.58) 24%,
+      rgba(0,0,0,.88) 36%,rgba(0,0,0,.88) 100%)}
+  .scrim-target{background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.44) 10%,rgba(0,0,0,.58) 24%,
+      rgba(0,0,0,.88) 36%,rgba(0,0,0,.88) 100%)}
+
+  .stack{position:absolute;left:0;right:0;bottom:0}
+  .progwrap{height:32px;display:flex;align-items:center;padding:0 12px}
+  .progcap{flex:1;height:32px;border-radius:16px;background:rgba(0,0,0,.45);display:flex;align-items:center;padding:0 14px}
+  .track{position:relative;width:100%;height:2px;border-radius:2px}
+  .track .played{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:#fff}
+  .gap{height:12px}
+  .ctrl{height:34px;display:flex;align-items:center;gap:8px;padding:0 8px}
+
+  /* 现状：胶囊 + 填充阶梯 */
+  .pill{height:34px;display:flex;align-items:center;justify-content:center;border-radius:17px;
+    color:#fff;font-size:12.5px;font-weight:600;padding:0 12px;white-space:nowrap}
+  .pill.pri{background:rgba(255,255,255,.18);font-weight:700;padding:0 16px;min-width:64px}
+  .tnum{font-size:12px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;padding:0 2px}
+  .grow{flex:1}
+  .seg{height:34px;display:flex;align-items:center;border-radius:17px;background:rgba(255,255,255,.08);padding:2px}
+  .seg b{display:flex;align-items:center;justify-content:center;height:30px;border-radius:15px;
+    font-size:12.5px;font-weight:600;color:#fff;padding:0 10px;white-space:nowrap}
+  .seg b.sel{background:rgba(255,255,255,.16)}
+  .icobtn{width:34px;height:34px;display:flex;align-items:center;justify-content:center;color:#fff}
+  .track-old{background:rgba(255,255,255,.42)}
+  .thumb-old{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;
+    background:rgba(0,0,0,.32);border:2px solid #fff}
+  .center-old{position:absolute;left:50%;top:calc((var(--status) + var(--video)) / 2);transform:translate(-50%,-50%);
+    width:64px;height:64px;border-radius:50%;background:rgba(0,0,38,.38);display:flex;align-items:center;
+    justify-content:center;z-index:5}
+
+  /* 目标：白线语言 */
+  .progwrap-t{height:32px;display:flex;align-items:center;padding:0 12px}
+  .track-t{position:relative;width:100%;height:2px;border-radius:2px;background:rgba(255,255,255,.50)}
+  .thumb-t{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff}
+  .ctrl-t{height:34px;display:flex;align-items:center;gap:12px;padding:0 12px}
+  .icoplay{width:34px;height:34px;display:flex;align-items:center;justify-content:center;color:#fff}
+  .label{font-size:12.5px;font-weight:600;white-space:nowrap}
+  .label.on{color:#fff}
+  .label.off{color:rgba(255,255,255,.60)}
+  .num{font-size:12.5px;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .iconbtn{width:34px;height:34px;display:flex;align-items:center;justify-content:center;color:#fff}
+  .center-t{position:absolute;left:50%;top:calc((var(--status) + var(--video)) / 2);transform:translate(-50%,-50%);
+    width:64px;height:64px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;
+    justify-content:center;z-index:5}
+
+  .ico{width:20px;height:20px;fill:currentColor}
+  .ico-s{width:15px;height:15px;fill:currentColor}
+
+  .cards{display:flex;gap:14px;flex-wrap:wrap;margin-top:26px}
+  .card{flex:1 1 300px;min-width:290px;background:#181a20;border:1px solid #262932;border-radius:14px;padding:14px 16px}
+  .card h3{font-size:13.5px;font-weight:650;margin-bottom:8px}
+  .card p,.card li{font-size:12.5px;color:#9aa0ab;line-height:1.75}
+  .card ul{margin:0;padding-left:16px}
+  .card b{color:#e9eaee}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #262932}
+  th{color:#8b919c;font-weight:600;font-size:11.5px}
+  td b{color:#e9eaee}
+  .ok{color:#7fd18b}.bad{color:#e88b8b}.warn{color:#e6c07b}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>播放页控制层 · 三栏对照（363×800 真机逻辑像素）</h1>
+  <p class="sub">中间栏 = <b>盘上已落地的五档渐变</b>（VideoPlayerPane.kt:1872-1879，mtime 11:13:44）。右侧栏 = 盘上现状 + 定稿规格里还<b>没落</b>的三件。左侧栏 = 10808 装机现状。</p>
+
+  <div class="board">
+    <!-- ① 现状 -->
+    <figure>
+      <div class="phone">
+        <div class="video"></div>
+        <div class="status"><span>9:41</span><span>▮▮▮ ⏻</span></div>
+        <div class="scrim scrim-old"></div>
+        <div class="stack">
+          <div class="progwrap"><div class="progcap"><div class="track track-old"><div class="played" style="width:38%"></div><div class="thumb-old" style="left:38%"></div></div></div></div>
+          <div class="gap"></div>
+          <div class="ctrl">
+            <div class="pill pri">暂停</div>
+            <div class="num" style="font-size:12px;font-weight:700;color:#fff">9:31 / 39:08</div>
+            <div class="grow"></div>
+            <div class="seg"><b class="sel">64K</b><b>480P</b><b>1.0x</b></div>
+            <div class="icobtn"><svg class="ico" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H8v-3zm12-4h-2v3h-3v2h3v3h2v-3h3v-2h-3z"/></svg></div>
+          </div>
+        </div>
+        <div class="center-old"><svg class="ico" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="page">
+          <div class="ptitle">【中文】【CC字幕】4K 修复 · 城市漫步</div>
+          <div class="pmeta">32.4 万播放 · 2026-10-14</div>
+          <div class="pcard"></div>
+        </div>
+      </div>
+      <figcaption><b>① 现状</b>（10808）<br>胶囊墙 + 渐变 0.82 + 空心环滑块</figcaption>
+    </figure>
+
+    <!-- ② 已落地的五档 -->
+    <figure>
+      <div class="phone">
+        <div class="video"></div>
+        <div class="status"><span>9:41</span><span>▮▮▮ ⏻</span></div>
+        <div class="scrim scrim-landed"></div>
+        <div class="stack">
+          <div class="progwrap"><div class="track track-t"><div class="played" style="width:38%"></div><div class="thumb-t" style="left:38%"></div></div></div>
+          <div class="gap"></div>
+          <div class="ctrl">
+            <div class="pill pri">暂停</div>
+            <div class="tnum">9:31 / 39:08</div>
+            <div class="grow"></div>
+            <div class="seg"><b class="sel">64K</b><b>480P</b><b>1.0x</b></div>
+            <div class="icobtn"><svg class="ico" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H8v-3zm12-4h-2v3h-3v2h3v3h2v-3h3v-2h-3z"/></svg></div>
+          </div>
+        </div>
+        <div class="center-old"><svg class="ico" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="page">
+          <div class="ptitle">【中文】【CC字幕】4K 修复 · 城市漫步</div>
+          <div class="pmeta">32.4 万播放 · 2026-10-14</div>
+          <div class="pcard"></div>
+        </div>
+      </div>
+      <figcaption><b>② 已落地五档</b>（只做了渐变+去胶囊）<br>轨道可读性 ↑，胶囊墙仍在</figcaption>
+    </figure>
+
+    <!-- ③ 目标 -->
+    <figure>
+      <div class="phone">
+        <div class="video"></div>
+        <div class="status"><span>9:41</span><span>▮▮▮ ⏻</span></div>
+        <div class="scrim scrim-target"></div>
+        <div class="stack">
+          <div class="progwrap-t"><div class="track-t track"><div class="played" style="width:38%"></div><div class="thumb-t" style="left:38%"></div></div></div>
+          <div class="gap"></div>
+          <div class="ctrl-t">
+            <div class="icoplay"><svg class="ico" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
+          </div>
+          <div class="ctrl-t" style="height:34px;padding:0 12px;margin-top:0">
+            <div class="icoplay"><svg class="ico" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14H6z"/></svg></div>
+            <div class="num">9:31</div>
+            <div class="grow"></div>
+            <div class="label off">64K</div>
+            <div class="label on">480P</div>
+            <div class="label on">1.0x</div>
+            <div class="iconbtn"><svg class="ico" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H8v-3zm12-4h-2v3h-3v2h3v3h2v-3h3v-2h-3z"/></svg></div>
+          </div>
+        </div>
+        <div class="center-t"><svg class="ico" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="page">
+          <div class="ptitle">【中文】【CC字幕】4K 修复 · 城市漫步</div>
+          <div class="pmeta">32.4 万播放 · 2026-10-14</div>
+          <div class="pcard"></div>
+        </div>
+      </div>
+      <figcaption><b>③ 目标 · 白线语言</b><br>图标 + 纯文字，零胶囊</figcaption>
+    </figure>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>三栏对照：控制层形态</h3>
+      <table>
+        <tr><th>项</th><th>① 现状</th><th>② 已落地</th><th>③ 目标</th></tr>
+        <tr><td>渐变最暗端</td><td>0.82</td><td><b>0.88</b></td><td>0.88</td></tr>
+        <tr><td>胶囊墙</td><td class="bad">在</td><td class="bad">在</td><td class="ok">全删</td></tr>
+        <tr><td>未播轨</td><td>白42%（1.77:1）</td><td><b>白42%（4.01:1）</b></td><td>白50%（5.11:1）</td></tr>
+        <tr><td>滑块</td><td class="bad">空心环</td><td class="bad">空心环</td><td class="ok">实心白圆</td></tr>
+        <tr><td>中央钮</td><td class="bad">玻璃底盘</td><td class="bad">玻璃底盘</td><td class="ok">白环</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>为什么目标栏的读法不同</h3>
+      <ul>
+        <li><b>零胶囊</b>：现状的「暂停」白18% + 分段组白8%底+白16%段 = 同一行里 3~4 块填充块，用户读作「墙上贴了一排按钮」。白线语言用<b>字重/白度</b>表达层级：播放图标最重、时间纯白、当前档白100%、非当前档白60%，一眼读完层级。</li>
+        <li><b>实心白圆</b>：无模糊时玻璃会降级成黑32%圆片 ⇒「空心环」，用户抓不住。实心白圆是唯一在亮画面上靠<b>形状</b>而非<b>墨量</b>存在的构件。</li>
+        <li><b>0.88 实底</b>：0.82 → 0.88 上铺满 75.5dp，118dp 层里只剩顶部 42.5dp 在淡出 ⇒ 控制层读作<b>一块实底工具条</b>，而不是「画面上贴了一排白字」= 用户否掉的形态。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>② 与 ③ 的差距 = 规格 §5 还剩的三件</h3>
+      <ul>
+        <li><b>滑块</b> <span style="font-family:Consolas,monospace">VideoPlayerPane.kt:3136-3178</span>：玻璃 Box + 白环 Canvas 两节点合并成一个实心白圆。<b>注意</b>：<code>thumbScale.value</code> 四字面量必须留着（守卫 <code>seekThumbScalesWhileDragging</code> 钉它）。</li>
+        <li><b>中央播放钮</b> <span style="font-family:Consolas,monospace">:2494</span>：删 <code>playerControlGlass</code>、改 2dp 白环。</li>
+        <li><b>控件行</b> <span style="font-family:Consolas,monospace">:3295-3343</span>：<code>CtrlBtn</code>/<code>PlayerSegmentGroup</code> 全部去底，播放改 24dp 图标，三档改纯文字（当前白100%、非当前白60%）。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

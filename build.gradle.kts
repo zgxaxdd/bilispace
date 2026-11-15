@@ -54,6 +54,13 @@ subprojects {
             lint {
                 disable += "NullSafeMutableLiveData"
             }
+            // A2：自有 Lint 规则。挂在这里而不是逐个模块 build.gradle.kts ——
+            // 本项目 50+ 模块，漏挂一个就等于那个模块不被检查，而且**不会报错**。
+            // 只对 Android 模块生效（`java-library` 的 ci-lint / infra:protobuf 没有
+            // lintChecks 这个 configuration，不能无条件挂）。
+            dependencies {
+                add("lintChecks", rootProject.project(":ci-lint"))
+            }
         }
     }
 
@@ -61,6 +68,9 @@ subprojects {
         extensions.configure<LibraryExtension> {
             lint {
                 disable += "NullSafeMutableLiveData"
+            }
+            dependencies {
+                add("lintChecks", rootProject.project(":ci-lint"))
             }
         }
     }

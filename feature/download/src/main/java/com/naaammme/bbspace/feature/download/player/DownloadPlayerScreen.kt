@@ -35,7 +35,7 @@ import androidx.compose.ui.graphics.Color
 
 
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -130,7 +130,7 @@ fun DownloadPlayerScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        val playerGap = 12.dp
+        val playerGap = BiliSpacing.md
         val playerHeight = maxWidth * (9f / 16f)
         val playerSpaceHeight = statusTop + playerHeight
 
@@ -196,12 +196,12 @@ private fun DownloadPlayerMetaList(
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(
-            start = 16.dp,
+            start = BiliSpacing.lg,
             top = topContentPadding,
-            end = 16.dp,
-            bottom = 24.dp
+            end = BiliSpacing.lg,
+            bottom = BiliSpacing.xxl
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         item("meta") {
             DownloadPlayerMetaCard(meta = meta)
@@ -215,8 +215,8 @@ private fun DownloadPlayerMetaCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             Text(
                 text = meta.title.ifBlank { "离线缓存" },

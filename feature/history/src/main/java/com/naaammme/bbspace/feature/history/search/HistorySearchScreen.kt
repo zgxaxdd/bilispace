@@ -38,6 +38,7 @@ import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
 import com.naaammme.bbspace.core.designsystem.component.ProvideSkeletonBreath
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.rememberSkeletonBreathOrNull
 import com.naaammme.bbspace.core.model.HistoryTarget
@@ -45,6 +46,7 @@ import com.naaammme.bbspace.feature.history.component.HistoryItemCard
 import com.naaammme.bbspace.feature.history.component.HistoryListLoading
 import com.naaammme.bbspace.feature.history.component.LOAD_MORE_SKELETON_COUNT
 import com.naaammme.bbspace.feature.history.component.LoadMoreTrigger
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,7 +109,7 @@ fun HistorySearchScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(
+                    IconButton(modifier = Modifier.appElasticPress(),
                         onClick = {
                             focusManager.clearFocus(force = true)
                             keyboard?.hide()
@@ -121,7 +123,7 @@ fun HistorySearchScreen(
                     }
                 },
                 actions = {
-                    IconButton(
+                    IconButton(modifier = Modifier.appElasticPress(),
                         onClick = submitSearch
                     ) {
                         Icon(
@@ -150,7 +152,7 @@ fun HistorySearchScreen(
                 state.errorMessage != null && state.items.isEmpty() -> {
                     StateMessageCard(
                         text = state.errorMessage.orEmpty().ifBlank { "搜索历史记录失败" },
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg),
                         isError = true,
                         actionText = "重试",
                         onAction = viewModel::submitSearch
@@ -160,14 +162,14 @@ fun HistorySearchScreen(
                 state.query.isBlank() -> {
                     StateMessageCard(
                         text = "输入关键词搜索历史记录",
-                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg)
                     )
                 }
 
                 state.items.isEmpty() -> {
                     StateMessageCard(
                         text = "没有找到相关历史记录",
-                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg)
                     )
                 }
 
@@ -178,8 +180,11 @@ fun HistorySearchScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        contentPadding = PaddingValues(
+                            horizontal = BiliSpacing.md,
+                            vertical = BiliSpacing.md
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
                     ) {
                         items(
                             items = state.items,

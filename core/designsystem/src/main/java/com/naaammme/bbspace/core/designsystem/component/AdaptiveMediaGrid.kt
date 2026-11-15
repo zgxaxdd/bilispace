@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.theme.BiliCardDensity
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 
 @Composable
 fun rememberAdaptiveGridColumnCount(
@@ -291,7 +292,7 @@ private fun DefaultGridError(message: String, onRetry: (() -> Unit)? = null) {
         onAction = onRetry,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp)
+            .padding(BiliSpacing.lg)
     )
 }
 
@@ -312,7 +313,7 @@ private fun DefaultGridLoadMore() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = BiliSpacing.sm)
     ) {
         VideoGridCardSkeleton()
     }

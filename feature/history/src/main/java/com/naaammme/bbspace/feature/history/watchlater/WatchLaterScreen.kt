@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -39,6 +40,7 @@ import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardCoverAnchor
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessVideoCardState
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
@@ -53,6 +55,8 @@ import com.naaammme.bbspace.feature.history.component.HistoryListLoading
 import com.naaammme.bbspace.feature.history.component.LOAD_MORE_SKELETON_COUNT
 import com.naaammme.bbspace.feature.history.component.LoadMoreTrigger
 import com.naaammme.bbspace.feature.history.component.formatVideoDuration
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.component.BiliTouchTargets
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,7 +96,7 @@ fun WatchLaterScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -100,7 +104,17 @@ fun WatchLaterScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = viewModel::toggleSort) {
+                    // ## 视觉对齐（task-9 C1：同一顶栏内可点件等高）
+                    // 左侧返回钮是 `IconButton`（命中区 48dp），M3 的 `TextButton` 默认只有
+                    // 40dp —— 同一行里文字钮比图标钮矮 8dp，读作"两颗不是一类的"。
+                    // 高度取 `BiliTouchTargets.comfortable`（= 48dp，由 BiliSpacing 推导，
+                    // 不新增 dp 字面量）：对齐到图标钮而不是反过来，才不会撑高标题行。
+                    TextButton(
+                        onClick = viewModel::toggleSort,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = BiliTouchTargets.comfortable)
+                            .appElasticPress()
+                    ) {
                         Text(if (state.asc) "最早添加" else "最新添加")
                     }
                 },
@@ -157,8 +171,11 @@ fun WatchLaterScreen(
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            contentPadding = PaddingValues(
+                                horizontal = BiliSpacing.md,
+                                vertical = BiliSpacing.md
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
                         ) {
                             items(
                                 items = state.items,
@@ -233,7 +250,12 @@ private fun WatchLaterItemCard(
                     onClick()
                 }
             },
-            modifier = cardModifier,
+            // 与 `HistoryItemCard.kt` 同一口径：本卡内有 `SeamlessCardCoverAnchor`
+            //（见下方 `coverAnchor`），而 `appElasticPress` 是绘制期 `graphicsLayer`
+            // 形变 —— OPPO 无缝框架按布局期 `getLocationInWindow` 取锚点矩形，
+            // 按住卡片时开视频会从"屏幕上已不存在的矩形"起飞。
+            // 锚点真组合（`seamless.active`）时整卡形变让位；不支持无缝的设备保留反馈。
+            modifier = cardModifier.appElasticPress(enabled = !seamless.active),
             colors = colors
         ) {
             WatchLaterItemContent(item = item, coverAnchor = { SeamlessCardCoverAnchor(seamless, item.target, Modifier.matchParentSize()) })
@@ -261,7 +283,7 @@ private fun WatchLaterItemContent(
             text = item.title,
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 16.dp),
+                .padding(horizontal = 14.dp, vertical = BiliSpacing.lg),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -271,8 +293,8 @@ private fun WatchLaterItemContent(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(BiliSpacing.smPlus),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         CoverImage(
             url = item.cover,
@@ -287,9 +309,9 @@ private fun WatchLaterItemContent(
                     text = text,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(6.dp)
+                        .padding(BiliSpacing.xsPlus)
                         .background(Color.Black.copy(alpha = 0.56f), MaterialTheme.shapes.extraSmall)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White
                 )
@@ -298,7 +320,7 @@ private fun WatchLaterItemContent(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Text(
                 text = item.title,
@@ -335,7 +357,7 @@ private fun WatchLaterItemContent(
                             MaterialTheme.colorScheme.secondaryContainer,
                             MaterialTheme.shapes.extraSmall
                         )
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

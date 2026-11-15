@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.model.PlaybackAudio
 import com.naaammme.bbspace.core.model.QualityOption
 import com.naaammme.bbspace.feature.video.detail.QualityOptionItem
@@ -55,7 +56,10 @@ internal fun QualitySelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("取消")
             }
         }
@@ -98,7 +102,10 @@ internal fun AudioSelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("取消")
             }
         }
@@ -140,7 +147,10 @@ internal fun SpeedSelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("取消")
             }
         }

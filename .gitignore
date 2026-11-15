@@ -29,3 +29,16 @@ desktop.ini
 # 本地打包产物与真机走查截图（体积大、可重新生成，不入库）
 dist/
 docs/ai-loop/shots/
+
+# 证据截图目录：只保留文字记录（.md / .txt / .json），截图不入库。
+# 注意：不要写成全局 *.png，否则会误伤 app/src/**/res 下的 Android 资源。
+docs/evidence*/*.png
+docs/evidence*/*.jpg
+docs/evidence*/*.jpeg
+docs/evidence*/*.webp
+
+# 本地临时脚本与构建日志
+.tmp_*.py
+.tmp_*.kt
+build-*.log
+*.hprof

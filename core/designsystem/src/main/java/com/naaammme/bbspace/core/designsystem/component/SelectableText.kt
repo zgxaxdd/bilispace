@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import kotlin.math.max
@@ -175,17 +176,26 @@ fun SelectableText(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         shadowElevation = 4.dp
                     ) {
-                        TextButton(onClick = {
-                            selection = null
-                            if (selectedText.isNotBlank()) {
-                                scope.launch {
-                                    clipboard.setClipEntry(
-                                        ClipData.newPlainText(null, selectedText).toClipEntry()
-                                    )
+                        TextButton(
+                            onClick = {
+                                selection = null
+                                if (selectedText.isNotBlank()) {
+                                    scope.launch {
+                                        clipboard.setClipEntry(
+                                            ClipData.newPlainText(null, selectedText).toClipEntry()
+                                        )
+                                    }
+                                    Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
                                 }
-                                Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
-                            }
-                        }) {
+                            },
+                            // 全局拖拽反馈（第 34 轮 T2）：选区浮动菜单里的"复制"
+                            // 是纯浮层小件，不参与过渡、不在播放器祖先链上。
+                            //
+                            // ⚠️ 只挂这一颗，**不挂**文本选区本体：选区拖动必须由
+                            // 原生选择器独占（`appElasticPress` 虽不消费手势，但跟手
+                            // 位移会让选区边界与手指错位）。
+                            modifier = Modifier.appElasticPress()
+                        ) {
                             Text("复制")
                         }
                     }

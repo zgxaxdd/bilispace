@@ -5,6 +5,7 @@ package com.naaammme.bbspace.feature.video.detail
  * 由 VideoDetailPage.kt 拆分而来（纯搬运，未改行为）。
  */
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import android.text.format.DateFormat
 import androidx.compose.animation.animateContentSize
@@ -29,12 +30,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Paid
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Paid
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -65,6 +70,8 @@ import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoDetail
 import com.naaammme.bbspace.core.model.VideoOwner
 import com.naaammme.bbspace.feature.video.VideoInteractionState
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 
 /**
  * 详情页简介内容卡（[CapsuleCard]）形状：与全 app 卡片同一来源（[BiliRadius.card]），
@@ -72,6 +79,16 @@ import com.naaammme.bbspace.feature.video.VideoInteractionState
  * 32dp 收敛进统一的大圆角语言。
  */
 private val DetailContentCardShape = RoundedCornerShape(BiliRadius.card)
+
+/**
+ * 标签 / 「展开全文」等**小胶囊**形状（16dp，[BiliRadius.groupedList]）。
+ *
+ * 此前两处各写 `MaterialTheme.shapes.extraLarge`，会随 CornerStyle 在 20~32dp 漂移；
+ * 标签高约 24dp，16dp 已接近全圆端 —— 与排行/评论页的 chip 同一套圆角语言。
+ * 文件级常量而非内联 `shape = RoundedCornerShape(...)`：后者会被
+ * `ListAllocationStructureTest` 的具名实参棘轮计数，且每次组合重造一份。
+ */
+private val DetailChipShape = RoundedCornerShape(BiliRadius.groupedList)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -107,7 +124,7 @@ internal fun VideoSummarySection(
         // 标题与作者是一组信息（"这是谁的什么视频"），因此内部间距比组间更小。
         // AV/BV 号不再单独占 chip：它们是需要时才要的技术标识，收进长按复制，
         // 视觉上让位给内容本身（旧版 7 个 chip 并排是信息密度过高的主因）。
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)) {
             Text(
                 text = detail.title,
                 style = MaterialTheme.typography.titleLarge,
@@ -137,7 +154,10 @@ internal fun VideoSummarySection(
         ActionCapsule(
             interaction = interaction,
             onAction = onAction,
-            onDownloadClick = onDownloadClick
+            onDownloadClick = onDownloadClick,
+            // 计数动效的身份键：切视频时重置"已消费的本地操作请求"，
+            // 避免上一支视频的未消费请求让新视频的首个数字凭空动一下。
+            identity = ids.aid,
         )
 
         // ── 简介 ──────────────────────────────────────────────────────────
@@ -199,11 +219,14 @@ private fun StatLine(
         )
         // 评论单独可点：它是唯一有"跳转"语义的统计项，用主色区分可点性
         detail.stat?.reply?.takeIf(String::isNotBlank)?.let { reply ->
-            Text(
-                text = "  ·  ",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // 只有统计项存在时才补分隔符：否则行首会孤零零挂一个 "·"
+            if (parts.isNotEmpty()) {
+                Text(
+                    text = "  ·  ",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text(
                 text = "$reply 评论",
                 style = MaterialTheme.typography.labelMedium,
@@ -211,8 +234,11 @@ private fun StatLine(
                 maxLines = 1,
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.small)
+                    // 全局拖拽反馈（第 34 轮 T2）："> N 评论"跳转小件。
+                    // `highlightShape` 与 `clip(shapes.small)` 同源。
+                    .appElasticPress(highlightShape = MaterialTheme.shapes.small)
                     .clickable(onClick = onOpenComments)
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                    .padding(horizontal = BiliSpacing.xs, vertical = 2.dp)
             )
         }
     }
@@ -222,6 +248,16 @@ private fun StatLine(
  * 简介块：折叠时最多 2 行 + "展开"提示；展开后全文 + "收起"。
  *
  * 整块可点（旧版是一个独立的 ToggleChip），点击区域更大、更符合直觉。
+ *
+ * ## 2026-10-11 排版重做（用户反馈「简介部分内容排版不好看，不符合现代人审美」）
+ * 旧版是「两行灰正文 + 一行主色小字『展开』」直接裸排在页面上：正文与"展开"之间只有
+ * 4dp，且两者**同字号不同色**，读起来像"正文最后多了一行字"，看不出那是一个可点的动作；
+ * 折叠态与展开态之间也没有任何可读的边界。
+ *
+ * 现代做法（B 站 / YouTube / 抖音的简介区一致）：**正文与动作分开**——
+ * 动作给一枚**右对齐的胶囊**（主色底 + 主色字 + 箭头），与正文之间有明确的一段呼吸；
+ * 它自己就能被认出"这里可以点"。同时正文的 `lineHeight` 交给主题的 bodyMedium
+ * （不再挤在默认行高上），折叠态才读得出"这是被截断的"。
  */
 @Composable
 private fun DescBlock(
@@ -233,9 +269,17 @@ private fun DescBlock(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
+            // 全局拖拽反馈（第 34 轮 T2）：简介整块可点（展开/收起）。
+            // 整宽 ⇒ 0.6 克制档；`highlightShape` 与 `clip` 同源。
+            .appElasticPress(
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f),
+                highlightShape = MaterialTheme.shapes.large
+            )
             .clickable(onClick = onToggle)
-            .padding(vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+            // 上边距把「正文」与上方统计/操作胶囊拉开：简介是**另一段内容**，
+            // 不再是紧贴在操作栏下面的一行灰字。
+            .padding(top = BiliSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         Text(
             text = desc,
@@ -244,11 +288,56 @@ private fun DescBlock(
             maxLines = if (expanded) Int.MAX_VALUE else 2,
             overflow = TextOverflow.Ellipsis
         )
-        Text(
-            text = if (expanded) "收起" else "展开",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary
-        )
+        // 动作胶囊：右对齐（与上方 ActionCapsule 的等分排布形成"这是一条独立动作"的对比），
+        // 主色淡底 + 主色字 + 展开/收起箭头 —— 三样都是"可点"的通用语言。
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            DescToggleChip(expanded = expanded)
+        }
+    }
+}
+
+/**
+ * 「展开 / 收起」动作胶囊。
+ *
+ * 为什么不用 [SoftChip]：那是**标签**的语言（中性灰底、无箭头、不可点），
+ * 拿它当动作入口会与旁边的 `#话题` 标签撞语义（真机上两者本来就并排出现在同一屏）。
+ * 这里用主色淡底 + 主色字 + 方向箭头，一眼区分"标签"与"动作"。
+ *
+ * 尺寸全部走 token（`BiliSpacing` + `MaterialTheme.shapes`），不新增 dp 字面量
+ * （`DesignTokenLintTest` 的棘轮）。
+ */
+@Composable
+private fun DescToggleChip(expanded: Boolean) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+        contentColor = MaterialTheme.colorScheme.primary,
+        shape = DetailChipShape
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = BiliSpacing.md,
+                vertical = BiliSpacing.xsPlus
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
+        ) {
+            Text(
+                text = if (expanded) "收起" else "展开全文",
+                style = MaterialTheme.typography.labelMedium
+            )
+            Icon(
+                imageVector = if (expanded) {
+                    Icons.Outlined.KeyboardArrowUp
+                } else {
+                    Icons.Outlined.KeyboardArrowDown
+                },
+                contentDescription = null,
+                modifier = Modifier.size(BiliSpacing.lg)
+            )
+        }
     }
 }
 
@@ -273,6 +362,12 @@ private fun TagBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(MaterialTheme.shapes.large)
+                // 全局拖拽反馈（第 34 轮 T2）：标签块整块可点（展开/收起）。
+                // 用 0.6 克制档 —— FlowRow 里是一排互斥标签，满强度会互相挤。
+                .appElasticPress(
+                    state = rememberAppElasticPressState(feedbackStrength = 0.6f),
+                    highlightShape = MaterialTheme.shapes.large
+                )
                 .clickable(onClick = onToggle),
             horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
             verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
@@ -299,6 +394,12 @@ internal fun OwnerRow(
         modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
+            // 全局拖拽反馈（第 34 轮 T2）：UP 主信息行（整行可点进空间）。
+            // 整行宽 ⇒ 0.6 克制档；`highlightShape` 与 `clip` 同源。
+            .appElasticPress(
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f),
+                highlightShape = MaterialTheme.shapes.large
+            )
             .clickable(onClick = onClick)
     } else {
         modifier.fillMaxWidth()
@@ -345,42 +446,77 @@ internal fun ActionCapsule(
     interaction: VideoInteractionState,
     modifier: Modifier = Modifier,
     onAction: (VideoDetailUiAction) -> Unit,
-    onDownloadClick: () -> Unit
+    onDownloadClick: () -> Unit,
+    /** 身份键（aid）：切视频时重置计数动效状态。 */
+    identity: Any? = Unit
 ) {
     val stat = interaction.stat
     val userState = interaction.userState
-    val liked = userState?.liked == true
-    val coinated = (userState?.coinCount ?: 0) > 0
-    val faved = userState?.faved == true
+    // 本地操作请求计数：只有这里 arm 过的变化才做数字弹跳（首次组合 / 后台刷新不动）。
+    // 上游把它放在共享 ViewModel（详情 + 竖屏互动栏共用）；本仓本轮写域只到 detail 侧，
+    // 播放器内侧栏未接线（见报告"未移植到播放器侧"）。
+    val countRequests = rememberVideoActionCountRequests()
+    // A16：三个位都是**可空**真值源 —— `null` = 未确认（未登录 / 服务端没回 req_user），
+    // 不是「未点赞 / 0 币 / 未收藏」。折叠成 false 会把未知画成"未选中"。
+    val liked = userState?.liked
+    val coinated = userState?.coinCount?.let { it > 0 }
+    val faved = userState?.faved
     CapsuleCard(modifier = modifier) {
         Row(modifier = Modifier.fillMaxWidth()) {
             if (stat != null) {
                 ActionChip(
                     label = "点赞",
                     value = actionCount(stat.likeValue, interaction.likeDelta),
-                    icon = Icons.Default.ThumbUp,
-                    selected = liked,
-                    onClick = { onAction(VideoDetailUiAction.Like) },
-                    onLongClick = { onAction(VideoDetailUiAction.Triple) }
+                    countValue = stat.likeValue + interaction.likeDelta,
+                    countRequest = countRequests.like,
+                    identity = identity,
+                    // 动作图标统一线性；**只有选中态才用实心**（与播放页同一条图标纪律）
+                    icon = if (liked == true) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                    selected = liked == true,
+                    // 未知态：中性占位（同尺寸、不可点），而不是画成"未选中"再翻面
+                    enabled = liked != null,
+                    onClick = {
+                        countRequests.requestLike()
+                        onAction(VideoDetailUiAction.Like)
+                    },
+                    onLongClick = {
+                        // 一键三连：三个计数都会变化 ⇒ 三个请求一起 arm（上游同义）。
+                        countRequests.requestTriple()
+                        onAction(VideoDetailUiAction.Triple)
+                    }
                 )
                 ActionChip(
                     label = "投币",
                     value = actionCount(stat.coinValue, interaction.coinDelta),
-                    icon = Icons.Default.Paid,
-                    selected = coinated,
-                    onClick = { onAction(VideoDetailUiAction.Coin) }
+                    countValue = stat.coinValue + interaction.coinDelta,
+                    countRequest = countRequests.coin,
+                    identity = identity,
+                    icon = if (coinated == true) Icons.Filled.Paid else Icons.Outlined.Paid,
+                    selected = coinated == true,
+                    // 投币是**单向**写（只加币），未知不会发错请求 ⇒ 保持可点
+                    onClick = {
+                        countRequests.requestCoin()
+                        onAction(VideoDetailUiAction.Coin)
+                    }
                 )
                 ActionChip(
                     label = "收藏",
                     value = actionCount(stat.favValue, interaction.favDelta),
-                    icon = if (faved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    selected = faved,
-                    onClick = { onAction(VideoDetailUiAction.Favorite) }
+                    countValue = stat.favValue + interaction.favDelta,
+                    countRequest = countRequests.favorite,
+                    identity = identity,
+                    icon = if (faved == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    selected = faved == true,
+                    // 收藏走显式 addIds/delIds（不是取反），未知时最坏是重复收藏 ⇒ 保持可点
+                    onClick = {
+                        countRequests.requestFavorite()
+                        onAction(VideoDetailUiAction.Favorite)
+                    }
                 )
                 ActionChip(
                     label = "分享",
                     value = stat.share,
-                    icon = Icons.Default.Share,
+                    icon = Icons.Outlined.Share,
                     selected = false,
                     onClick = { onAction(VideoDetailUiAction.Share) }
                 )
@@ -388,7 +524,7 @@ internal fun ActionCapsule(
             ActionChip(
                 label = "下载",
                 value = null,
-                icon = Icons.Default.Download,
+                icon = Icons.Outlined.Download,
                 selected = false,
                 onClick = onDownloadClick
             )
@@ -453,19 +589,39 @@ internal fun SoftChip(
     onLongPressLabel: String? = null
 ) {
     val modifier = when {
+        // 长按复制：按铁律**不挂跟手形变**（长按意图会被跟手位移读成拖拽）。
+        // 这里连按压都不挂 —— `copyTextOnLongPress` 自带 interactionSource，
+        // 再叠一层只按压会让"按住等复制"的手感与其它 chip 不一致却又不跟手，
+        // 反而更像坏了。保持原样，报告里单列。
         onLongPressLabel != null -> Modifier.copyTextOnLongPress(text, onLongPressLabel)
-        onClick != null -> Modifier.clickable(onClick = onClick)
+        onClick != null -> Modifier
+            // 全局拖拽反馈（第 34 轮 T2）：可点的 SoftChip（标签/分区等独立小件）。
+            // `highlightShape` 与 `DetailChipShape` 同源，光斑裁在 chip 圆角内。
+            .appElasticPress(highlightShape = DetailChipShape)
+            .clickable(onClick = onClick)
         else -> Modifier
     }
+    // 2026-10-11：底色从 `surfaceContainerHighest` 换成 `surfaceContainerHigh` + 一层描边。
+    // 前者是**容器色阶里最重的一档**（用来表达"嵌套最深"），拿它画一排标签会与页面底色
+    // 只差一点点明度，真机上读成"一片灰饼"；而 `outlineVariant` 的发丝描边给出了标签的
+    // 边界感 —— 现代标签语言的通行做法是"浅底 + 细边"，不靠色差。
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = DetailChipShape,
+        border = BorderStroke(
+            width = BiliSpacing.xs / 8f,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        ),
         modifier = modifier
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier.padding(
+                horizontal = BiliSpacing.smPlus,
+                vertical = BiliSpacing.xsPlus
+            )
         )
     }
 }
@@ -477,25 +633,41 @@ internal fun RowScope.ActionChip(
     icon: ImageVector,
     selected: Boolean,
     onClick: (() -> Unit)? = null,
-    onLongClick: (() -> Unit)? = null
+    onLongClick: (() -> Unit)? = null,
+    /**
+     * A16：状态未确认时传 `false` —— 按钮**留在原位**（同尺寸占位，不隐藏、不移位），
+     * 但不可点、并且视觉上退成中性灰。
+     *
+     * 为什么是"同尺寸中性占位"而不是隐藏：隐藏会让整行 4 个 chip 的 `weight(1f)`
+     * 重新分配宽度，状态到达时其它按钮会**横向跳一下**。上游 `a614d2eba` 的修法
+     * 明确是「同尺寸中性占位 + 暂时禁用」，不是隐藏。
+     */
+    enabled: Boolean = true,
+    /** 原始计数（未格式化）：用于识别"文本没变但计数真的变了"，并让请求被正确消费。 */
+    countValue: Long? = null,
+    /** 该动作的本地请求计数（[VideoActionCountRequests] 对应字段）；0 表示不 arm。 */
+    countRequest: Int = 0,
+    /** 身份键（aid）：切视频时重置计数动效状态。 */
+    identity: Any? = Unit
 ) {
     // A3：选中态颜色渐变 + 图标 spring 弹跳（0.85→1.0，一次回弹）。
     // 时长走 token（此前两处都硬编码 150ms）——动效速度档位与 reduceMotion 必须能作用到它们。
     val actionAnim = LocalAnimations.current
     val iconTint by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+        targetValue = when {
+            // A16：未确认 → 中性灰（既不"点亮"也不"未选中"），让用户一眼看出"还说不准"
+            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            selected -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         animationSpec = tween(durationMillis = actionAnim.short),
         label = "actionChipTint"
     )
     val textColor by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onSurface
+        targetValue = when {
+            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            selected -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onSurface
         },
         animationSpec = tween(durationMillis = actionAnim.short),
         label = "actionChipText"
@@ -516,11 +688,19 @@ internal fun RowScope.ActionChip(
         }
     }
     val clickableModifier = when {
+        // A16：未确认时不挂任何点击/长按处理器。热区与尺寸全部保留（同尺寸占位），
+        // 所以状态到达时这一行不会横跳；区别只在"点不动 + 灰一档"。
+        !enabled -> Modifier
         onClick != null && onLongClick != null -> Modifier.combinedClickable(
             onClick = onClick,
             onLongClick = onLongClick
         )
 
+        // ⚠️ 第 34 轮 T2：这里**刻意不挂** appElasticPress。
+        // 本操作栏图标已经有自己的按压动效（下面的 `iconScale` Animatable：
+        // 按下放大、松开回弹，见 `graphicsLayer { scaleX = iconScale.value }`）。
+        // 再叠一层弹性形变 = 双抖（与 Switch/Slider 同一条判据）。
+        // ⇒ 这一行**已经有**拖拽反馈语义，只是实现方式不同，不是"漏接"。
         onClick != null -> Modifier.clickable(onClick = onClick)
         else -> Modifier
     }
@@ -551,12 +731,13 @@ internal fun RowScope.ActionChip(
                     scaleY = iconScale.value
                 }
         )
-        Text(
+        VideoActionCountText(
             text = value ?: label,
-            style = MaterialTheme.typography.labelMedium,
+            request = countRequest,
+            countValue = countValue,
+            identity = identity,
             color = textColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            style = MaterialTheme.typography.labelMedium,
         )
     }
 }

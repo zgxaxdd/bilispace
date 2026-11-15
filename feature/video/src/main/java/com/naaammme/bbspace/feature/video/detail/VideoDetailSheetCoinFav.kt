@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.feature.video.FavFolderSheetState
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 internal fun CoinSheetContent(
@@ -67,15 +68,20 @@ internal fun CoinSheetContent(
             )
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)) {
+                // 全局拖拽反馈（第 34 轮 T2）：投币枚数档位（弹层内互斥小芯片）。
+                // `FilterChip` 自身没有形变，挂外层不会双抖。
                 FilterChip(
                     selected = multiply == 1,
                     onClick = { multiply = 1 },
+                    modifier = Modifier.appElasticPress(),
                     label = { Text("1 枚") }
                 )
                 FilterChip(
                     selected = multiply == 2,
                     onClick = { multiply = 2 },
                     enabled = maxCoin == 2,
+                    // `enabled` 透传：2 枚不可选时连形变一起关掉。
+                    modifier = Modifier.appElasticPress(enabled = maxCoin == 2),
                     label = { Text("2 枚") }
                 )
             }
@@ -83,6 +89,7 @@ internal fun CoinSheetContent(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
+                // Checkbox 自身有形变（勾选动画），按铁律**外层不挂**。
                 Checkbox(checked = withLike, onCheckedChange = { withLike = it })
                 Text("同时点赞", style = MaterialTheme.typography.bodyMedium)
             }
@@ -98,7 +105,11 @@ internal fun CoinSheetContent(
             Button(
                 onClick = { onSubmit(multiply, withLike) },
                 enabled = !busy,
-                modifier = Modifier.fillMaxWidth()
+                // 全局拖拽反馈（第 34 轮 T2）：投币确认主按钮（弹层内）。
+                // `enabled` 透传 —— 投币中按钮禁用，形变同步关掉。
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .appElasticPress(enabled = !busy)
             ) {
                 Text(if (busy) "投币中…" else "确认投币")
             }
@@ -121,7 +132,7 @@ internal fun FavFolderSheetContent(
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         Text("收藏", style = MaterialTheme.typography.titleLarge)
         when {
@@ -175,13 +186,19 @@ internal fun FavFolderSheetContent(
                 }
             }
         }
-        TextButton(onClick = { showCreate = true }) {
+        TextButton(
+            onClick = { showCreate = true },
+            // 全局拖拽反馈（第 34 轮 T2）：收藏弹层里"新建收藏夹"（浮层小件）。
+            modifier = Modifier.appElasticPress()
+        ) {
             Text("＋ 新建收藏夹")
         }
         Button(
             onClick = onSubmit,
             enabled = !state.submitting && !state.loading,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .appElasticPress(enabled = !state.submitting && !state.loading)
         ) {
             Text(if (state.submitting) "保存中…" else "完成")
         }
@@ -192,7 +209,7 @@ internal fun FavFolderSheetContent(
             onDismissRequest = { showCreate = false },
             title = { Text("新建收藏夹") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)) {
                     OutlinedTextField(
                         value = newTitle,
                         onValueChange = { newTitle = it },
@@ -203,11 +220,13 @@ internal fun FavFolderSheetContent(
                         FilterChip(
                             selected = !privateFolder,
                             onClick = { privateFolder = false },
+                            modifier = Modifier.appElasticPress(),
                             label = { Text("公开") }
                         )
                         FilterChip(
                             selected = privateFolder,
                             onClick = { privateFolder = true },
+                            modifier = Modifier.appElasticPress(),
                             label = { Text("私有") }
                         )
                     }
@@ -224,13 +243,18 @@ internal fun FavFolderSheetContent(
                             showCreate = false
                         }
                     },
-                    enabled = newTitle.isNotBlank()
+                    enabled = newTitle.isNotBlank(),
+                    // 全局拖拽反馈 + `enabled` 透传（标题为空时按钮禁用，形变同步关掉）。
+                    modifier = Modifier.appElasticPress(enabled = newTitle.isNotBlank())
                 ) {
                     Text("创建")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showCreate = false }) {
+                TextButton(
+                    onClick = { showCreate = false },
+                    modifier = Modifier.appElasticPress()
+                ) {
                     Text("取消")
                 }
             }

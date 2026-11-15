@@ -32,14 +32,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliSheetGrabber
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.biliSheetShape
 import androidx.compose.ui.graphics.Color
 import com.naaammme.bbspace.core.model.SearchFilter
 import com.naaammme.bbspace.core.model.SearchOp
 import com.naaammme.bbspace.core.model.SearchTime
 import java.util.Calendar
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -79,8 +80,11 @@ fun SearchFiltersSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(
+                horizontal = BiliSpacing.lg,
+                vertical = BiliSpacing.md
+            ),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
         ) {
             item(
                 key = "title",
@@ -126,21 +130,21 @@ fun SearchFiltersSheet(
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md)
                 ) {
                     OutlinedButton(
                         onClick = {
                             draftSel = emptyMap()
                             draftTime = SearchTime()
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text("重置")
                     }
                     TextButton(
                         onClick = { onApply(draftSel, draftTime) },
                         enabled = canApply,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).appElasticPress()
                     ) {
                         Text("确定")
                     }
@@ -172,12 +176,12 @@ private fun SearchFilterSection(
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(top = BiliSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             filter.ops.forEach { op ->
-                FilterChip(
+                FilterChip(modifier = Modifier.appElasticPress(),
                     selected = isPicked(op, picked),
                     onClick = { onToggle(op) },
                     label = { Text(op.label) }
@@ -201,15 +205,15 @@ private fun CustomTimePanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(top = BiliSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         Text(
             text = "自定义时间",
             style = MaterialTheme.typography.titleSmall
         )
         Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             DateBtn(
                 label = "开始日期",
@@ -282,7 +286,7 @@ private fun DateBtn(
                 cal.get(Calendar.DAY_OF_MONTH)
             ).show()
         },
-        modifier = modifier
+        modifier = modifier.appElasticPress()
     ) {
         Text(
             text = if (timeS > 0L) formatDay(timeS) else label,

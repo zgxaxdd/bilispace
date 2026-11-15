@@ -18,7 +18,15 @@
    用 **`git worktree`** 或直接 `git fetch` + 只读的 `git log/show`。
    参考仓（`_ref/*`）**永远只读**，不在里面做任何本地改动。
 2. **收口时必须更新基线**。基线没更新 = 下一轮会把同一批提交再"发现"一次，delta 永远算不对。
-   基线落在 `docs/ai-loop/PROGRESS.md` 的对应批次里（当前：**`033147e36`** = v0.2.9，见批次 UP-02）。
+   基线落在 `docs/ai-loop/PROGRESS.md` 的对应批次里（当前：**`3608e0347`** = v0.3.6，见批次 UP-03）。
+
+3. **不许在参考仓的工作区上 `grep`/`find` 读上游源码**（2026-10-13 UP-03 新增，血的教训）。
+   `_ref/BiliPai` 的**工作区会停在某个旧基线**（UP-03 实测：工作区 HEAD = `033147e36`，
+   而 `origin/main` 已到 `3608e0347`）。此时 `grep`/`find` 读到的是**改动前的源码**，
+   会把整个区间的**新增文件全部漏掉**——不是"少读了几行"，是**方向性错误**。
+   一律用 **`git show origin/main:<path> | cat -n`** 读文件内容、
+   **`git grep <pat> origin/main`** 做全仓检索。
+   （`git log --oneline`/`--numstat`/`--stat` 不受影响，它们本来就作用于历史对象。）
 
 ---
 
@@ -27,12 +35,29 @@
 ### ① 建隔离工作区 + 取新提交
 
 ```bash
-git -C <上游参考仓> fetch origin            # 参考仓只读，不做本地分支
+git -C <上游参考仓> fetch origin --tags    # 参考仓只读，不做本地分支、不 pull/checkout
 git -C <上游参考仓> log --oneline <基线>..origin/main
 ```
-- 不要 `checkout`。要读文件就 `git -C <仓> show <ref>:<path>`，或建一个**独立** worktree
-  （`git worktree add /tmp/upstream-<sha> <sha>`）读完即删。
-- 记录新 tip 的 sha 与 tag（如 `6e6bdce36` / v0.2.4），后面写进报告。
+- 不要 `checkout`（`FINDINGS` **W1**）。要读文件就 `git -C <仓> show origin/main:<path> | cat -n`，
+  或建一个**独立** worktree（`git worktree add /tmp/upstream-<sha> <sha>`）读完即删。
+- **先记下参考仓工作区 HEAD**（`git rev-parse --short HEAD`）并写进清单 §0 表格。
+  它若 ≠ `origin/main`，就**绝对不能**在该工作区上 `grep`/`find`（见 §0 硬约束 3）。
+- 记录新 tip 的 sha 与 tag（如 `3608e0347` / v0.3.6），后面写进报告。
+
+### ①.5 先剔噪音，再数增量（2026-10-13 UP-03 新增）
+
+`rev-list --count` 给出的提交数**会严重高估**真实增量。数之前先排掉三类：
+
+```bash
+# 完整回滚对（净零）：找出"改动被后续提交逐字撤销"的提交
+git -C <仓> diff --stat <A>^ <B>          # A=改进提交, B=回滚提交；只剩 CHANGELOG 等 ⇒ 代码净零
+# 重复提交对（rebase 残留）：diff 哈希逐字节相同才算重复
+git -C <仓> show <sha1> --format='' -M | sha256sum
+git -C <仓> show <sha2> --format='' -M | sha256sum
+```
+- **哈希不同就不是重复**：同题的两个提交（如 `c8fe9d671`/`5fa90deda`）内容有差异，**不能**当重复剔除。
+- UP-03 实测：107 提交里有 1 对完整回滚（160 文件）、1 对逐字节重复、14 条版本号/文档提交
+  ⇒ 真实行为增量约 **70 条**。
 
 ### ② 逐文件 `--numstat -M`，区分"纯搬运"与"行为变化"
 
@@ -59,6 +84,19 @@ git -C <上游参考仓> log --numstat -M --oneline <基线>..origin/main
 | **B · 重写适配** | 结构不同构 | 只搬语义/判据；接线重设；写明差异点 |
 | **C · 不建议移植** | 架构/产品/跨仓/无 substrate | 归档算法作参考，写理由（**不许用"看起来是死代码"当理由**——先核消费者，S3 的教训） |
 
+**分 A/B 之前先查目标守卫（UP-03 新增）**：本仓的棘轮/结构守卫会咬住**移植件的形状**，不只是行为。
+定级前至少核对这四条（`core/designsystem/src/test/.../FrameBudgetLintTest.kt` 与 `.../motion/AnimationTokenRatchetTest.kt`）：
+
+| 守卫 | 上限 | 含义 |
+|---|---|---|
+| `Modifier.composed{}` | 1（实测现用 0） | 上游大量用 `composed{}`；本仓要求改写成 `Modifier.Node` |
+| `animate*AsState` | 10（已满 10/10） | 新增即红 |
+| `tween(`/`spring(` + 数字字面量 | 4，且**必须全部在 `DissolvableSurface.kt`** | 上游的具名弹簧（如 `spring(0.5f, 300f, 0.001f)`）**会匹配该正则** ⇒ 必须改写成 `LocalAnimations` token |
+| `hazeBlur(` / `drawBackdrop(` | 4（已满 4/4） | 新增玻璃面即红；`GlassMountRegistryTest` 还要求登记 file+kind+行号 |
+
+⇒ 一个**行为上等价**的移植件可能因为形状（`composed{}`、硬编码弹簧、新增玻璃面）而**必须重写**，
+这时应定 B 而不是 A，并在任务书里写明"为什么不能原样搬"。
+
 "结构不同构"的实证清单在 `docs/2026-10-03-BiliPai移植-执行报告.md` §2 与任务书 §1。
 
 ### ⑤ 写任务书（每项固定字段）+ 强制段落
@@ -83,6 +121,8 @@ git -C <上游参考仓> log --numstat -M --oneline <基线>..origin/main
 | 纪律 | 出处 | 在本 SOP 里的位置 |
 |---|---|---|
 | 不要 `checkout`，要 worktree | `FINDINGS` **W1** | §0 硬约束 1 |
+| **参考仓工作区可能停在旧基线，不许在其上 grep/find** | UP-03（2026-10-13）实测 | §0 硬约束 3 + 步骤① |
+| **数增量前先剔三类噪音**（完整回滚对 / 逐字节重复对 / 版本号文档） | UP-03 实测（107 → 约 70） | 步骤①.5 |
 | 交接/任务书断言必须回读源码 | `FINDINGS` **W4** | 步骤 ③ |
 | 扫源码型守卫会被判 `UP-TO-DATE` 静默跳过 | `FINDINGS` **W5** / `BACKLOG` **ST-26** | 步骤 ⑥（`--rerun` 的意义） |
 | `--rerun` 只作用于命令行**最后一个**任务 | `FINDINGS` **W22**（2026-10-03 复核） | 步骤 ⑥：**逐模块单任务**调用 |
@@ -91,6 +131,7 @@ git -C <上游参考仓> log --numstat -M --oneline <基线>..origin/main
 | 依赖核查要自己走 `build.gradle.kts` | `FINDINGS` **W30** | 步骤 ③⑤（"零新依赖"是断言不是事实） |
 | 既有工具要读实现，别读名字 | `FINDINGS` **W31** | 步骤 ③ |
 | 改共享入口的分派语义前 grep 全部调用点 | `FINDINGS` **W32** | 步骤 ③⑤（差异点段落） |
+| **本仓守卫会咬住"移植件的形状"**：`Modifier.composed` 上限 1（现用 0）、`animate*AsState` 10/10、`tween(`/`spring(`+字面量 4/4 且必须全在 `DissolvableSurface.kt`、真实模糊入口 `hazeBlur(`/`drawBackdrop(` 4/4 | UP-03 实测（子代理核对） | 步骤 ④：分级时要先查目标守卫是否**允许**该形状，再判 A/B |
 
 ---
 

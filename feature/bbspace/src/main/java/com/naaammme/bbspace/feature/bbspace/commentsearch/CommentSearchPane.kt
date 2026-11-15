@@ -27,7 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,6 +37,8 @@ import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_COMMENT
 import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.theme.asBold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -77,7 +78,7 @@ fun CommentSearchPane(
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         item {
             CommentSearchHeaderCard(
@@ -99,11 +100,10 @@ fun CommentSearchPane(
 
         state.allCount?.let { allCount ->
             item {
-                CommentSearchBaseCard(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                CommentSearchBaseCard(verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)) {
                     Text(
                         text = "共 $allCount 条，已加载 ${state.items.size} 条",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.titleMedium.asBold()
                     )
                     val tipText = when {
                         state.queryPending -> "筛选条件已修改，点击查询更新结果"
@@ -182,12 +182,11 @@ private fun CommentSearchHeaderCard(
 ) {
     CommentSearchBaseCard(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         Text(
             text = "查评论",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.titleMedium
         )
         OutlinedTextField(
             value = uidInput,
@@ -210,11 +209,11 @@ private fun CommentSearchHeaderCard(
         )
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
         ) {
             CommentSearchMode.entries.forEach { md ->
-                FilterChip(
+                FilterChip(modifier = Modifier.appElasticPress(),
                     selected = mode == md,
                     onClick = { onModeSelected(md) },
                     enabled = !isLoading && !isLoadingMore,
@@ -224,7 +223,7 @@ private fun CommentSearchHeaderCard(
         }
         Button(
             onClick = onQueryClick,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().appElasticPress(),
             enabled = !isLoading && !isLoadingMore
         ) {
             Text(if (isLoading) "查询中" else "查询")
@@ -236,16 +235,16 @@ private fun CommentSearchHeaderCard(
 private fun CommentSearchBaseCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(8.dp),
+    verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(BiliSpacing.sm),
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
         onClick = onClick ?: {},
         enabled = onClick != null,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth().appElasticPress()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(BiliSpacing.lg),
             verticalArrangement = verticalArrangement,
             content = content
         )

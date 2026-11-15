@@ -50,6 +50,7 @@ import com.naaammme.bbspace.core.designsystem.glass.LocalGlassRefresher
 import com.naaammme.bbspace.core.designsystem.glass.glassEffect
 import com.naaammme.bbspace.core.designsystem.glass.glassFrameRefresh
 import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import com.naaammme.bbspace.core.designsystem.motion.appSearchElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
@@ -297,6 +298,14 @@ internal fun LinkedBottomDock(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clip(dockShape)
+                                // 全局拖拽反馈（上游 BiliPai `AppElasticPress`）：
+                                // 搜索是"胶囊形宽控件"，正是上游点名要统一的那类。
+                                // 用 `appSearchElasticPress`（strength 0.6）：宽控件按满强度
+                                // 形变会读作"整条底栏在晃"，上游为此专门降了增益。
+                                //
+                                // 挂在 `.clip()` **之后**：形变作用于已裁剪的形状，光斑也按
+                                // 圆形高亮（默认 Shape.Circle）绘制，不会溢出到玻璃壳外。
+                                .appSearchElasticPress()
                                 .clickable(role = Role.Button, onClick = onSearchClick),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -382,8 +391,8 @@ internal fun LinkedBottomDock(
 internal fun dockCapsuleShape(): Shape = remember { RoundedCornerShape(BiliRadius.dock) }
 
 /**
- * Dock 单个胶囊表面：玻璃链路（消费端逐帧重采样 + haze/miuix 背板）与
- * 非玻璃降级（iOS 描边 + 阴影）都在这一处收口，导航簇 / 合并格 / 搜索位共用。
+ * Dock 单个胶囊表面：玻璃链路（消费端逐帧重采样 + haze/miuix 背板）与非玻璃
+ * 降级（iOS 描边 + 阴影）都在这一处收口。2026-10-18 外壳精修见文件顶部常量注释。
  */
 @Composable
 internal fun DockGlassSurface(
@@ -402,13 +411,13 @@ internal fun DockGlassSurface(
         isIOS -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = if (dark) 0.90f else 0.92f)
         else -> MaterialTheme.colorScheme.surfaceContainer
     }
-    // 非玻璃档的悬浮壳（描边 + 投影）。此前只有 iOS 档挂壳，Material 档是**平的**
-    // 一块色板——同一个 Dock 在两种界面风格下判若两物。现代大圆角语言的悬浮感
-    // 必须两种风格一致，只有描边色/底色按各自色彩体系取。
+    // 悬浮壳：非玻璃档（描边 + 投影）；2026-10-18 精修三条见函数 KDoc。
+    // 此前只有 iOS 档挂壳，Material 档是平的一块色板，同款底栏在两档下判若两物。
+    // 描边宽度/透明度与投影参数的常量见文件顶部 `Dock*` 组。
     val borderColor = if (dark) {
-        Color.White.copy(alpha = 0.10f)
+        Color.White.copy(alpha = DockHairlineAlphaDark)
     } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = DockHairlineAlphaLight)
     }
     val shellModifier = when {
         glassOn -> Modifier
@@ -424,15 +433,16 @@ internal fun DockGlassSurface(
                 shape = shape,
                 isScrolling = isScrolling,
             )
+            .border(DockHairlineWidth, borderColor, shape)
         else -> Modifier
             .shadow(
-                elevation = 3.dp,
+                elevation = DockShellElevation,
                 shape = shape,
                 clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.08f),
-                spotColor = Color.Black.copy(alpha = 0.30f),
+                ambientColor = Color.Black.copy(alpha = DockAmbientAlpha),
+                spotColor = Color.Black.copy(alpha = DockSpotAlpha),
             )
-            .border(1.dp, borderColor, shape)
+            .border(DockHairlineWidth, borderColor, shape)
     }
     Surface(
         modifier = modifier.then(shellModifier),
@@ -442,3 +452,31 @@ internal fun DockGlassSurface(
         content = content,
     )
 }
+
+// ── 2026-10-18 外壳精修常量（对齐顶栏 / 设置页的 iOS 语汇）──────────────────
+//
+// ## 为什么是"精修"而不是重做
+// Dock 的结构（玻璃链路 + 同心圆角 32/24 + 12/8dp 内边距）本身是对的，
+// 问题在**外壳的三处取值与其它 chrome 不同语汇**，读起来"精致度掉一档"。
+//
+// ## ① 描边：1dp → 0.5dp（发丝级）
+// 1dp 在 density 3.5 的设备上是 3.5px，浅色主题下读作"一圈灰线"——它把一块
+// 悬浮玻璃框成了卡片。发丝描边的语义是"给玻璃一个边界提示"，不是"画一个框"，
+// 与 `BiliCardSurface.biliDarkHairlineBorder` 的 0.5dp 同一处理逻辑。
+// 不接 `BiliSpacing`：描边**粗细**不是间距档位（BiliSpacing 最小 4dp，套上去
+// 会得到一圈粗环），同 48dp 触控下限的处理方式——规格常量不做成间距 token。
+private val DockHairlineWidth = 0.5.dp
+
+// ## ② 描边透明度
+// 深色主题用白色低透明（黑底上灰线看不见，只能用亮线勾边）；浅色主题用
+// `outlineVariant` 再压到 18%（直接用它原值会偏重，读作分割线而不是边缘提示）。
+private const val DockHairlineAlphaDark = 0.12f
+private const val DockHairlineAlphaLight = 0.18f
+
+// ## ③ 投影：elevation 3 → 6dp，spot 0.30 → 0.18
+// 原取值的问题不是"太淡"而是"太重且太散"：spot 0.30 在浅色底的 Dock 下方
+// 是一坨灰晕，看起来像渲染脏了。iOS 的悬浮靠"抬高 + 压淡"——离底更远但阴影
+// 更薄，边界由发丝描边负责而不是由投影负责。
+private val DockShellElevation = 6.dp
+private const val DockAmbientAlpha = 0.10f
+private const val DockSpotAlpha = 0.18f

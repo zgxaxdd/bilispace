@@ -27,6 +27,7 @@ import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.model.FavoriteContentTarget
 import com.naaammme.bbspace.feature.favorite.FavoriteLoading
 import com.naaammme.bbspace.feature.favorite.item.FavoriteContentList
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +60,7 @@ fun FavoriteFolderDetailScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(
+                    IconButton(modifier = Modifier.appElasticPress(),
                         onClick = {
                             if (state.selectionMode) {
                                 viewModel.exitSelection()
@@ -80,10 +81,10 @@ fun FavoriteFolderDetailScreen(
                 },
                 actions = {
                     if (state.selectionMode) {
-                        TextButton(onClick = viewModel::selectAll) {
+                        TextButton(modifier = Modifier.appElasticPress(), onClick = viewModel::selectAll) {
                             Text("全选")
                         }
-                        TextButton(
+                        TextButton(modifier = Modifier.appElasticPress(),
                             onClick = viewModel::deleteSelected,
                             enabled = state.selectedKeys.isNotEmpty() && !state.submitting
                         ) {

@@ -69,6 +69,9 @@ import com.naaammme.bbspace.core.swipe.shouldFetchNextRefillPage
 import com.naaammme.bbspace.core.swipe.shouldRunSwipeRefillFallback
 import com.naaammme.bbspace.core.swipe.source.SwipeSourceRegistry
 import com.naaammme.bbspace.core.swipe.swipeEntriesFromRelates
+import com.naaammme.bbspace.feature.video.player.PlaybackPageOwnership
+import com.naaammme.bbspace.feature.video.player.playbackPageTargetOf
+import com.naaammme.bbspace.feature.video.player.shouldReclaimVideoPlaybackSession
 import com.naaammme.bbspace.feature.video.swipesource.HomeFeedSwipeSource
 import com.naaammme.bbspace.feature.video.swipesource.StoryFeedSwipeSource
 import com.naaammme.bbspace.feature.video.swipesource.SwipeFeedCursorPolicy
@@ -112,7 +115,25 @@ data class SponsorBlockUiState(
 )
 
 /**
- * 详情页互动区状态：计数 = 服务器值 + 本地增量，userState 为乐观更新后的结果
+ * 详情页互动区状态：计数 = 服务器值 + 本地增量，userState 为乐观更新后的结果。
+ *
+ * ⚠️ **`userState == null` 表示「未知」，不是「未点赞 / 0 币 / 未收藏」**（A16）。
+ *
+ * `req_user` 只在登录态下才出现在详情回包里（[com.naaammme.bbspace.core.video.VideoDetailRepository]
+ * 的 `mapUserState` 在 `!reply.hasReqUser()` 时返回 null）。
+ *
+ * **读侧**：把未知折叠成默认值会在**未登录**时把三个按钮画成「未选中」。⚠️ 注意口径
+ * （已核对 `VideoDetailRepository.mapReply`）：`stat` 与 `userState` 是在**同一个**
+ * `VideoDetail(...)` 构造里一起赋值的（`:217` / `:225`），所以不存在「stat 先到、
+ * userState 后到」的中间帧——不要把这条读侧问题描述成"首帧翻转"。
+ *
+ * **写侧（真正严重的那一处）**：点赞是**取反**操作，`!(liked ?: false)` 在未知时恒为
+ * true，于是「状态还没确认时点一下赞」会真的发出 `setLike(true)`。若服务端本来已赞，
+ * 用户这一下本意是取消，实际却变成重复点赞。这条与登录与否无关，只要 `req_user` 缺席
+ * 就可能命中（未登录、或服务端未回该字段）。
+ *
+ * ⇒ 纪律：读侧走下面这几个**可空**访问器渲染中性态；写侧一律先过 [likeStatusKnown]。
+ * 上游对应实现见 BiliPai `a614d2eba`（`VideoEngagementUiState.likeStatusKnown`）。
  */
 data class VideoInteractionState(
     val stat: VideoStat? = null,
@@ -120,8 +141,41 @@ data class VideoInteractionState(
     val likeDelta: Long = 0,
     val coinDelta: Long = 0,
     val favDelta: Long = 0,
-    val busy: Boolean = false
-)
+    val busy: Boolean = false,
+    /**
+     * **点赞位**是否已由服务器确认（详情回包的 `req_user` 到达过，或点赞/三连写成功过）。
+     *
+     * 为什么只针对点赞位、而不是笼统的「状态已知」：点赞是**取反**操作，它的写目标是
+     * `!liked`，所以「未知」在写侧无法折算成任何安全默认值。投币/收藏都是**单向**
+     * 写（`addCoin` 只加、`dealFav` 用显式 addIds/delIds），未知时最坏是"多加一币"，
+     * 且上游 `doCoin` 也只门了 `alsoLike && !likeStatusKnown` —— 保持一致。
+     *
+     * **必须是显式字段，不能写成 `userState != null` 的派生属性**：本文件有若干乐观
+     * 写回点写作 `(it.userState ?: VideoUserState()).copy(...)` —— 一旦在未知态下走到，
+     * 就会**凭空造出一个 `userState`**，派生写法会随之把门打开，A16 的写回缺陷就从
+     * 另一条路径复现。显式字段只在真值源落地处赋值，乐观写回一律 `copy` 透传，
+     * 无法被伪造。
+     *
+     * 上游对应物：BiliPai `a614d2eba` 的 `VideoEngagementUiState.likeStatusKnown`。
+     */
+    val likeStatusKnown: Boolean = false
+) {
+    /**
+     * 点赞态：`true` 已赞 / `false` 未赞 / **`null` 未确认**。
+     *
+     * 为什么由 [likeStatusKnown] 把门、而不是直接回 `userState?.liked`：收藏/投币的
+     * 乐观写回点会把 `userState` 从 null **造成**非 null（`(it.userState ?: VideoUserState())`），
+     * 那样造出来的 `liked` 恒为 false，读侧就会把「未确认」画成「未点赞」——正是 A16
+     * 要消掉的那种错觉。让同一个字段同时管住读与写，才不会有第二条缝。
+     */
+    val liked: Boolean? get() = if (likeStatusKnown) userState?.liked else null
+
+    /** 投币数；`null` = 未知。投币是单向写，未确认时读侧仍可显示。 */
+    val coinCount: Int? get() = userState?.coinCount
+
+    /** 收藏态；`null` = 未知。收藏是显式 addIds/delIds，未确认时读侧仍可显示。 */
+    val faved: Boolean? get() = userState?.faved
+}
 
 /**
  * 收藏夹选择面板状态
@@ -144,7 +198,9 @@ private data class InteractionResetKey(
     val cid: Long,
     val epId: Long,
     val stat: VideoStat?,
-    val userState: VideoUserState?
+    val userState: VideoUserState?,
+    /** A16：点赞位是否已确认。**必须进键**，见 init 里的注释。 */
+    val likeStatusKnown: Boolean
 )
 
 @HiltViewModel
@@ -245,17 +301,29 @@ class VideoViewModel @Inject constructor(
                     // 去重键必须带上 cid / epId：同一视频切分P、切选集时 detail 往往不变，
                     // 只用 Triple(aid, stat, userState) 去重会让上一分P的**乐观 delta**
                     // （点赞/投币后的计数偏移）残留到新分P上，表现为新分P计数凭空多一。
+                    //
+                    // A16：`likeStatusKnown` 也必须进键。`userState` 已经是键的一部分，看似
+                    // 冗余，但它与 `likeStatusKnown` **不同源**——乐观写回点会把 `userState`
+                    // 从 null 造成非 null（`(it.userState ?: VideoUserState())`），那种变化
+                    // 不该被当成"真值到达"。真值到达（`req_user` 落地）是
+                    // `userState: null → 非 null` 且 `likeStatusKnown: false → true`，
+                    // 少了这一位，这次跳变就可能被 `distinctUntilChanged` 吃掉。
                     InteractionResetKey(
                         aid = it.ids.aid,
                         cid = it.ids.cid,
                         epId = it.ids.epId,
                         stat = it.detail?.stat,
-                        userState = it.detail?.userState
+                        userState = it.detail?.userState,
+                        likeStatusKnown = it.detail?.userState != null
                     )
                 }
                 .distinctUntilChanged()
                 .collect { key ->
-                    _interaction.value = VideoInteractionState(stat = key.stat, userState = key.userState)
+                    _interaction.value = VideoInteractionState(
+                        stat = key.stat,
+                        userState = key.userState,
+                        likeStatusKnown = key.likeStatusKnown
+                    )
                 }
         }
     }
@@ -486,8 +554,86 @@ class VideoViewModel @Inject constructor(
         val nextStack = stack.dropLast(1)
         val nextTarget = nextStack.last()
         _targetStack.value = nextStack
-        playbackController.openVideo(nextTarget)
+        // #892 上游 shouldReclaimVideoPlaybackSession 的本仓用法（B 级适配）：
+        // 只有"会话确实不是这一页"时才重新认领。此前无条件 openVideo —— 会话已经
+        // 停在父页时（子页打开失败 / 已被打断）会白白重走一次取流，画面回到
+        // preparing，用户读作"从相关推荐返回后卡一下"。
+        //
+        // 被盖住的页面不许抢会话的上游判据（isVisible）在这里恒为 true：本方法
+        // 只由当前可见页的返回键调用；"被盖住"的语义在本仓由页栈本身表达。
+        val activePlayer = player.value
+        val state = videoState.value
+        val pageIds = nextTarget.toPlayableParams().ids
+        val shouldReclaim = activePlayer == null || shouldReclaimVideoPlaybackSession(
+            isVisible = true,
+            isSessionActive = state.playbackSource != null || state.isPreparing,
+            currentPlayer = activePlayer,
+            // bvid 统一用 orEmpty() 比较：上游这里传可空值，但本仓 ids.bvid 在 PGC/
+            // 兜底路径上会是 null，而 target 侧是 ""，直接比会把"同一支视频"误判成不同。
+            currentBvid = state.ids.bvid.orEmpty(),
+            currentCid = state.ids.cid,
+            pagePlayer = activePlayer,
+            pageBvid = pageIds.bvid.orEmpty(),
+            pageCid = pageIds.cid,
+        )
+        if (shouldReclaim) playbackController.openVideo(nextTarget)
         return true
+    }
+
+    /**
+     * 页面生命周期对播放器的引用计数（#892 / 上游 `40690bd19` 的
+     * `PlaybackPageOwnership` 移植）。
+     *
+     * 本仓播放器由进程级 `StreamPlaybackSession` 单例持有，页面**没有**释放权
+     * （见 `PlaybackPageOwnership` 的差异表），因此这里记的不是"谁负责释放"，
+     * 而是"**哪些页面实例仍在引用这台播放器**"：已销毁页面的迟到协程不许再改写
+     * 会话身份 —— 与上游 `syncCurrentVideoInfo(expectedPlayer)` 是同一条纪律。
+     */
+    private val pageOwnership = PlaybackPageOwnership()
+
+    fun retainPlaybackPage(player: Player) {
+        pageOwnership.retain(player)
+    }
+
+    fun releasePlaybackPage(player: Player) {
+        pageOwnership.release(player)
+    }
+
+    fun isPlaybackPageRetained(player: Player): Boolean = pageOwnership.isRetained(player)
+
+    /**
+     * 可见页面**认领会话身份**（#892 用户症状的本仓落点）。
+     *
+     * ## 病灶（本仓形态，与上游不同构但同一症状）
+     * 无缝路径打开详情时 `AppNavHost.openVideoRoute` 只调
+     * `PlaybackHostViewModel.warmOpen(target)`（直接对进程级 session `openVideo`），
+     * **不经过**本 VM 的 `openRoot` —— 于是 MainActivity 的这个 VM 页内导航栈恒为空。
+     * 从胶囊/覆盖层展开播放器时（会话仍在播某支视频），页面没有"页身份"：
+     * 1. 点相关推荐 → `openTarget` 走 `current == null` 分支，栈变成 `[子视频]`，
+     *    父视频**没有被记进栈** ⇒ 返回时 `popPage()` 返回 false，直接把整个播放器
+     *    关掉（用户读到"原视频没了 / 返回后卡死"）；
+     * 2. 全屏上下滑 → `openSwipeTarget` 的"栈非空"判据直接 early-return ⇒ 滑了没反应。
+     *
+     * ## 修法
+     * 页面首次组合时，若栈为空且会话里确有视频，就把**会话身份认领为页身份**
+     * （上游"可见页面重新认领会话"的同一不变量；本仓认领的是页身份，因为播放器
+     * 本来就只有一台）。
+     *
+     * **只在栈为空时动作**：栈非空说明页面自己知道在播什么，晚到的认领会覆盖
+     * 用户刚建立的导航关系（`popPage` 的父页必须留在栈里）。
+     * **只在本页仍持有播放器时动作**：页面已销毁时不许改写会话身份。
+     */
+    fun adoptPlaybackSessionPage() {
+        if (_targetStack.value.isNotEmpty()) return
+        val activePlayer = player.value ?: return
+        if (!pageOwnership.isRetained(activePlayer)) return
+        val state = videoState.value
+        val pageTarget = playbackPageTargetOf(biz = state.biz, ids = state.ids) ?: return
+        _targetStack.value = listOf(pageTarget)
+        DiagnosticLog.i(
+            "PlaybackPage",
+            "adopt: aid=${state.ids.aid} cid=${state.ids.cid} biz=${state.biz.name}"
+        )
     }
 
     /**
@@ -823,8 +969,18 @@ class VideoViewModel @Inject constructor(
      * - 失败静默（预取是尽力而为）。
      */
     fun prefetchSwipeQueue(page: Int) {
-        val anchor = swipeSession.anchor.value ?: return
-        val pages = listOf(anchor) + swipeSession.queue.value
+        // D11：页序拼法只有一处（`SwipeSessionController.pages()`）。锚点未发布时它返回
+        // 空列表 —— 下面 `available = pages.size - page - 1` 自然为负、`prefetchCount` 返 0，
+        // 与旧写法 `val anchor = ... ?: return` 同拍。
+        val pages = swipeSession.pages()
+        if (pages.isEmpty()) return
+        // D6：**先做范围校验再起协程**。此前这里不校验 `page`，而调用点是
+        // `onPrefetch(pagerState.currentPage)` 与 `dragTargetPage(...)` —— pager 在队列收缩
+        //（`SwipeQueueBoundPolicy` 截尾、「不感兴趣」退队）的那一拍仍可能报出**越界页号**，
+        // 于是 `available` 变负、`targetPages` 返回空，一次预取白跑，还会污染
+        // `lastPrefetchRequest`（下一次"口径是否失效"的判据随之失真）。越界直接返回：
+        // 不发请求、不记账、不写台账。
+        if (page < 0 || page >= pages.size) return
         viewModelScope.launch {
             val prefetchEnabled = playerSettings.state.first().playback.prefetchVideo
             val isUnmetered = networkTypeProvider.isUnmetered()
@@ -1275,6 +1431,27 @@ class VideoViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 跨会话「已推去重」（SW-05，默认开）。
+     *
+     * `PlayerPlaybackPrefs.crossSessionDedup` 此前是**只有读取方、没有写入方**的孤儿键：
+     * `SwipeSeenMemory` 与 [prefetchSwipeQueue] 都认真读了它，但整个 App 没有任何 UI
+     * 能改它 —— 等于"出厂值锁死 + 设置项不存在"（第 35 轮静态分析发现的死接口之一）。
+     * 现在补上设置页的开关（`VideoPlaybackSheet`），读写两侧才闭环。
+     */
+    fun updateSwipeCrossSessionDedup(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setSwipeCrossSessionDedup(enabled)
+        }
+    }
+
+    /** 刷视频模式防烧屏（默认开）：见 `PlayerPlaybackPrefs.burnInGuard` / `SwipeChromeBurnInPolicy`。 */
+    fun updateSwipeBurnInGuard(enabled: Boolean) {
+        viewModelScope.launch {
+            playerSettings.setSwipeBurnInGuard(enabled)
+        }
+    }
+
     fun updateReportPlayback(enabled: Boolean) {
         viewModelScope.launch {
             playerSettings.setReportPlayback(enabled)
@@ -1404,9 +1581,22 @@ class VideoViewModel @Inject constructor(
 
     // ===== 互动动作 =====
 
-    /** 点赞/取消点赞 */
+    /**
+     * 点赞/取消点赞。
+     *
+     * **A16 修复（2026-10-13）**：点赞是**取反**操作，原写法
+     * `val target = !(state.userState?.liked ?: false)` 在状态未知时 `?: false`
+     * 恒折叠成「未点赞」⇒ `target` 恒为 true ⇒ **无条件发出 `setLike(true)`**。
+     * 若服务端本来已赞，用户这一下本意是取消，实际却变成重复点赞（唯一一处
+     * 「发错请求」的缺陷）。未知时必须拒绝并说明，不许猜。
+     * 上游同款守卫：`a614d2eba` 的 `if (!state.likeStatusKnown) { emitMessage(...); return }`。
+     */
     fun toggleLike() = withInteraction { state, aid, interactionTarget ->
-        val target = !(state.userState?.liked ?: false)
+        if (!state.likeStatusKnown) {
+            _msg.tryEmit("点赞状态尚未确认，请稍后重试")
+            return@withInteraction
+        }
+        val target = !(state.liked ?: false)
         // 本文件里包挂起调用的 runCatching 一律用 runCatchingCancellable：
         // 标准库版本会把 CancellationException 也吞成 Result.failure，于是
         // "用户退出页面导致请求被取消"会走 onFailure 分支 → 弹一条
@@ -1418,7 +1608,12 @@ class VideoViewModel @Inject constructor(
                 updateInteractionIfCurrent(interactionTarget) {
                     it.copy(
                         userState = (it.userState ?: VideoUserState()).copy(liked = target),
-                        likeDelta = it.likeDelta + if (target) 1 else -1
+                        likeDelta = it.likeDelta + if (target) 1 else -1,
+                        // 写成功 = 服务器已确认这一位（上游 doCoin/triple 的
+                        // `likeStatusKnown = current.likeStatusKnown || 写成功` 同一口径）。
+                        // 门在入口已把未知态挡掉了，所以这里通常是恒真；保留它是为了
+                        // 覆盖"挂起期间互动区被重置成未知、但 ids 未变"这一窗口。
+                        likeStatusKnown = true
                     )
                 }
                 _msg.tryEmit(toast.ifBlank { if (target) "点赞成功" else "已取消点赞" })
@@ -1429,12 +1624,18 @@ class VideoViewModel @Inject constructor(
 
     /** 投币，multiply 只能为 1 或 2，withLike 表示同时点赞 */
     fun submitCoin(multiply: Int, withLike: Boolean) = withInteraction { state, aid, interactionTarget ->
-        val coinCount = state.userState?.coinCount ?: 0
+        // A16：`withLike` 会把「已赞」一并写进本地态，而未知态推不出这个位。
+        // 不整块拒绝——用户仍可只投币（上游 a614d2eba 同款口径）。
+        if (withLike && !state.likeStatusKnown) {
+            _msg.tryEmit("点赞状态尚未确认，请取消附带点赞后重试")
+            return@withInteraction
+        }
+        val coinCount = state.coinCount ?: 0
         if (coinCount + multiply > 2) {
             _msg.tryEmit("达到投币上限啦~")
             return@withInteraction
         }
-        val likedBefore = state.userState?.liked ?: false
+        val likedBefore = state.liked ?: false
         runCatchingCancellable { actionRepository.addCoin(aid, multiply, withLike) }.fold(
             onSuccess = {
                 updateInteractionIfCurrent(interactionTarget) {
@@ -1444,7 +1645,10 @@ class VideoViewModel @Inject constructor(
                             liked = likedBefore || withLike
                         ),
                         coinDelta = it.coinDelta + multiply,
-                        likeDelta = it.likeDelta + (if (withLike && !likedBefore) 1 else 0)
+                        likeDelta = it.likeDelta + (if (withLike && !likedBefore) 1 else 0),
+                        // A16：`withLike` 写成功即点赞位已确认（上游 doCoin 的
+                        // `likeStatusKnown = current.likeStatusKnown || alsoLike` 同口径）。
+                        likeStatusKnown = it.likeStatusKnown || withLike
                     )
                 }
                 _msg.tryEmit("投币成功")
@@ -1457,8 +1661,16 @@ class VideoViewModel @Inject constructor(
 
     /**
      * 一键三连：Web 端点一次完成；失败时降级为逐项执行，单项失败不阻断其余项
+     *
+     * **A16**：三连同样以「点赞态」为输入——Web 端点自行判断、而 [tripleFallback]
+     * 的降级分支直接发 `setLike(aid, true)`。未知态下必须拒绝（上游
+     * `doTripleAction` 的 `if (!state.likeStatusKnown)` 同一口径）。
      */
-    fun triple() = withInteraction { _, aid, interactionTarget ->
+    fun triple() = withInteraction { state, aid, interactionTarget ->
+        if (!state.likeStatusKnown) {
+            _msg.tryEmit("点赞状态尚未确认，请稍后重试")
+            return@withInteraction
+        }
         val message = try {
             val result = actionRepository.triple(aid, videoState.value.ids.bvid)
             markTripleResult(like = result.like, coin = result.coin, fav = result.fav, target = interactionTarget)
@@ -1699,22 +1911,34 @@ class VideoViewModel @Inject constructor(
                 ),
                 likeDelta = it.likeDelta + (if (like && !user.liked) 1L else 0L),
                 coinDelta = it.coinDelta + (if (coin && user.coinCount == 0) 1L else 0L),
-                favDelta = it.favDelta + (if (fav && !user.faved) 1L else 0L)
+                favDelta = it.favDelta + (if (fav && !user.faved) 1L else 0L),
+                // A16：点赞写成功即该位已确认（上游 doTripleAction 的
+                // `likeStatusKnown = current.likeStatusKnown || result.likeSuccess` 同口径）。
+                // 入口已门过 likeStatusKnown，这里是幂等的补写，覆盖挂起期间被重置的窗口。
+                likeStatusKnown = it.likeStatusKnown || like
             )
         }
     }
 
-    /** Web 三连失败后的降级：逐项执行，单项失败不阻断其余项 */
+    /**
+     * Web 三连失败后的降级：逐项执行，单项失败不阻断其余项。
+     *
+     * A16：本方法以 `state.liked` 决定要不要补发 `setLike(aid, true)` —— 未知态下
+     * `?: false` 会折叠成"未点赞"从而**多发一次点赞**。入口 [triple] 已按
+     * `likeStatusKnown` 整块拒绝，所以走到这里时 `liked` 一定非空；下面统一用
+     * `?: false` 兜底只是防御性写法（`?:` 在此处语义上不可达），不承担判断。
+     */
     private suspend fun tripleFallback(aid: Long, interactionTarget: InteractionTarget): String {
         val state = _interaction.value
-        val alreadyAll = (state.userState?.liked ?: false) &&
-            (state.userState?.coinCount ?: 0) > 0 &&
-            (state.userState?.faved ?: false)
+        val likedBefore = state.liked ?: false
+        val coinBefore = state.coinCount ?: 0
+        val favedBefore = state.faved ?: false
+        val alreadyAll = likedBefore && coinBefore > 0 && favedBefore
         if (alreadyAll) return "已完成三连"
 
         val done = mutableListOf<String>()
         val failed = mutableListOf<String>()
-        if (!(state.userState?.liked ?: false)) {
+        if (!likedBefore) {
             runCatchingCancellable { actionRepository.setLike(aid, true) }
                 .onSuccess {
                     done += "点赞"
@@ -1722,7 +1946,7 @@ class VideoViewModel @Inject constructor(
                 }
                 .onFailure { failed += "点赞" }
         }
-        if ((state.userState?.coinCount ?: 0) == 0) {
+        if (coinBefore == 0) {
             runCatchingCancellable { actionRepository.addCoin(aid, 1, selectLike = false) }
                 .onSuccess {
                     done += "投币"
@@ -1730,7 +1954,7 @@ class VideoViewModel @Inject constructor(
                 }
                 .onFailure { failed += "投币" }
         }
-        if (!(state.userState?.faved ?: false)) {
+        if (!favedBefore) {
             runCatchingCancellable {
                 val (rid, type) = favRidType()
                 val folders = favoriteRepository.fetchCreatedFoldersWithState(rid, type)

@@ -70,13 +70,26 @@ class GlassRecordChainStructureTest {
             countMatching(appNavHost, """val\s+hazeGlassOn\s*=\s*glassOn\s*&&\s*!liquidGlassOn""") == 1 &&
                 countMatching(appNavHost, """hazeGlassOn\)\s*Modifier\.hazeSource\(""") == 1
         )
-        // HomeScreen（首页顶栏那份私有源）
+        // HomeScreen：**已整块删除私有源**（2026-10-18 第二十轮，用户第 33 轮反馈）。
+        //
+        // 历史：这里原本断言 `val homeHazeOn = homeGlassOn && !homeLiquidOn` 存在并配
+        // 一个 `GlassSourceRefresher` 门控。用户明确说「顶栏被修坏了…模糊顶栏无法隐藏，
+        // 重新设计顶栏的所有ui，减少性能消耗，减少顶栏区域」⇒ 顶栏改纯色 chrome，
+        // 那份私有源（HazeState + layerBackdrop + 逐帧全屏离屏录制）**没有消费者了**。
+        //
+        // 所以本条从"必须有互斥守卫"翻转为**"必须一处都不许有"**：
+        // 反向断言比删除断言更严格 —— 谁把这套源加回来（哪怕改名、哪怕只是加一份
+        // 没人消费的录制），本测试立刻红。加回来之前先回答：顶栏用什么在采样？
+        // 那份 1272×2800 的逐帧录制由谁消费？（答案很可能是"没人"。）
         assertTrue(
-            "HomeScreen 必须有 `val homeHazeOn = homeGlassOn && !homeLiquidOn` 并用它挂 hazeSource。" +
-                "首页整块屏幕本来就已被根 Crossfade 录了一遍，这里再录第二遍时" +
-                "两套录制器叠加，等于同一帧两遍全屏离屏。",
-            countMatching(homeScreen, """val\s+homeHazeOn\s*=\s*homeGlassOn\s*&&\s*!homeLiquidOn""") == 1 &&
-                countMatching(homeScreen, """homeHazeOn\)\s*Modifier\.hazeSource\(""") == 1
+            "HomeScreen 已删除私有玻璃源（顶栏改纯色 chrome），但源码里仍有玻璃源挂载：" +
+                "hazeSource=${countMatching(homeScreen, """\.hazeSource\(""")} 处、" +
+                "layerBackdrop=${countMatching(homeScreen, """\.layerBackdrop\(""")} 处、" +
+                "GlassSourceRefresher=${countMatching(homeScreen, """GlassSourceRefresher\s*\{""")} 处。\n" +
+                "首页整块屏幕已被根 Crossfade 录了一遍；再录第二遍是纯白录。",
+            countMatching(homeScreen, """\.hazeSource\(""") == 0 &&
+                countMatching(homeScreen, """\.layerBackdrop\(""") == 0 &&
+                countMatching(homeScreen, """GlassSourceRefresher\s*\{""") == 0
         )
         // 反向保险：不许再出现"用非互斥守卫挂 hazeSource"的写法
         val sloppy = mainSources.filter { file ->
@@ -92,16 +105,25 @@ class GlassRecordChainStructureTest {
     /**
      * 顶栏完全滚出屏幕后，首页那份私有源没有消费者，tick 必须停。
      *
-     * 为什么这一条值得单独钉：滚动时顶栏**本来就是隐藏的**（这是常态而非例外），
-     * 所以门控砍掉的不是边角情况，而是滚动路径上大部分时间的第二份全屏重录。
+     * ## 2026-10-18 第二十轮：**该源已整块删除，本条随之翻转为反向断言**
+     *
+     * 原意是"顶栏滚出后不要再 tick"，现在更进一步：**根本没有 tick 了**。
+     * 用户第 33 轮明确要求「减少性能消耗」，而这份 tick 的作用只是驱动
+     * 首页私有源的逐帧全屏重录 —— 顶栏不再采样，它就没有存在理由。
+     *
+     * 断言形态：HomeScreen 里不许再出现 `GlassSourceRefresher` 构造，
+     * 也不许出现 `nestedScroll(glassRefresher.nestedScrollConnection)` 这类接线。
      */
     @Test
     fun homeGlassTickIsGatedOnBarVisibility() {
         assertTrue(
-            "HomeScreen 构造 GlassSourceRefresher 时必须传入门控（顶栏完全滚出后不再 tick）。" +
-                "GlassSourceRefresher 的默认门控恒为 true，漏传就等于每滚动帧都重录一整屏。",
-            countMatching(homeScreen, """GlassSourceRefresher\s*\{""") == 1 &&
-                countMatching(homeScreen, """topBarOffsetPx\s*<\s*topBarHeightState\.value""") == 1
+            "HomeScreen 已删除私有玻璃源，但仍有 GlassSourceRefresher 构造" +
+                "（${countMatching(homeScreen, """GlassSourceRefresher\s*\{""")} 处）或 " +
+                "`nestedScroll(.*glassRefresher` 接线" +
+                "（${countMatching(homeScreen, """nestedScroll\(.*glassRefresher""")} 处）。\n" +
+                "顶栏改纯色后这份逐帧重录没有消费者，是纯浪费。",
+            countMatching(homeScreen, """GlassSourceRefresher\s*\{""") == 0 &&
+                countMatching(homeScreen, """nestedScroll\(.*glassRefresher""") == 0
         )
         // 根节点**不该**被门控：Dock/胶囊在顶栏隐藏时仍然可见、仍在采样。
         assertTrue(

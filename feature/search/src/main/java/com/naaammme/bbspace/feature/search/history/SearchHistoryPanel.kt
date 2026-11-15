@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,7 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.motion.MaybeDissolvableVideoCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.SearchHistoryOrder
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -50,8 +54,12 @@ fun SearchHistoryPanel(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        // 与结果列表同一套密度 token（原 12/12dp）：入口页/结果页切换时边距不跳。
+        contentPadding = PaddingValues(
+            horizontal = BiliSpacing.md,
+            vertical = BiliSpacing.md
+        ),
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         item(
             key = "header",
@@ -66,7 +74,7 @@ fun SearchHistoryPanel(
                     text = "搜索历史",
                     style = MaterialTheme.typography.titleMedium
                 )
-                TextButton(onClick = onToggleOrder) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = onToggleOrder) {
                     Text(
                         text = when (order) {
                             SearchHistoryOrder.TIME -> "最热"
@@ -83,8 +91,8 @@ fun SearchHistoryPanel(
         ) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm, Alignment.Start),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 visible.forEachIndexed { index, item ->
                     // 每个词一个独立的消散状态：`key(item)` 给它稳定身份 ——
@@ -125,12 +133,15 @@ fun SearchHistoryPanel(
                     val remaining = histories.size - displayCap
                     Surface(
                         onClick = { displayCap += DISPLAY_STEP },
-                        shape = MaterialTheme.shapes.large,
+                        shape = SearchHistoryChipShape,
                         color = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Text(
                             text = "展开更多 ($remaining)",
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(
+                                horizontal = BiliSpacing.smPlus,
+                                vertical = BiliSpacing.sm
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -152,11 +163,17 @@ private fun SearchHistoryChip(
     Surface(
         modifier = Modifier
             .widthIn(max = 160.dp)
+            // 全局拖拽反馈：搜索历史芯片**有长按手势**（长按触发消散删除），
+            // 故关掉跟手位移（`dragEnabled = false`），只留按压缩放/光斑。
+            // 否则"按住等删除"的过程中整颗芯片跟着手指走，读起来是拖拽而非长按。
+            .appElasticPress(dragEnabled = false)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = MaterialTheme.shapes.large,
+        // 圆角走 token（原 `MaterialTheme.shapes.large` 随 CornerStyle 在 16~24dp 漂移）；
+        // 与筛选按钮/结果卡同一套分组圆角语言。
+        shape = SearchHistoryChipShape,
         color = if (featured) {
             MaterialTheme.colorScheme.tertiaryContainer
         } else {
@@ -165,7 +182,10 @@ private fun SearchHistoryChip(
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.padding(
+                horizontal = BiliSpacing.smPlus,
+                vertical = BiliSpacing.sm
+            ),
             style = MaterialTheme.typography.bodyMedium,
             color = if (featured) {
                 MaterialTheme.colorScheme.onTertiaryContainer
@@ -179,3 +199,10 @@ private fun SearchHistoryChip(
 }
 
 private const val DISPLAY_STEP = 100
+
+/**
+ * 历史词 chip / "展开更多" 的形状（分组圆角 token 16dp）。
+ * 文件级常量而非内联 `shape = RoundedCornerShape(...)`：避免每组合重造，
+ * 也避开 `ListAllocationStructureTest` 的具名实参棘轮。
+ */
+private val SearchHistoryChipShape = RoundedCornerShape(BiliRadius.groupedList)

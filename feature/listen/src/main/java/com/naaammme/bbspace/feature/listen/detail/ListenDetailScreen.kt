@@ -1,6 +1,7 @@
 package com.naaammme.bbspace.feature.listen.detail
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
+import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.icon.AppIcons
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +70,11 @@ fun ListenDetailScreen(
             TopAppBar(
                 title = { Text("听视频") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        // 全局拖拽反馈（第 34 轮 T2）：听视频详情页顶栏返回钮。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
@@ -85,38 +93,44 @@ fun ListenDetailScreen(
                 CircularProgressIndicator()
             }
         } else if (errorMsg != null) {
-            Column(
+            // 错误态走全站唯一出口（UI-04）；此前是本屏自拼的 Column+Text，
+            // 与其它页的错误卡观感不一致，且直取 colorScheme.error。
+            // Box 居中而非让卡片撑满整屏：与 DynamicDetailScreen 的首屏错误同款写法。
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .padding(innerPadding)
+                    .padding(BiliSpacing.xxl),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
+                StateMessageCard(
                     text = errorMsg,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.error
+                    isError = true
                 )
             }
         } else {
+            // 业务尺寸（竖排内容列的最大宽度）：内容排版约束，不是间距标度的一档。
             val contentWidth = Modifier.widthIn(max = 320.dp).fillMaxWidth()
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .padding(horizontal = 24.dp),
+                    .padding(horizontal = BiliSpacing.xxl),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.xxl))
 
                 CoverImage(
                     url = cover,
                     contentDescription = title,
                     modifier = contentWidth.aspectRatio(1f),
+                    // 圆角**刻意保留** `MaterialTheme.shapes.large`：本屏没有 isIOS 分支，
+                    // 该档位承载的是用户选的 CornerStyle（SQUARE/STANDARD/ROUNDED/CIRCULAR），
+                    // 换成固定 BiliRadius 等于剥夺用户的圆角偏好（功能回退）。
                     shape = MaterialTheme.shapes.large
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.xxl))
 
                 Column(modifier = contentWidth) {
                     if (title.isNotEmpty()) {
@@ -126,7 +140,7 @@ fun ListenDetailScreen(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(BiliSpacing.xs))
                     }
                     if (author.isNotEmpty()) {
                         Text(
@@ -138,7 +152,7 @@ fun ListenDetailScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.xxl))
 
                 ListenProgress(
                     durationMs = state.durationMs,
@@ -147,27 +161,42 @@ fun ListenDetailScreen(
                     modifier = contentWidth
                 )
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.xxxl))
 
                 Button(
                     onClick = viewModel::togglePlayPause,
                     enabled = state.audioUrl != null && !state.isPreparing,
+                    // 全局拖拽反馈（第 34 轮 T2）：播放/暂停主按钮。
+                    // `enabled` 透传（音频未就绪时按钮是灰的，形变同步关掉）；
+                    // `highlightShape` 与 `shape` 同源，光斑裁在按钮自己的圆角内。
+                    modifier = Modifier.appElasticPress(
+                        enabled = state.audioUrl != null && !state.isPreparing,
+                        highlightShape = MaterialTheme.shapes.extraLarge
+                    ),
+                    // 同 CoverImage：无 isIOS 分支，保留用户 CornerStyle 档位。
                     shape = MaterialTheme.shapes.extraLarge,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                     ),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
+                    contentPadding = PaddingValues(
+                        horizontal = BiliSpacing.xxl,
+                        // 业务尺寸（按钮内垂直内边距，决定按钮高度）：14dp 不在间距标度里，
+                        // 也不是 BiliSpacing 的某一档，保留字面量。
+                        vertical = 14.dp
+                    )
                 ) {
                     if (state.isPreparing) {
+                        // 业务尺寸（按钮内 spinner 直径）：与图标同档，不是间距。
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     } else {
                         Icon(
                             imageVector = if (state.isPlaying) AppIcons.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (state.isPlaying) "暂停" else "播放",
+                            // 业务尺寸（按钮内图标直径）：与 spinner 同档，不是间距。
                             modifier = Modifier.size(24.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(BiliSpacing.sm))
                         Text(
                             text = if (state.isPlaying) "暂停" else "播放",
                             style = MaterialTheme.typography.titleSmall

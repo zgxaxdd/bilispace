@@ -18,7 +18,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.SmsLoginState
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,7 +71,7 @@ fun SmsLoginScreen(
             TopAppBar(
                 title = { Text("手机号登录") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(modifier = Modifier.appElasticPress(), onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -82,10 +84,13 @@ fun SmsLoginScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(
+                    horizontal = BiliSpacing.xxl,
+                    vertical = BiliSpacing.lg
+                ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.xxxl))
 
             Box {
                 OutlinedTextField(
@@ -143,7 +148,7 @@ fun SmsLoginScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.lg))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -159,7 +164,7 @@ fun SmsLoginScreen(
                     modifier = Modifier.weight(1f)
                 )
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(BiliSpacing.md))
 
                 val smsSent = state is SmsLoginState.SmsSent
                 val sending = state is SmsLoginState.SendingSms
@@ -169,7 +174,7 @@ fun SmsLoginScreen(
                 Button(
                     onClick = { viewModel.sendSms(phone) },
                     enabled = sendEnabled,
-                    modifier = Modifier.height(56.dp)
+                    modifier = Modifier.height(56.dp).appElasticPress()
                 ) {
                     Text(
                         when {
@@ -182,7 +187,7 @@ fun SmsLoginScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.xxl))
 
             val canLogin = smsCode.length == 6 && (state is SmsLoginState.SmsSent || (state is SmsLoginState.Error && lastCaptchaKey.isNotEmpty()))
             val logging = state is SmsLoginState.Logging
@@ -193,6 +198,7 @@ fun SmsLoginScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .appElasticPress()
             ) {
                 if (logging) {
                     CircularProgressIndicator(
@@ -208,7 +214,7 @@ fun SmsLoginScreen(
             // 错误提示
             val errorState = state
             if (errorState is SmsLoginState.Error) {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(BiliSpacing.lg))
                 Text(
                     text = errorState.msg,
                     color = MaterialTheme.colorScheme.error,
@@ -216,7 +222,7 @@ fun SmsLoginScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.xxl))
 
             Text(
                 text = "手机号仅用于请求 B站官方接口获取鉴权信息，所有数据均保存于本地设备。请务必通过 GitHub 渠道下载本应用。",
@@ -225,9 +231,9 @@ fun SmsLoginScreen(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(BiliSpacing.lg))
 
-            TextButton(onClick = onSwitchToQr) {
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onSwitchToQr) {
                 Text("扫码登录")
             }
         }

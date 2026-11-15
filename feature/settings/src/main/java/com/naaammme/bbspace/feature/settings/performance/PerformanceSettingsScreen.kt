@@ -7,13 +7,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.theme.FrameRateMode
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
 import com.naaammme.bbspace.feature.settings.SettingsViewModel
 import com.naaammme.bbspace.feature.settings.components.SettingSwitch
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,7 +30,7 @@ fun PerformanceSettingsScreen(
             TopAppBar(
                 title = { Text("性能设置") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    AppMiuixIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
@@ -40,8 +42,8 @@ fun PerformanceSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.lg)
         ) {
             item {
                 SettingSwitch(
@@ -96,18 +98,18 @@ private fun FrameRateSelector(
     onSelect: (FrameRateMode) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(BiliSpacing.lg)) {
             Text("屏幕刷新率", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(BiliSpacing.sm))
             Text(
                 "高刷新率可提升滑动流畅度，但会增加耗电",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(BiliSpacing.md))
             FrameRateMode.entries.forEach { mode ->
                 FilterChip(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().appElasticPress(),
                     selected = selected == mode,
                     onClick = { onSelect(mode) },
                     label = {
@@ -135,7 +137,7 @@ private fun FrameRateSelector(
                     }
                 )
                 if (mode != FrameRateMode.entries.last()) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(BiliSpacing.sm))
                 }
             }
         }

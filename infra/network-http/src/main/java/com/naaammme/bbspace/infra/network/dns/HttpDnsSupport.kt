@@ -49,11 +49,34 @@ internal fun <T> parallelFirstSuccess(
     return null
 }
 
-/** FL-11：HTTPDNS 服务器并行探测的共享有界池（上限 3 并发，daemon 不挡进程退出）。 */
-internal val httpDnsProbeExecutor: ExecutorService =
-    Executors.newFixedThreadPool(3) { runnable ->
-        Thread(runnable, "http-dns-probe").apply { isDaemon = true }
+/**
+ * W8：**全 DNS 子系统唯一的命名有界 IO 池**。
+ *
+ * 修复前有两份 `newFixedThreadPool(3)`：本文件的 `http-dns-probe`（HTTPDNS 多源并行探测）
+ * 与 [BiliDns] 的 `bili-dns-refresh`（DNS 预热/过期异步刷新）。两份池各自的线程名不同、
+ * 互不知情，出问题时 `adb shell ps -T` 只能看到两撮匿名线程，抓栈也分不清"这是探测还是刷新"，
+ * 而两者本质是同一类工作（阻塞式 DNS HTTP 读），完全没必要各养 3 个线程。
+ *
+ * 现在合并为**一个** 3 线程命名池（线程数**不增**：原 3+3=6 → 3），线程名带序号
+ * (`bili-dns-io-1..3`) 便于 `debuggerd -b <tid>` / `ps -T` 直接定位。
+ *
+ * 并发语义不变：仍是最多 3 个 DNS IO 任务同时进行；`parallelFirstSuccess` 的"最多 3 并发"
+ * 与 BiliDns 的刷新任务共享这 3 个槽位 —— 最坏情况下互相排队（本来就在同一条网络瓶颈上），
+ * 但换来"全仓只有一处 DNS IO 线程来源"。
+ */
+internal object DnsIo {
+    /** 与合并前的单池一致（3）；**不许**为了"看起来更快"调大（会放大 DNS 请求风暴）。 */
+    const val THREADS = 3
+
+    private val seq = java.util.concurrent.atomic.AtomicInteger(0)
+
+    val executor: ExecutorService = Executors.newFixedThreadPool(THREADS) { runnable ->
+        Thread(runnable, "bili-dns-io-${seq.incrementAndGet()}").apply { isDaemon = true }
     }
+}
+
+/** FL-11：HTTPDNS 服务器并行探测池（W8 起与 DNS 刷新共用 [DnsIo.executor]，线程数不增）。 */
+internal val httpDnsProbeExecutor: ExecutorService get() = DnsIo.executor
 
 // 默认 1s 超时的 HTTPDNS/DoH GET, 失败抛异常由调用方记录
 // （FL-11：原注释写"2s 超时"，与默认值 1000ms 不符；PF-01 已把超时值列为

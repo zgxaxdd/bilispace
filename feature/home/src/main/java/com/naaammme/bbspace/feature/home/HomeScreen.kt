@@ -2,13 +2,13 @@ package com.naaammme.bbspace.feature.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -17,8 +17,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -33,58 +31,38 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.CompositionLocalProvider
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
 import com.naaammme.bbspace.core.designsystem.component.FilledTabRow
-import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
-import com.naaammme.bbspace.core.designsystem.glass.GlassSurfaceType
-import com.naaammme.bbspace.core.designsystem.glass.GlassSourceRefresher
-import com.naaammme.bbspace.core.designsystem.glass.LocalGlassConfig
-import com.naaammme.bbspace.core.designsystem.glass.LocalGlassHazeState
-import com.naaammme.bbspace.core.designsystem.glass.LocalGlassRefresher
-import com.naaammme.bbspace.core.designsystem.glass.LocalLiquidBackdrop
-import com.naaammme.bbspace.core.designsystem.glass.glassEffect
-import com.naaammme.bbspace.core.designsystem.glass.glassFrameRefresh
-import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.appSearchElasticPress
 import com.naaammme.bbspace.core.designsystem.seamless.LocalStoryCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessAnchorState
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
-import com.naaammme.bbspace.core.model.listen.ListenItem
 import com.naaammme.bbspace.feature.home.article.HomeArticlePage
 import com.naaammme.bbspace.feature.home.interest.InterestDialog
 import com.naaammme.bbspace.feature.home.listen.ListenHomePage
@@ -92,11 +70,22 @@ import com.naaammme.bbspace.feature.home.live.HomeLivePage
 import com.naaammme.bbspace.feature.home.video.HomeVideoPage
 import com.naaammme.bbspace.feature.rank.RankScreen
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 private val homeTabs = listOf("FM", "推荐", "直播", "排行", "专栏")
 private val homeRankTabPage = 3
 private val homeProfileAvatarSize = 38.dp
+/**
+ * 未登录时头像外圈描边宽度（1.5dp）。
+ *
+ * 刻意**不用** `BiliSpacing`（最小 4dp）：这是 1.5dp 的发丝级描边，套 token 会把头像
+ * 描成粗环。已按 `DesignTokenLintTest` 的体例在这里留理由行。
+ */
+private val HomeSignedOutRingWidth = 1.5.dp
+
 private val homeProfileIconSize = 24.dp
 private const val homeDefaultPage = 1
 
@@ -152,100 +141,77 @@ fun HomeScreen(
         derivedStateOf { with(density) { topBarHeightState.value.toDp() } }
     }
 
-    // 顶栏随内容滚动 1:1 同步上滑。
-    // Compose 嵌套滚动约定：手指上滑（内容上移、浏览下方内容）时滚动位移 delta.y 为负
-    // （与 M3 EnterAlwaysScrollBehavior 的 heightOffset += available.y 同一符号体系）。
-    // 因此用 -delta 累加：上滑 → offset 增大 → 顶栏上移隐藏；下滑 → offset 减小 → 顶栏滑回。
-    var topBarOffsetPx by remember { mutableStateOf(0f) }
-    val topBarScrollConnection = remember(topBarHeightState) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                // consumed = 子布局实际消费掉的位移；available = 子布局未消费的余量
-                // （例如已滚到列表顶部后继续下拉的 over-scroll）。
-                // 两者相加 = 本次真实滚动位移：既保证顶栏与内容 1:1 同步，
-                // 又保证列表到顶后继续下拉仍能把顶栏拉回来。
-                val delta = consumed.y + available.y
-                if (delta != 0f) {
-                    // 取整到像素再写：offset 本身按 IntOffset 消费，亚像素变化不产生任何可见差异，
-                    // 却会让每个滚动 tick 都触发一次状态写入与 offset 块重布局。取整后大部分
-                    // tick 的值与上一次相同，mutableStateOf 的结构相等判断直接短路。
-                    val next = (topBarOffsetPx - delta)
-                        .coerceIn(0f, topBarHeightState.value.toFloat())
-                        .let { kotlin.math.round(it) }
-                    if (next != topBarOffsetPx) {
-                        topBarOffsetPx = next
-                    }
-                }
-                return Offset.Zero
-            }
-        }
+    // 顶栏滚动状态机：偏移累加 + fling 结束吸附，见 `HomeTopBarScroll.kt`。
+    // 旧实现的缺口（不改，留着当背景）：没有收敛逻辑时 fling 在半隐区间结束会把
+    // 顶栏停在半隐（"卡住不回弹"）；现在 onPostFling 吸附最近端
+    // （reduceMotion 直落，否则 morph token 动画）。
+    //
+    // ⚠️ 上一轮这里还传 `isScrolling`（供顶栏玻璃切采样预算）。顶栏改纯色后
+    // 该状态连同 120ms 静默计时器一起**从状态机里删掉了** —— 没有消费者，
+    // 而它每个滚动位移要取消+重启一个 Job。不要在没恢复消费者的前提下把它加回来。
+    //
+    // 符号约定（沿用旧实现，勿改）：手指上滑（内容上移）时 delta.y 为负，故用 -delta
+    // 累加；上滑 → offset 增大 → 顶栏隐藏；下滑 → offset 减小 → 顶栏滑回。
+    // 复位（切 Tab / 刷新 scrollToTop）统一走 topBarScroll.reset()。
+    // 验收：静止半隐不再出现（fling 结束必落在 0 或 height 两端）。
+    val animations = com.naaammme.bbspace.core.designsystem.theme.LocalAnimations.current
+    val topBarScroll = remember(topBarHeightState, animations) {
+        HomeTopBarScrollState(
+            heightProvider = { topBarHeightState.value },
+            animations = animations,
+            scope = scope
+        )
     }
-    // 顶栏偏移经 provider 延迟读取（见 HomeTopBar 注释）；
+    // 顶栏偏移经 provider 延迟读取（见 HomeTopBar 注释：绘制期取值，零重组零重布局）；
     // 内容顶距经 derivedStateOf 读取高度：高度只在测量后写一次，不构成滚动期重组。
-    val topBarOffsetProvider = remember { { topBarOffsetPx } }
+    val topBarOffsetProvider: () -> Float = remember { { topBarScroll.offsetPx } }
 
     // 切 Tab 后新页面内容从顶部开始，顶栏必须复位显示
     LaunchedEffect(pagerState.settledPage) {
-        topBarOffsetPx = 0f
+        topBarScroll.reset()
     }
 
-    // 首页玻璃：独立 HazeState，源 = Pager 内容（顶栏不在源内，避免自采样鬼影）。
-    // 与主框架同理：录制节点与顶栏玻璃都不随列表滚动自动重录/重采样，需要
-    // GlassSourceRefresher 逐帧 tick（滚动衔接处残影修复，见 GlassRefresher.kt）。
-    val homeGlassState = remember { HazeState() }
-    val homeGlassOn = isGlassActive(homeGlassState)
-    // 顶栏官方液态：Pager 内容录进 miuix 背板（顶栏是悬浮兄弟节点，无自采样），
-    // 由 LocalLiquidBackdrop 下发给顶栏的 glassEffect（LIQUID 档走 drawBackdrop）
-    val homeLiquidBackdrop = rememberLayerBackdrop()
-    val homeLiquidOn = LocalGlassConfig.current.material == GlassMaterial.LIQUID && homeGlassOn
-    // ── 拆掉"同一帧两遍全屏离屏录制"（任务书 T1）────────────────────────────
-    // 本页在 AppNavHost 的 Crossfade **里面**，而那个 Crossfade 已经把同一块屏幕
-    // 录进了主框架的 haze 源与 miuix 背板（供 Dock / 胶囊采样）。首页再为了自己的
-    // 顶栏录一份，等于同一片像素每帧录两遍。
+    // ── 2026-10-18 第二十轮：**拆掉首页私有玻璃源**（用户第 33 轮反馈）──────────
     //
-    // 不能直接复用主框架那份：主框架的源把**首页顶栏也包进去了**，顶栏采样含自身的
-    // 背板会自采样鬼影（这正是当初建私有源的理由）。所以这里改为**只录消费端真正
-    // 会用到的那一种**：
-    //   LIQUID 档 → glassEffect 走 `liquidGlassSurface(backdrop)` 后**直接 return**，
-    //              根本不碰 haze（见 GlassEffect.kt 的 LIQUID 分支）；
-    //   FROSTED 档 → 没有背板路径，才需要 hazeSource。
-    // 于是默认 LIQUID 档下，hazeSource 这一路是纯粹的白录 —— 关掉后每滚动帧少一次
-    // 1272×2800 的全屏离屏录制。保留 homeGlassState 本身仍然要 provide 给顶栏：
-    // `isGlassActive(state)` 要求 state != null 才承认玻璃生效。
-    val homeHazeOn = homeGlassOn && !homeLiquidOn
-    // tick 门控：顶栏**完全滚出屏幕**后，首页这套私有玻璃源就没有任何可见消费者了
-    // （顶栏是唯一消费者），继续逐帧 tick 只是让全屏重录白跑。滚动中顶栏正是隐藏的
-    // 常态，所以这一刀砍掉的是滚动路径上大部分的第二份录制。
-    // 读的是 snapshot state 而非组合期值：nestedScroll 回调里读不会触发重组，
-    // 顶栏滑回来的那一帧门控自动打开、立即恢复重录（最多落后一次分发，肉眼不可见）。
-    val homeGlassRefresher = remember {
-        GlassSourceRefresher { topBarOffsetPx < topBarHeightState.value }
-    }
+    // 用户原话：「顶栏被修坏了，内容文字可以继续上滑隐藏而模糊顶栏无法隐藏，
+    // 请你重新设计顶栏的所有ui，要求需要减少性能消耗，减少顶栏区域」。
+    //
+    // 三件事一起改，且都在这里落地：
+    //  ① **整条顶栏（含底色）作为一个整体上滑消失** —— 见 HomeTopBar 的新结构；
+    //  ② **顶栏不再有任何实时模糊** —— 下面这一整块（HazeState / layerBackdrop /
+    //     GlassSourceRefresher 逐帧 tick / 全屏离屏录制）已全部删除；
+    //  ③ **顶栏区域减半** —— 删掉 iOS 大标题（`iOSTypography.displayLarge` = 34sp，
+    //     行高约 41dp + 上下内边距 ≈ 47dp）。
+    //
+    // ## 为什么玻璃必须整块删，而不是再收紧门控
+    // 这块玻璃的成本不是"看起来重"，是可以逐项点出来的：
+    //   每滚动帧 → 全屏离屏录制（1272×2800）→ 采样 → 重绘，
+    // 而 `GlassSourceRefresher` 的 tick 让它在**滚动全程**都发生。
+    // 上一轮我把它收进 `homeTopBarGlassEnabled()`（只在 LIQUID 挂），但用户的设备
+    // 正是 `ui_style=IOS + glass_material=LIQUID` ⇒ 门控对他是**恒真**的，
+    // 等于一行都没省（这是我的判断失误，已记在 docs）。
+    // 既然用户这轮把「减少性能消耗」和「减少顶栏区域」并列提出，玻璃就是第一刀：
+    // 顶栏读作"一条纯色 chrome"时观感损失极小，省下的却是滚动路径上最大的一笔
+    // 非必要开销（同一帧的**第二份**全屏录制；第一份在 AppNavHost，供 Dock 用）。
+    //
+    // ## 观感怎么补
+    // 用 `MaterialTheme.colorScheme.background` 的**不透明**纯色底 + 下边两角大圆角
+    // （`BiliRadius.topBarShape`）。这与 iOS 无玻璃时的降级分支同源、与底栏 Dock
+    // 同一套圆角语汇，且**零采样成本**。
+    // 想恢复液态玻璃时改的是本文件与 HomeTopBar 两处；登记表里 HomeScreen 的三条
+    // 挂载条目已同批删除（`GlassMountRegistryTest` 双向校验会盯着这件事）。
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             // 监听内容滚动，驱动顶栏同步平移
-            .nestedScroll(topBarScrollConnection)
-            .nestedScroll(homeGlassRefresher.nestedScrollConnection)
+            .nestedScroll(topBarScroll)
     ) {
         // 内容全屏：延伸到状态栏之后，滚动时卡片可上探到状态栏区域
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
                 .fillMaxSize()
-                .drawWithContent {
-                    // 读滚动 tick：滚动帧强制本节点重绘（重录 haze 源）
-                    homeGlassRefresher.frame
-                    drawContent()
-                }
-                .then(if (homeHazeOn) Modifier.hazeSource(homeGlassState) else Modifier)
-                .then(if (homeLiquidOn) Modifier.layerBackdrop(homeLiquidBackdrop) else Modifier)
-                // 底色画进录制链内（理由同 AppNavHost Crossfade：文字区透明不能进背板）
                 .background(MaterialTheme.colorScheme.background)
         ) { page ->
             when (page) {
@@ -285,7 +251,7 @@ fun HomeScreen(
                     onToastShown = viewModel::consumeToast,
                     // 刷新后程序化 scrollToItem(0) 也会派发嵌套滚动事件，
                     // 会把 offset 顶到上限导致顶栏一打开就隐藏，这里强制复位。
-                    onScrollToTop = { topBarOffsetPx = 0f }
+                    onScrollToTop = { topBarScroll.reset() }
                 )
 
                 2 -> HomeLivePage(
@@ -311,28 +277,6 @@ fun HomeScreen(
             }
         }
 
-        // 透明悬浮顶栏：随内容滚动同步上滑，完全滚出后隐藏。
-        // 偏移量以 provider 延迟读取：滚动期间每个滚动 tick 只触发顶栏 offset 块重布局，
-        // 不再重组 HomeScreen 整个 scope（含 HorizontalPager 分支与全部子项参数比对）。
-        CompositionLocalProvider(
-            LocalGlassHazeState provides homeGlassState,
-            LocalGlassRefresher provides homeGlassRefresher,
-            LocalLiquidBackdrop provides homeLiquidBackdrop
-        ) {
-        // 顶栏"是否正在滚动"必须用 derivedStateOf 收成**布尔**再进组合。
-        //
-        // 直接写 `isScrolling = topBarOffsetPxProvider() > 0f` 会在 HomeTopBar 的
-        // 组合期读取 `topBarOffsetPx`（Float state）——它每个滚动像素都变（快滑时=每帧），
-        // 于是 HomeTopBar 的整个 restart scope 每帧重组一次，连带每次重组都重新执行
-        // `glassEffect(...)` 这个 @Composable modifier 工厂（LIQUID 档下会让 miuix
-        // 丢弃并重建玻璃绘制缓存）。
-        //
-        // 这恰好把本文件 :310 的设计意图抵消了：那里刻意用 provider 延迟到布局期读，
-        // 就是为了"滚动时只重布局、不重组"。derivedStateOf 让组合期只订阅布尔，
-        // 只有"开始滚动/停止滚动"这一次翻转才失效。
-        val topBarScrolling by remember {
-            derivedStateOf { topBarOffsetProvider() > 0f }
-        }
         // ── 刷视频模式入口（顶栏按钮）────────────────────────────────────────
         // 锚点 = 芯片自身上的零绘制 View（SeamlessAnchor），OPPO 无缝 morph 把**这颗
         // 看得见的芯片**长成全屏刷视频页（芯片底与形状见 HomeTopBar 的注释：
@@ -359,7 +303,7 @@ fun HomeScreen(
                     // 为什么必须截真实像素：框架捕获不到锚点内容时会退回 BUNDLE_COLOR
                     // 纯色兜底 —— 那正是"打开时冒出一块色块、返回时色块消失"的观感来源。
                     // 截到真实像素后，两个方向 morph 的都是用户眼睛看到的那颗芯片。
-                    storyOpener.captureCardBitmap(anchorView) { captured ->
+                    storyOpener.captureCardBitmap(anchorView, storyAnchorState) { captured ->
                         val opened = storyOpener.tryOpen(
                             anchor = anchorView,
                             target = target,
@@ -371,7 +315,10 @@ fun HomeScreen(
                             keepAnchorVisible = true,
                             // 截屏失败（极少数）时不装饰锚点：此时退回纯色兜底，
                             // 形状/颜色仍与静止态那颗芯片一致，不会出现"封面拉伸进圆芯片"
-                            decorateAnchor = captured != null
+                            decorateAnchor = captured != null,
+                            // 真实显示矩形（含拖拽反馈形变）。这颗芯片同样挂了
+                            // appElasticPress，按住点开时布局矩形会与屏幕上的圆心错位。
+                            anchorState = storyAnchorState
                         )
                         if (!opened) {
                             captured?.recycle()
@@ -386,9 +333,6 @@ fun HomeScreen(
         HomeTopBar(
             selectedIndex = pagerState.currentPage,
             topBarOffsetPxProvider = topBarOffsetProvider,
-            // FL-06：顶栏完全滚出后的重采样门控用（与源侧 tickGate 同款判据）
-            topBarHeightPxProvider = { topBarHeightState.value },
-            isScrolling = topBarScrolling,
             onEnterStoryMode = enterStoryMode,
             onNavigateToSearch = onNavigateToSearch,
             onNavigateToProfile = onNavigateToProfile,
@@ -397,6 +341,9 @@ fun HomeScreen(
                 scope.launch { pagerState.animateScrollToPage(page) }
             },
             storyAnchorState = storyAnchorState,
+            // 锚点是否真组合（= 本机支持 OPPO 无缝）。芯片按钮的整件形变据此让位，
+            // 判据见下方 `IconButton` 的 `appElasticPress` 注释。
+            storySeamlessActive = canStorySeamless,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .onSizeChanged { size ->
@@ -406,184 +353,268 @@ fun HomeScreen(
                     }
                 }
         )
-        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 顶栏的**刷视频入口芯片** —— 同时是无缝动画的**锚点宿主**。
+ *
+ * ## 为什么它必须是独立 composable（第 34 轮）
+ * OPPO 无缝动画从"锚点矩形"长成全屏，框架画的是**锚点那一块的内容**。
+ * 锚点是零绘制 View，框架捕获不到内容就退回 `BUNDLE_COLOR` 纯色兜底 ——
+ * 于是打开时凭空冒出一块圆角色块、返回时又凭空消失。根因是**入口在静止态
+ * 根本没有底色**（旁边「我的」是圆形头像，自带底）。这里给同一颗圆形芯片底，
+ * 两个方向就都从"用户本来就看得见的那颗芯片"出发/收回。
+ *
+ * ## 形变必须让位给系统过渡（`enabled = !seamlessActive`）
+ * `appElasticPress` 的形变是 `Modifier.graphicsLayer`（**绘制期**变换，只改像素落点、
+ * 不改布局），而 OPPO 框架取锚点矩形走 `View.getLocationInWindow()`
+ *（**布局期**坐标）⇒ 按住芯片（正被放大/拖偏）时进入刷视频，框架会按
+ * "屏幕上已不存在的矩形"起飞。
+ *
+ * 判据与卡片一致：锚点真组合时整件形变让位；不支持无缝的机型
+ *（锚点不组合、走普通 startActivity）保留按压反馈。
+ *
+ * 注：`anchorState.displayRectPx()` 那条 `BUNDLE_RECT` 补偿只修**锚点矩形**，
+ * 不会消除祖先链上的形变 —— 两者是不同层面的修法，不能互相替代。
+ */
+@Composable
+private fun HomeStoryChip(
+    /** 锚点是否真组合（本机支持 OPPO 无缝）；为真时整件形变让位给系统过渡。 */
+    seamlessActive: Boolean,
+    storyAnchorState: SeamlessAnchorState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // `visualSize` = 看得见的那颗芯片：触摸区是 48dp（无障碍下限），
+    // 形变必须按 36dp 的可见圆算，否则会围着 48dp 的透明方框鼓。
+    IconButton(
+        onClick = onClick,
+        modifier = modifier.appElasticPress(
+            visualSize = homeProfileAvatarSize,
+            enabled = !seamlessActive
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .size(homeProfileAvatarSize)
+                .clip(homeStoryChipShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = "进入刷视频模式",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(homeProfileIconSize)
+            )
+            // 锚点与**芯片**同边界（不是 48dp 的 IconButton 触摸区）：
+            // morph 的起点矩形 = 用户看见的那颗圆，半径也取它的一半。
+            SeamlessAnchor(storyAnchorState, Modifier.matchParentSize())
+        }
+    }
+}
+
 @Composable
 private fun HomeTopBar(
     selectedIndex: Int,
-    // 偏移量延迟读取：offset 块内取值，滚动时只重布局顶栏、不重组上游 scope
+    // 偏移量延迟读取：**绘制期**取值（见下方 graphicsLayer），滚动时既不重组也不重布局
     topBarOffsetPxProvider: () -> Float,
-    // FL-06：顶栏实测高度（px），与偏移量构成"是否仍可见"的判据
-    topBarHeightPxProvider: () -> Int,
-    // 是否正在滚动。由调用方用 derivedStateOf 收成布尔后传入 —— 不要在组合期直接读
-    // 像素级 offset state（详见调用点注释）。
-    isScrolling: Boolean,
     onEnterStoryMode: () -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToProfile: () -> Unit,
     profileAvatar: String?,
     onSelectTab: (Int) -> Unit,
     storyAnchorState: SeamlessAnchorState,
+    /** 锚点是否真组合（本机支持 OPPO 无缝）；见芯片按钮的 `appElasticPress` 注释。 */
+    storySeamlessActive: Boolean,
     modifier: Modifier = Modifier
 ) {
     val isIOS = LocalUiStyle.current == UiStyle.IOS
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val topGlassState = LocalGlassHazeState.current
-    val topGlassOn = isGlassActive(topGlassState)
-    // 顶栏玻璃形状：**上边两角保持直角、下边两角倒大圆角**。
+    // 顶栏形状：**上边两角直角、下边两角倒大圆角**（单一来源 `BiliRadius.topBarShape`）。
     // 上角倒圆会在状态栏两侧漏出背后滚动的内容；下角倒圆才让顶栏读作
-    // "从内容上方浮出的一张玻璃片"，与底栏 Dock(32dp) 同一套大圆角语汇。
-    // 形状由 `BiliRadius.topBarShape` 单一来源提供，且**必须传 CornerBasedShape**：
-    // LIQUID 档 `liquidGlassSurface` 的 `lens()` 折射依赖角半径，传 0dp 直角
-    // 会让折射沿整个矩形边"平推"，正是用户看到的"顶栏下方液态模糊有点奇怪"。
+    // "从内容上方浮出一张片"，与底栏 Dock(32dp) 同一套大圆角语汇。
     val topBarShape = BiliRadius.topBarShape
-    Column(
+
+    // ## 2026-10-18 第二十轮：顶栏重做（用户第 33 轮第 1 条 + 第 4 条）
+    //
+    // 用户原话：「顶栏被修坏了，内容文字可以继续上滑隐藏而模糊顶栏无法隐藏，
+    // 请你重新设计顶栏的所有ui，要求需要减少性能消耗，减少顶栏区域」。
+    //
+    // ### 旧结构为什么会坏（是我上一轮改错的）
+    // 上一轮为了修「整体滑动 + 轮廓没隐藏」，把顶栏拆成两层：
+    // ```
+    // Box(.clipToBounds())          // ← 固定裁剪窗，底色/玻璃挂在这一层
+    //   Column(.offset { -offset }) // ← 只有内容在这层移动
+    // ```
+    // 结果是**底色被钉死在 y=0**：内容滑走了，那条不透明的片还在屏幕顶端，
+    // 永远不会消失。用户看到的正是「文字能隐藏、模糊顶栏不能隐藏」。
+    //
+    // ### 新结构：整条顶栏（含底色）作为**一个整体**位移
+    // ```
+    // Box(.graphicsLayer { translationY = -offset }   // 底色 + 内容一起走
+    //     .background(bg, topBarShape))
+    // ```
+    // 三个收益，都是结构性的：
+    // 1. **能真正隐藏**：`offset` 达到顶栏实测高度时整条（含底色与圆角）完全移出屏幕；
+    // 2. **滚动期零布局**：`graphicsLayer` 的 lambda 在**绘制阶段**执行，
+    //    读 `offsetPx` 只让本节点重绘 ⇒ 不再像旧版 `offset {}` 那样每个滚动像素
+    //    都触发一次顶栏重测量/重布局（顶栏里还有 Card、IconButton、miuix TabRow，
+    //    重布局比"平移一个已录好的图层"贵一个数量级）；
+    // 3. **零采样**：顶栏不再有任何实时模糊 —— 上一轮那套私有玻璃源
+    //    （HazeState + layerBackdrop + GlassSourceRefresher 逐帧全屏离屏录制）
+    //    已在 `HomeScreen` 调用点整块删除。这是本轮「减少性能消耗」最实的一刀。
+    //
+    // ### 「减少顶栏区域」
+    // iOS 大标题（`displayLarge` 34sp，占约 47dp）**整块删除** —— 它同时是
+    // "顶栏为什么这么高"和"为什么滚一下就没了一半"的答案。删掉后顶栏只剩
+    // 「搜索行 + Tab 行」两行，实测约 144dp → 约 95dp（含状态栏前的部分）。
+    // 页面分区名仍在 Tab 行里可读（选中的那颗胶囊就是它），信息没有丢。
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .clipToBounds()
-            .offset { IntOffset(0, -topBarOffsetPxProvider().roundToInt()) }
-            // iOS：玻璃 / 半透明底放在 offset 之后、statusBarsPadding 之前——
-            // 既随顶栏 1:1 滑动，又铺满含状态栏的整条（走查发现的两个层级问题）
-            .then(
-                when {
-                    isIOS && topGlassOn -> Modifier
-                        // FL-06：顶栏完全滚出屏幕后停止重采样（此前消费端无谓词，是
-                        // 与源侧 tickGate 不对称的缺口）。与源侧同款谓词：偏移 < 高度。
-                        .glassFrameRefresh(
-                            LocalGlassRefresher.current,
-                            visible = { topBarOffsetPxProvider() < topBarHeightPxProvider() }
-                        )
-                        .glassEffect(
-                            state = topGlassState,
-                            surfaceType = GlassSurfaceType.HEADER,
-                            shape = topBarShape,
-                            isScrolling = isScrolling
-                        )
-                    isIOS -> Modifier.background(
-                        MaterialTheme.colorScheme.background.copy(
-                            alpha = if (dark) 0.85f else 0.92f
-                        ),
-                        topBarShape
-                    )
-                    else -> Modifier
-                }
-            )
-            .statusBarsPadding()
-            // 上 4dp 给大标题留呼吸；下 10dp 让玻璃片在下角圆角之外留出"玻璃厚度"，
-            // 否则圆角会紧贴 Tab 行底边，读不出"浮起一片"的感觉。
-            .padding(top = 4.dp, bottom = 10.dp)
-    ) {
-        if (isIOS) {
-            // iOS 大标题：当前分区名，随顶栏 1:1 滚动收起
-            Text(
-                text = homeTabs[selectedIndex.coerceIn(0, homeTabs.lastIndex)],
-                style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp)
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                // 与底栏 Dock 的 12dp 外边距对齐到同一栅格：顶栏搜索胶囊与 Dock
-                // 左右边缘同列，页面纵向 chrome 才有统一的视觉中线。
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Card(
-                onClick = onNavigateToSearch,
-                modifier = Modifier.weight(1f),
-                // 现代大圆角语言：顶栏搜索胶囊与底栏 Dock（32dp）同属一套语汇，
-                // 取高度一半得全圆端。此前 iOS 用 10dp、Material 用
-                // `MaterialTheme.shapes.large`（随 CornerStyle 漂移），同一顶栏
-                // 在不同设置下圆角不一致，且与底栏大圆角割裂。
-                shape = RoundedCornerShape(BiliRadius.searchPill),
-                colors = CardDefaults.cardColors(
-                    if (isIOS) {
-                        // iOS 搜索胶囊：onSurfaceVariant@12%（≈ #767680 12%，方案 2.3）
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    }
-                )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "搜索视频、UP主、番剧",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            // 整条顶栏吃滚动位移。**底色挂在同一个节点上**，所以它跟着一起走。
+            .graphicsLayer {
+                translationY = -topBarOffsetPxProvider()
             }
-            // 刷视频模式入口（原「单/双列布局切换」按钮）。
-            //
-            // ## 为什么这里有**可见的芯片底**（用户反馈："会突兀地出现一个边框"）
-            //
-            // OPPO 无缝动画从"锚点矩形"长成全屏，框架画的是**锚点那一块的内容**。
-            // 锚点是零绘制 View，框架捕获不到内容就退回 `BUNDLE_COLOR` 纯色兜底——
-            // 于是打开时凭空冒出一块圆角色块、返回时又凭空消失。
-            //
-            // 根因是**入口在静止态根本没有底色**：旁边「我的」是 38dp 圆形头像
-            // （AvatarImage 自带底），只有它是个裸图标。这里给同一颗 38dp 圆形芯片底，
-            // 两个方向就都从"用户本来就看得见的那颗芯片"出发/收回，不再有突起突灭。
-            // 形状/尺寸与头像同源（[homeProfileAvatarSize] + [homeStoryChipShape]）。
-            Box(contentAlignment = Alignment.Center) {
-                IconButton(onClick = onEnterStoryMode) {
-                    Box(
+            // 不透明底色：纯色 chrome 比玻璃便宜整整一个"全屏离屏录制"，
+            // 且不会出现"玻璃下的内容在动、片本身不动"的分裂感。
+            .background(MaterialTheme.colorScheme.background, topBarShape)
+            .statusBarsPadding()
+            // 上 4 给搜索行留一点呼吸；下 8 让底边圆角之外有一点"片的厚度"，
+            // 否则圆角会紧贴 Tab 行底边，读不出"浮起一片"（旧版是 10，随大标题一起收）。
+            .padding(top = BiliSpacing.xs, bottom = BiliSpacing.sm)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // 与底栏 Dock 的 12dp 外边距对齐到同一栅格：顶栏搜索胶囊与 Dock
+                    // 左右边缘同列，页面纵向 chrome 才有统一的视觉中线。
+                    .padding(horizontal = BiliSpacing.md),
+                // ## 视觉对齐（用户第 33 轮第 4 条「所有 UI 设计都要遵循视觉对齐」）
+                // 三件可点件**同高、同间距**：搜索胶囊 `weight(1f)` 撑满剩余宽度，
+                // 两颗圆形芯片固定 [homeProfileAvatarSize]，三者视觉高度相等（36dp），
+                // 间距统一 `BiliSpacing.sm`。旧版三者紧贴无间距、高度 40/38/38 各不相同。
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Card(
+                    onClick = onNavigateToSearch,
+                    // 拖拽反馈：宽控件用 `appSearchElasticPress`（strength 0.6），
+                    // 与底栏 Dock 的搜索位同一档 —— 满强度会让长条被拉成面条。
+                    modifier = Modifier
+                        .weight(1f)
+                        .appSearchElasticPress(),
+                    // 现代大圆角语言：顶栏搜索胶囊与底栏 Dock（32dp）同属一套语汇，
+                    // 取高度一半得全圆端。
+                    shape = RoundedCornerShape(BiliRadius.searchPill),
+                    colors = CardDefaults.cardColors(
+                        if (isIOS) {
+                            // iOS 搜索胶囊：onSurfaceVariant@12%（≈ #767680 12%，方案 2.3）
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        }
+                    )
+                ) {
+                    Row(
                         modifier = Modifier
-                            .size(homeProfileAvatarSize)
-                            .clip(homeStoryChipShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            // vertical 用 `sm`(8)：20dp 图标 + 16dp = **36dp**，
+                            // 与左右两颗圆形芯片（[homeProfileAvatarSize]）同高。
+                            .padding(horizontal = 14.dp, vertical = BiliSpacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.PlayArrow,
-                            contentDescription = "进入刷视频模式",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(homeProfileIconSize)
-                        )
-                        // 锚点与**芯片**同边界（不是 48dp 的 IconButton 触摸区）：
-                        // morph 的起点矩形 = 用户看见的那颗圆，半径也取它的一半。
-                        SeamlessAnchor(storyAnchorState, Modifier.matchParentSize())
-                    }
-                }
-            }
-            IconButton(onClick = onNavigateToProfile) {
-                AvatarImage(
-                    url = profileAvatar,
-                    contentDescription = "我的",
-                    modifier = Modifier.size(homeProfileAvatarSize),
-                    fallbackContent = {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = "我的",
-                            modifier = Modifier.size(homeProfileIconSize),
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(modifier = Modifier.width(BiliSpacing.sm))
+                        Text(
+                            text = "搜索视频、UP主、番剧",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
+                }
+                // ## 刷视频模式入口（顶栏按钮）
+                //
+                // 第 34 轮把这一颗抽成独立 composable `HomeStoryChip`，理由有两条：
+                // 1. **它是无缝锚点宿主**，而紧邻的头像按钮不是 —— 挤在同一个
+                //    `HomeTopBar` 里时，"锚点祖先链上有没有形变"这件事只能按**函数**
+                //    判定，两个兄弟按钮会被混为一谈（`SeamlessAnchorElasticPressGuardTest`
+                //    正是因此报出假阳性）。拆开后锚点与它的形变判据在同一个函数里，
+                //    守卫可以精确到"这颗芯片有没有让位"。
+                // 2. 芯片自己是一个完整的交互单元（底 + 图标 + 锚点），抽出来之后
+                //    `HomeTopBar` 只负责布局。
+                HomeStoryChip(
+                    seamlessActive = storySeamlessActive,
+                    storyAnchorState = storyAnchorState,
+                    onClick = onEnterStoryMode
                 )
+                // ## 头像入口 / 未登录态的视觉表达（2026-10-18 W11「顶栏认证优化」）
+                //
+                // 此前未登录时这里只画一个灰色 `Person` 图标，**与"已登录但头像没加载出来"
+                // 完全无法区分** —— 用户点下去跳到档案页才发现自己没登录，多一次无效跳转。
+                // 现在未登录（`profileAvatar == null`）时给头像加一圈主色描边 +
+                // 语义化描述"未登录，点按登录"，让"该去登录"这件事在点之前就成立。
+                // 只改视觉与 a11y 描述，`onClick` 不变（仍由宿主决定去哪）。
+                IconButton(
+                    onClick = onNavigateToProfile,
+                    modifier = Modifier
+                        .appElasticPress(visualSize = homeProfileAvatarSize)
+                        .semantics {
+                            // 未登录时读屏与长按提示都指向"登录"，而不是含糊的"我的"。
+                            if (profileAvatar == null) {
+                                contentDescription = "未登录，点按登录"
+                            }
+                        }
+                ) {
+                    AvatarImage(
+                        url = profileAvatar,
+                        contentDescription = if (profileAvatar == null) "未登录，点按登录" else "我的",
+                        modifier = Modifier
+                            .size(homeProfileAvatarSize)
+                            .then(
+                                if (profileAvatar == null) {
+                                    Modifier.border(
+                                        width = HomeSignedOutRingWidth,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                                        shape = CircleShape
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        fallbackContent = {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                // 图标自己也要有描述：`AccessibilityStructureTest` 要求
+                                // IconButton 内的图标 contentDescription 非 null（读屏靠它识别按钮）。
+                                contentDescription = "未登录，点按登录",
+                                modifier = Modifier.size(homeProfileIconSize),
+                                tint = if (profileAvatar == null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    )
+                }
             }
+            FilledTabRow(
+                tabs = homeTabs,
+                selectedIndex = selectedIndex,
+                onSelect = onSelectTab,
+                modifier = Modifier
+            )
         }
-        FilledTabRow(
-            tabs = homeTabs,
-            selectedIndex = selectedIndex,
-            onSelect = onSelectTab,
-            modifier = Modifier
-        )
     }
 }

@@ -12,13 +12,16 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.theme.AnimationSpeed
 import com.naaammme.bbspace.core.designsystem.theme.CornerStyle
-import com.naaammme.bbspace.core.designsystem.theme.DEFAULT_PULL_REFRESH_DISTANCE_DP
 import com.naaammme.bbspace.core.designsystem.theme.FrameRateMode
 import com.naaammme.bbspace.core.designsystem.theme.PaletteStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
 import com.naaammme.bbspace.core.designsystem.theme.ThemeMode
 import com.naaammme.bbspace.core.designsystem.theme.TransitionStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedColorSpec
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedContrastLevel
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedPaletteStyle
+import com.naaammme.bbspace.core.designsystem.theme.scheme.SeedSettingsCodec
 import com.naaammme.bbspace.core.model.DanmakuConfig
 import com.naaammme.bbspace.core.model.PlayerBufferProfile
 import com.naaammme.bbspace.core.model.PlayerBufferSettings
@@ -86,6 +89,12 @@ class AppSettings @Inject constructor(
     private val seedColorKey = intPreferencesKey("seed_color")
     private val useDynamicColorKey = booleanPreferencesKey("use_dynamic_color")
     private val paletteStyleKey = stringPreferencesKey("palette_style")
+    // ── 种子配色三维度（22 风格 / 色彩标准 / 对比度）──────────────────────────
+    // 一律按 **name** 持久化：枚举改名时 `fromStored`/`runCatching valueOf` 回落默认，
+    // 不崩界面、不丢其它设置（与 theme_mode / palette_style 同款容错）。
+    private val seedPaletteStyleKey = stringPreferencesKey("seed_palette_style")
+    private val seedColorSpecKey = stringPreferencesKey("seed_color_spec")
+    private val seedContrastLevelKey = stringPreferencesKey("seed_contrast_level")
     private val swapBaseColorsKey = booleanPreferencesKey("swap_base_colors")
     private val fontScaleKey = floatPreferencesKey("font_scale")
     private val uiScaleKey = floatPreferencesKey("ui_scale")
@@ -101,6 +110,15 @@ class AppSettings @Inject constructor(
     private val uiStyleKey = stringPreferencesKey("ui_style")
     private val glassMaterialKey = stringPreferencesKey("glass_material")
     private val glassStrengthKey = floatPreferencesKey("glass_strength")
+    /**
+     * 全局拖拽反馈开关（上游 BiliPai 同名功能）。
+     *
+     * boolean 而不是 string：它是纯开关，没有"未来加档位"的预期，且**默认 true**
+     * 必须对新老用户一致 —— 用 `r.bool(name) ?: default` 就能表达"没存过 = 开"，
+     * 不需要额外的迁移门闩（对比 `transitionDefaultMigratedKey` 那种"旧默认被写死过
+     * 才需要改写"的场景）。
+     */
+    private val globalDragFeedbackKey = booleanPreferencesKey("global_drag_feedback_enabled")
     // 旧版两键保留读取用于迁移，不再写入
     private val glassEnabledLegacyKey = booleanPreferencesKey("glass_enabled")
     private val glassStyleLegacyKey = stringPreferencesKey("glass_style")
@@ -220,7 +238,15 @@ class AppSettings @Inject constructor(
         uiStyle = r.str(uiStyleKey.name)?.let { runCatching { UiStyle.valueOf(it) }.getOrNull() }
             ?: defaultThemeConfig.uiStyle,
         glassMaterial = resolveGlassMaterial(r),
-        glassStrength = r.float(glassStrengthKey.name) ?: defaultThemeConfig.glassStrength
+        glassStrength = r.float(glassStrengthKey.name) ?: defaultThemeConfig.glassStrength,
+        // 22 风格三维度：解码统一走 SeedSettingsCodec（未知/旧值回落默认），
+        // 因此升级用户与"从没设置过"的用户走的是同一条旧管线。
+        seedPaletteStyle = SeedSettingsCodec.decodeSeedPaletteStyle(r.str(seedPaletteStyleKey.name)),
+        seedColorSpec = SeedSettingsCodec.decodeSeedColorSpec(r.str(seedColorSpecKey.name)),
+        seedContrastLevel = SeedSettingsCodec.decodeSeedContrastLevel(r.str(seedContrastLevelKey.name)),
+        // 没存过就取默认（true）：老用户升级后立刻获得拖拽反馈，不需要再进设置页开一次。
+        globalDragFeedbackEnabled = r.bool(globalDragFeedbackKey.name)
+            ?: defaultThemeConfig.globalDragFeedbackEnabled
     )
 
     /**
@@ -322,6 +348,30 @@ class AppSettings @Inject constructor(
 
     suspend fun updatePaletteStyle(style: PaletteStyle) {
         editSettingsMirrored { it[paletteStyleKey] = style.name }
+    }
+
+    // ── 种子配色三维度（22 风格 / 色彩标准 / 对比度）：只写 name ────────────────
+    suspend fun updateSeedPaletteStyle(style: SeedPaletteStyle) {
+        editSettingsMirrored { it[seedPaletteStyleKey] = style.name }
+    }
+
+    suspend fun updateSeedColorSpec(spec: SeedColorSpec) {
+        editSettingsMirrored { it[seedColorSpecKey] = spec.name }
+    }
+
+    suspend fun updateSeedContrastLevel(level: SeedContrastLevel) {
+        editSettingsMirrored { it[seedContrastLevelKey] = level.name }
+    }
+
+    /**
+     * 全局拖拽反馈开关。
+     *
+     * `editSettingsMirrored`：主题配置走内存镜像，首帧同步可读（见 [mirrorThemeConfig]）。
+     * 本开关被 `AppElasticPress` 在**每次按下**时读取，必须走同一条镜像链路，
+     * 否则改完开关要等下一次重进页面才生效。
+     */
+    suspend fun updateGlobalDragFeedback(enabled: Boolean) {
+        editSettingsMirrored { it[globalDragFeedbackKey] = enabled }
     }
 
     suspend fun updateSwapBaseColors(enabled: Boolean) {
@@ -484,9 +534,11 @@ class AppSettings @Inject constructor(
      * 内嵌播放（16dp 圆角裁剪）就全黑了，而全屏（RectangleShape，无裁剪）正常 ——
      * 用户实测"点全屏能播"正是这个原因。
      * 所以本模式生效时必须：①播放页内部**不套圆角裁剪**（四角变直角）；
-     * ②外层带 `graphicsLayer`/`clip` 的三处调用点传 `allowSurfaceView = false`
-     * （宽屏展开布局、形变布局、刷视频 Pager）；③控制条「真模糊」按关处理
-     * （画面不在应用图层里，玻璃采不到帧）。
+     * ②外层带 `graphicsLayer`/`clip` 的调用点传 `allowSurfaceView = false` ——
+     * **全仓只有一处**（刷视频 Pager，`PortraitSwipePager.kt`）；宽屏展开与形变布局
+     * 的图层问题已解决，守卫要求 `VideoScreen.kt` 里为 0 处
+     * （`PlayerSurfacePowersaveGuardTest.onlyPagerKeepsTextureView`）；
+     * ③控制条「真模糊」按关处理（画面不在应用图层里，玻璃采不到帧）。
      *
      * **默认开**（用户要求"全面使用 SurfaceView"）；生效时机：**重进播放页**
      * （surface 类型在创建 PlayerView 时定死，运行期切换要重建视图并重接播放器，
@@ -710,6 +762,12 @@ class AppSettings @Inject constructor(
     private val prefetchVideoKey = booleanPreferencesKey("prefetch_video")
     private val cdnParallelDownloadKey = booleanPreferencesKey("cdn_parallel_download")
     private val cdnAdaptivePrefetchKey = booleanPreferencesKey("cdn_adaptive_prefetch")
+    // ── CDN 属地优选 / 自定义线路（2026-10-17 夜 W4，对照 BiliPai `CdnRegionPlugin`）──
+    // 默认**全关**：上游把该功能标为实验性；不开就不改变任何既有选线行为。
+    private val cdnRegionEnabledKey = booleanPreferencesKey("cdn_region_enabled")
+    private val cdnRegionHostsKey = stringPreferencesKey("cdn_region_hosts")
+    private val cdnCustomRulesKey = stringPreferencesKey("cdn_custom_rules")
+    private val cdnStrictCustomCdnKey = booleanPreferencesKey("cdn_strict_custom_cdn")
     private val swipeAutoAdvanceKey = booleanPreferencesKey("swipe_auto_advance")
     private val crossSessionDedupKey = booleanPreferencesKey("swipe_cross_session_dedup")
     private val burnInGuardKey = booleanPreferencesKey("swipe_burn_in_guard")
@@ -766,6 +824,14 @@ class AppSettings @Inject constructor(
                     ?: defaultPlaybackPrefs.cdnParallelDownload,
                 cdnAdaptivePrefetch = prefs[cdnAdaptivePrefetchKey]
                     ?: defaultPlaybackPrefs.cdnAdaptivePrefetch,
+                cdnRegionEnabled = prefs[cdnRegionEnabledKey]
+                    ?: defaultPlaybackPrefs.cdnRegionEnabled,
+                cdnRegionHosts = CdnRegionConfigCodec.decodeHosts(prefs[cdnRegionHostsKey])
+                    .ifEmpty { defaultPlaybackPrefs.cdnRegionHosts },
+                cdnCustomRules = CdnRegionConfigCodec.decodeRules(prefs[cdnCustomRulesKey])
+                    .ifEmpty { defaultPlaybackPrefs.cdnCustomRules },
+                cdnStrictCustomCdn = prefs[cdnStrictCustomCdnKey]
+                    ?: defaultPlaybackPrefs.cdnStrictCustomCdn,
                 doubleTapLike = prefs[doubleTapLikeKey] ?: defaultPlaybackPrefs.doubleTapLike,
                 repeatMode = prefs[repeatModeKey]
                     ?.let(PlayerRepeatMode::valueOf)
@@ -847,6 +913,32 @@ class AppSettings @Inject constructor(
     /** DASH 分段自适应预取开关：见 `PlayerPlaybackPrefs.cdnAdaptivePrefetch`。 */
     suspend fun setCdnAdaptivePrefetch(enabled: Boolean) {
         editSettingsMirrored { it[cdnAdaptivePrefetchKey] = enabled }
+    }
+
+    // ── CDN 属地优选 / 自定义线路（W4，对照 BiliPai `CdnRegionPlugin`；默认全关）────────
+    //
+    // ⚠️ 这四个开关**只影响"候选表的顺序与来源"**，不会绕过传输层的槽位预算/并行策略
+    // （`CdnPlaybackDataSource` 的 300ms 有界等待、降级可恢复、≤2 次重升都在那一层）。
+    // 默认值全部来自 `PlayerPlaybackPrefs` 的出厂默认（关），所以不开就与现状逐字节一致。
+
+    /** 属地优选总开关：见 `PlayerPlaybackPrefs.cdnRegionEnabled`。 */
+    suspend fun setCdnRegionEnabled(enabled: Boolean) {
+        editSettingsMirrored { it[cdnRegionEnabledKey] = enabled }
+    }
+
+    /** 属地优选的目标 host 列表（顺序即优先级；空 = 退回原序）。 */
+    suspend fun setCdnRegionHosts(hosts: List<String>) {
+        editSettingsMirrored { it[cdnRegionHostsKey] = CdnRegionConfigCodec.encodeHosts(hosts) }
+    }
+
+    /** 自定义 CDN 改写规则（首条命中即停；编码见 `CdnRegionConfigCodec`）。 */
+    suspend fun setCdnCustomRules(rules: List<com.naaammme.bbspace.core.model.player.CdnRegionPolicy.CustomRule>) {
+        editSettingsMirrored { it[cdnCustomRulesKey] = CdnRegionConfigCodec.encodeRules(rules) }
+    }
+
+    /** 严格只用自定义线路：见 `PlayerPlaybackPrefs.cdnStrictCustomCdn`。 */
+    suspend fun setCdnStrictCustomCdn(enabled: Boolean) {
+        editSettingsMirrored { it[cdnStrictCustomCdnKey] = enabled }
     }
 
     /** 竖屏连播「播完自动翻下一支」（默认开）：见 `PlayerPlaybackPrefs.swipeAutoAdvance`。 */

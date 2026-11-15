@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A2 迁移基线（2026-10-13 第 10 轮）。见 app/lint.xml 的完整说明。
+
+  BbspaceAnimateAsState 已由 FrameBudgetLintTest.animateAsState_isFrozen 数文本棘轮
+  （上限 10）迁移到 ci-lint/AnimateAsStateDetector；切换前做过等价性证明（10/10 行号一致）。
+  本模块原有 1 处。
+
+  ⚠️ **补登（2026-10-14 第 14 轮）**：BbspaceHardcodedAnimationDuration 在这里有 1 处
+  （DynamicFeed.kt:254 的 `spring(dampingRatio = Spring.DampingRatioMediumBouncy, …)`）。
+  第 11 轮迁移硬编码动画参数棘轮时**漏登了本模块**：该处是"多行 `spring(`、首参在下一行"
+  的形态，文本棘轮的正则逐行匹配、从来报不到它，所以我按"棘轮能找到的 8 处都在
+  core:designsystem"打了基线，没意识到检测器**比棘轮多看见几处**。
+  后果：`:feature:dynamic:lintDebug` 从第 11 轮起一直是红的。
+  教训：迁移时应当**按检测器的报告打基线，而不是按旧棘轮的清单** ——
+  检测器比旧守卫更严是迁移的目的，那就一定会多出需要登记的点。
+-->
+<lint>
+    <issue id="BbspaceAnimateAsState">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/dynamic/feed/DynamicFeed.kt" />
+    </issue>
+    <issue id="BbspaceHardcodedAnimationDuration">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/dynamic/feed/DynamicFeed.kt" />
+    </issue>
+</lint>

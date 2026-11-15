@@ -35,6 +35,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.designsystem.component.BiliPullToRefreshBox
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
@@ -42,6 +45,7 @@ import com.naaammme.bbspace.core.model.DistributionAreaItem
 import com.naaammme.bbspace.core.model.InterestAreaLabels
 import com.naaammme.bbspace.core.model.InterestDistributionMaterial
 import com.naaammme.bbspace.core.model.InterestLabel
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -62,7 +66,11 @@ fun InterestScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        // 全局拖拽反馈（第 34 轮 T2）：内容偏好页顶栏返回钮。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
@@ -98,7 +106,7 @@ fun InterestScreen(
                         StateMessageCard(
                             text = state.errorMessage.orEmpty()
                                 .ifBlank { "加载兴趣标签失败" },
-                            modifier = Modifier.padding(16.dp),
+                            modifier = Modifier.padding(BiliSpacing.lg),
                             isError = true,
                             actionText = "重试",
                             onAction = viewModel::refresh
@@ -110,8 +118,8 @@ fun InterestScreen(
                     val response = state.response ?: return@BiliPullToRefreshBox
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        contentPadding = PaddingValues(horizontal = BiliSpacing.lg, vertical = BiliSpacing.md),
+                        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
                     ) {
                         val distMaterial = response.distributionMaterial
                         if (distMaterial != null && distMaterial.areaList.isNotEmpty()) {
@@ -127,10 +135,10 @@ fun InterestScreen(
                                     ?: "我的内容偏好",
                                 subtitle = null
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(BiliSpacing.xsPlus))
                             FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
                             ) {
                                 response.labels.forEach { label ->
                                     InterestLabelChip(label = label)
@@ -177,9 +185,9 @@ private fun InterestLabelChip(label: InterestLabel) {
         modifier = Modifier
             .background(
                 MaterialTheme.colorScheme.secondaryContainer,
-                MaterialTheme.shapes.small
+                InterestLabelShape
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = BiliSpacing.md, vertical = BiliSpacing.xsPlus),
         style = MaterialTheme.typography.labelLarge,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
@@ -194,15 +202,15 @@ private fun InterestAreaCard(area: InterestAreaLabels) {
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surfaceContainerLow,
-                MaterialTheme.shapes.medium
+                InterestCardShape
             )
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         Text(text = area.areaName, style = MaterialTheme.typography.titleSmall)
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             area.areaLabel.forEach { label ->
                 Text(
@@ -210,9 +218,9 @@ private fun InterestAreaCard(area: InterestAreaLabels) {
                     modifier = Modifier
                         .background(
                             MaterialTheme.colorScheme.secondaryContainer,
-                            MaterialTheme.shapes.extraSmall
+                            InterestSmallShape
                         )
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.xs),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
@@ -228,10 +236,10 @@ private fun DistributionSection(material: InterestDistributionMaterial) {
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surfaceContainerLow,
-                MaterialTheme.shapes.medium
+                InterestCardShape
             )
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
     ) {
         Text(
             text = material.title.takeIf { it.isNotBlank() } ?: "近期偏好分布",
@@ -262,7 +270,7 @@ private fun DistributionBar(item: DistributionAreaItem, maxCount: Int) {
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         Text(
             text = item.name,
@@ -274,7 +282,7 @@ private fun DistributionBar(item: DistributionAreaItem, maxCount: Int) {
                 modifier = Modifier
                     .fillMaxWidth(fraction)
                     .height(16.dp)
-                    .clip(MaterialTheme.shapes.extraSmall)
+                    .clip(InterestSmallShape)
                     .background(barColor)
             )
         }
@@ -286,3 +294,10 @@ private fun DistributionBar(item: DistributionAreaItem, maxCount: Int) {
         )
     }
 }
+
+// 形状单一来源：此前 5 处直接写 `MaterialTheme.shapes.*`，同一屏内随 CornerStyle 漂移
+// （小标签 / 卡片 / 角标三种角色各写各的）。统一收口到 BiliRadius，并提成文件级常量
+// —— 不在调用点内联 `RoundedCornerShape(...)`（ListAllocationStructureTest 的形状分配棘轮）。
+private val InterestLabelShape = RoundedCornerShape(BiliRadius.groupedList)
+private val InterestCardShape = RoundedCornerShape(BiliRadius.card)
+private val InterestSmallShape = RoundedCornerShape(BiliRadius.badge)

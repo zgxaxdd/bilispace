@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.AdaptiveMediaGrid
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.VideoGridCardSkeleton
@@ -52,10 +54,10 @@ fun ListenHomePage(
         errorMessage = state.errorMessage,
         loadMoreEnabled = state.hasMore,
         contentPadding = PaddingValues(
-            start = 4.dp,
+            start = BiliSpacing.xs,
             top = topContentPadding,
-            end = 4.dp,
-            bottom = 4.dp
+            end = BiliSpacing.xs,
+            bottom = BiliSpacing.xs
         ),
         key = { _, item -> item.actionKey() },
         loadingContent = {
@@ -80,7 +82,8 @@ private fun ListenCard(
 ) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth()
+        // 全局拖拽反馈（第 34 轮 T2）：整卡可点，按压/跟手形变。
+        modifier = Modifier.fillMaxWidth().appElasticPress()
     ) {
         Column {
             CoverImage(
@@ -91,7 +94,7 @@ private fun ListenCard(
                     .fillMaxWidth()
                     .aspectRatio(16f / 10f)
             )
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Column(modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.xsPlus)) {
                 Text(
                     text = item.title,
                     maxLines = 2,

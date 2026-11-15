@@ -183,24 +183,49 @@ class ListAllocationStructureTest {
     // ── 断言：动画值在布局/绘制期读 ────────────────────────────────────────────
 
     /**
-     * iOS 分段滑块的位移必须走 `offset { }`（布局期读），不能是 `offset(x = )`（组合期读）。
+     * FilledTabRow 的分段控件必须走 **Miuix 渲染层**（`AppMiuixSegmentedControl`）。
      *
-     * 这条尤其值钱，因为它在**顶栏里**：`animateDpAsState` 的值被组合期读取时，
-     * 切 Tab 的整个 spring 过程每帧重组一次顶栏。
+     * ## 2026-10-18（W2 批次 2）为什么改这条断言
+     * 原断言防的是"自绘滑块在**组合期**读 `animateDpAsState` ⇒ 切 Tab 时每帧重组顶栏"。
+     * 现在 iOS 分支整段自绘实现（`IOSSegmented`：`BoxWithConstraints` + `animateDpAsState`
+     * + `offset {}`）**已删除**，改为委托 `AppMiuixSegmentedControl`（miuix `TabRow`，
+     * 指示器位移是库内 spring、不占本仓 `animate*AsState` 棘轮）。
+     * ⇒ 旧断言的**对象不存在了**，语义转成三条仍可失败的新断言：
+     * ① 必须委托给唯一出口；② 不许回潮组合期 `offset(x = )`；
+     * ③ 不许再自绘滑块动画（`animate*AsState(` **或** `Animatable(`）；
+     * ④ `IOSSegmented` 这个名字不得再出现（防旧实现被贴回来）。
+     *
+     * ⚠️ 这是**结构改动带来的锚点迁移**，不是放宽：四条断言都仍然会在违规时红。
+     *
+     * **2026-10-18 审计补强（W6 复核）**：原第 ③ 条只认 `animateDpAsState(` —— 审计指出
+     * "自绘滑块改用 `animateFloatAsState` / `Animatable` / `graphicsLayer { translationX }`
+     * 时三条断言全过"。现把正则扩到 `animate[A-Za-z]*AsState\(|Animatable\(`，并补第 ④ 条。
+     * 注意：`Animatable(` 只在**本文件**里禁（顶栏本该零动画状态）；别处用 Animatable 是合规写法。
      */
     @Test
-    fun segmentedControlReadsThumbOffsetInLayoutPhase() {
-        val eager = countMatching(filledTabRow, """\.offset\(\s*x\s*=""")
-        val lazyOnes = countMatching(filledTabRow, """\.offset\s*\{""")
+    fun segmentedControlDelegatesToMiuixRenderer() {
+        val delegates = countMatching(filledTabRow, """AppMiuixSegmentedControl\(""")
         assertTrue(
-            "FilledTabRow 仍有 $eager 处 `offset(x = ...)`。它在组合期读 animateDpAsState 的值，" +
-                "切 Tab 时每帧重组顶栏。应改为 `offset { IntOffset(px, 0) }`，" +
-                "并保留 animateDpAsState 的 State 引用（不要 `by` 解包）。",
+            "FilledTabRow 的 iOS 分支必须委托给 `AppMiuixSegmentedControl`（分段控件唯一出口）；" +
+                "当前 $delegates 处。",
+            delegates >= 1
+        )
+        val eager = countMatching(filledTabRow, """\.offset\(\s*x\s*=""")
+        assertTrue(
+            "FilledTabRow 里不许出现 `offset(x = ...)`（组合期读动画值 ⇒ 每帧重组顶栏）：当前 $eager 处。",
             eager == 0
         )
+        val selfDrawn = countMatching(filledTabRow, """animate[A-Za-z]*AsState\(|Animatable\(""")
         assertTrue(
-            "FilledTabRow 应使用布局期偏移（`offset { ... }`），当前找到 $lazyOnes 处。",
-            lazyOnes >= 1
+            "FilledTabRow 不许自绘滑块动画（`animate*AsState(` / `Animatable(`）：指示器交给 miuix " +
+                "库内部实现。当前 $selfDrawn 处。",
+            selfDrawn == 0
+        )
+        val legacy = countMatching(filledTabRow, """IOSSegmented""")
+        assertTrue(
+            "FilledTabRow 里出现了 `IOSSegmented`（已删除的自绘滑块实现）。" +
+                "iOS 分支的唯一出口是 `AppMiuixSegmentedControl`，不要贴回旧实现。当前 $legacy 处。",
+            legacy == 0
         )
     }
 
@@ -403,33 +428,26 @@ class ListAllocationStructureTest {
     }
 
     /**
-     * `Path()` / `Outline.Generic` 只许出现在形状自己的 `createOutline` / `build*Path` 里。
+     * ~~`Path()` / `Outline.Generic` 只许出现在形状自己的 `createOutline` / `build*Path` 里。~~
      *
-     * W7 的教训：**棘轮的覆盖面 = 它真正会红的写法集合**，不是它的名字。
-     * 本类原先只盖 `RoundedCornerShape` / `composed` / `animate*AsState`，
-     * 所以 `UserCollageCanvas` 里每次 `createOutline` 分配 `Path` + `Outline.Generic`
-     * 完全不在视野内。这里把这两类纳入计数并按**实测基线**冻结（只许减不许升）。
+     * **A2 迁移（2026-10-13 第 12 轮）：本断言已删除**，改由 Lint 检测器
+     * `BbspacePathOutlineAllocation`（ci-lint/PathOutlineAllocationDetector.java）执行。
+     *
+     * 为什么这条迁得最干净：**现存 4 处全部合规**（2 处 `Outline.Generic` 在
+     * `createOutline` 里、2 处 `Path()` 在 `buildPolygonPath`/`buildStarPath` 里）
+     * ⇒ 检测器报告 0，**一条 `lint.xml` 豁免都不用写**。前两次迁移都要先打基线，
+     * 这次不用 —— 因为判据从"总量不超过 4"升级成了"只能在 createOutline / build*Path 里"，
+     * 而存量恰好都在那里。
+     *
+     * 覆盖面也因此变严：棘轮说"总共不超过 4 处"，别处再添 3 处仍绿；
+     * 检测器说"只能在 createOutline / build*Path 里"，别处添 1 处就红。
+     *
+     * W7 的教训（**棘轮的覆盖面 = 它真正会红的写法集合，不是它的名字**）原样保留 ——
+     * 它正是把覆盖面从"出现次数"改到"所在函数"的理由。
+     *
+     * 迁移详情与踩坑记录（`Path()` 是顶层工厂不是构造器、`Outline.Generic` 是嵌套类
+     * 构造器）见 docs/2026-10-13-上游同步落地-执行报告.md §1.13。
      */
-    @Test
-    fun pathAndOutlineAllocations_areFrozenAtMeasuredBaseline() {
-        val pattern = """\bPath\(\s*\)|Outline\.(Generic|ConvexPolygon|RoundedRect)\("""
-        val probe = listOf("    val path = Path()", "    return Outline.Generic(path)")
-        assertTrue("自检失败：Path/Outline 的正则连示例都抓不到", countMatching(probe, pattern) == 2)
-
-        val sites = mainSources.flatMap { file ->
-            file.readLines().mapIndexedNotNull { index, line ->
-                if (countMatching(listOf(line), pattern) == 0) return@mapIndexedNotNull null
-                "${file.relativeTo(repoRoot).path.replace('\\', '/')}:${index + 1}"
-            }
-        }
-        val baseline = 4
-        assertTrue(
-            "全仓 Path()/Outline.* 分配点当前 ${sites.size} 处，冻结上限 $baseline 处" +
-                "（制定日实测 4 处，全在 UserCollageCanvas 的 createOutline/build*Path 里 —— " +
-                "那两处是形状 API 要求的分配，能省的是别在这里加新的）。实际：${sites.joinToString()}",
-            sites.size <= baseline
-        )
-    }
 
     /**
      * 选区背景路径不许在 `drawBehind` 里现算（PF-05）。

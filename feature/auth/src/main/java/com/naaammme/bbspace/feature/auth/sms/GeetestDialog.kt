@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.naaammme.bbspace.core.model.GeetestResult
 import org.json.JSONObject
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -27,7 +28,7 @@ fun GeetestDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(modifier = Modifier.appElasticPress(), onClick = onDismiss) { Text("取消") }
         },
         title = { Text("人机验证") },
         text = {

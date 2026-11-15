@@ -42,6 +42,23 @@ import com.naaammme.bbspace.core.designsystem.component.rememberHighlightedTitle
 import com.naaammme.bbspace.core.model.SearchAuthor
 import com.naaammme.bbspace.core.model.SearchFeedbackSec
 import com.naaammme.bbspace.core.model.SearchVideo
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+
+/**
+ * 搜索结果卡与其中的封面圆角（**文件级常量**）。
+ *
+ * ## 为什么从 `MaterialTheme.shapes.large` 换成 `BiliRadius.card`
+ * 1. `BiliRadius.card` 的 KDoc 写着"一个角色只有一个来源：卡片容器、卡片封面、无缝打开的
+ *    锚点与动画半径，全部取这个值" —— 搜索卡此前用 `shapes.large`（M3 = 16dp）是这条纪律的例外；
+ * 2. 更实际的问题：无缝展开用的 `rememberSeamlessCardSpec(...)` 此前传的是 `shapes.medium`（M3 = 12dp），
+ *    而卡片实际半径是 16dp —— **本来就差 4dp**，展开动画第一帧会"圆角跳一下"。
+ *    统一到 `BiliRadius.card`(20dp) 后两者同源，这个隐患随之消失。
+ * 3. 写成**文件级常量**而不是内联 `RoundedCornerShape(`：`ListAllocationStructureTest` 把
+ *    `shape = RoundedCornerShape(` 这种具名实参形态钉在上限里（每次重组都会分配一份）。
+ */
+private val SearchResultCardShape = RoundedCornerShape(BiliRadius.card)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,8 +68,8 @@ fun SearchAuthorCard(
 ) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().appElasticPress(),
+        shape = SearchResultCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -68,7 +85,7 @@ fun SearchAuthorCard(
                 url = author.avatar,
                 contentDescription = author.name,
                 modifier = Modifier.size(64.dp),
-                shape = MaterialTheme.shapes.large
+                shape = SearchResultCardShape
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -109,7 +126,7 @@ fun SearchCard(
 ) {
     // 无缝打开：注册成功由系统接管过渡，失败走 onClick 普通打开
     val seamless = rememberSeamlessVideoCardState()
-    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = MaterialTheme.shapes.medium).radiusPx
+    val seamlessRadiusPx = rememberSeamlessCardSpec(shape = SearchResultCardShape).radiusPx
     val titleText = rememberHighlightedTitle(
         text = video.title,
         highlightColor = MaterialTheme.colorScheme.primary
@@ -123,8 +140,20 @@ fun SearchCard(
                 onClick()
             }
         },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        // ## 为什么这里**不能无条件**挂 appElasticPress（第 34 轮 OPPO 动画修复）
+        //
+        // 本卡内放了 `SeamlessCardCoverAnchor`（见下方 `CoverImage` 内），而
+        // `appElasticPress` 的形变是 `Modifier.graphicsLayer` —— **绘制期**变换：
+        // 它改变像素落点，但不改布局。OPPO 无缝框架用 `View.getLocationInWindow`
+        // 取锚点矩形（布局期坐标），于是「按住卡片（卡片正被放大/拖偏）→ 点开视频」
+        // 时框架按**屏幕上已不存在的矩形**起飞，动画从错误的位置/大小开始。
+        //
+        // 判据是「本卡是否是系统过渡的锚点宿主」：`seamless.active` 为真时锚点
+        // 真的组合了，此时**整卡形变必须让位**给系统过渡；只有不支持无缝的设备
+        //（`active=false`，锚点不组合、走普通打开）才保留按压反馈。
+        // 与 `HistoryItemCard.kt` 同一口径（那里有完整推导）。
+        modifier = Modifier.fillMaxWidth().appElasticPress(enabled = !seamless.active),
+        shape = SearchResultCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -228,7 +257,7 @@ private fun SearchFeedbackMenu(feedbacks: List<SearchFeedbackSec>) {
         AlertDialog(
             onDismissRequest = { show = false },
             confirmButton = {
-                TextButton(onClick = { show = false }) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = { show = false }) {
                     Text("关闭")
                 }
             },

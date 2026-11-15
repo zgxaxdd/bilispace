@@ -20,20 +20,15 @@ import com.naaammme.bbspace.infra.crypto.HwIdGenerator
 import com.naaammme.bbspace.infra.network.BiliRestClient
 import com.naaammme.bbspace.infra.network.BiliRestParamBuilder
 import com.naaammme.bbspace.infra.network.BiliRestProfile
-import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.EOFException
-import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.ArrayDeque
 import java.util.HashSet
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
-import java.util.zip.InflaterInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
@@ -51,7 +46,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.brotli.dec.BrotliInputStream
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -394,7 +388,10 @@ class LiveRoomMessageRepository @Inject constructor(
         }
 
         OP_MESSAGE -> {
-            unpackBusinessPayload(packet).forEach { json ->
+            // B7：解包逻辑已抽到 [LiveDanmakuProtocol]（纯逻辑、可单测）。
+            // 原先它是本类的 private 方法，于是"恶意包会不会打崩解析器"这件事
+            // 没有任何真字节级的测试能覆盖（只能靠扫源码）。见该 object 的 KDoc。
+            LiveDanmakuProtocol.unpack(packet.version, packet.payload).forEach { json ->
                 parseAckPayload(json)?.let { ack ->
                     sendAck(
                         output = output,
@@ -418,39 +415,6 @@ class LiveRoomMessageRepository @Inject constructor(
         }
 
         else -> Unit
-    }
-
-    private fun unpackBusinessPayload(packet: LivePacket): List<JSONObject> {
-        return when (packet.version) {
-            VERSION_PLAIN -> parseJsonOrNull(packet.payload)?.let(::listOf)
-                ?: unpackNestedPackets(packet.payload)
-            VERSION_ZLIB -> unpackNestedPackets(inflate(packet.payload))
-            VERSION_BROTLI -> unpackNestedPackets(decodeBrotli(packet.payload))
-            else -> emptyList()
-        }
-    }
-
-    private fun unpackNestedPackets(bytes: ByteArray): List<JSONObject> {
-        if (bytes.isEmpty()) return emptyList()
-        val packets = mutableListOf<JSONObject>()
-        var offset = 0
-        while (offset + HEADER_SIZE <= bytes.size) {
-            val packetLen = readInt32(bytes, offset)
-            if (packetLen !in HEADER_SIZE..MAX_PACKET_SIZE || offset + packetLen > bytes.size) break
-            val headerLen = readInt16(bytes, offset + 4)
-            if (headerLen !in HEADER_SIZE..packetLen) break
-            val version = readInt16(bytes, offset + 6)
-            val op = readInt32(bytes, offset + 8)
-            val payload = bytes.copyOfRange(offset + headerLen, offset + packetLen)
-            if (op == OP_MESSAGE) {
-                val nested = LivePacket(version, op, payload)
-                packets += unpackBusinessPayload(nested)
-            } else if (op == OP_AUTH_REPLY) {
-                parseJsonOrNull(payload)?.let(packets::add)
-            }
-            offset += packetLen
-        }
-        return packets
     }
 
     private fun parseDanmuMessage(
@@ -646,16 +610,11 @@ class LiveRoomMessageRepository @Inject constructor(
         op: Int,
         payload: ByteArray
     ) {
-        val buf = ByteBuffer.allocate(HEADER_SIZE + payload.size)
-            .order(ByteOrder.BIG_ENDIAN)
-        buf.putInt(HEADER_SIZE + payload.size)
-        buf.putShort(HEADER_SIZE.toShort())
-        buf.putShort(VERSION_PLAIN.toShort())
-        buf.putInt(op)
-        buf.putInt(0)
-        buf.put(payload)
+        // B7：拼包走 [LiveDanmakuProtocol.encode] —— 与测试用的是**同一份**字节布局，
+        // 不会出现"测试里手写一份、生产里另一份"的漂移。
+        val frame = LiveDanmakuProtocol.encode(version = VERSION_PLAIN, op = op, payload = payload)
         synchronized(writeLock) {
-            output.write(buf.array())
+            output.write(frame)
             output.flush()
         }
     }
@@ -689,45 +648,22 @@ class LiveRoomMessageRepository @Inject constructor(
 
     private fun parsePopularCount(payload: ByteArray): Long {
         if (payload.size < 4) return 0L
-        return readUInt32(payload)
+        return LiveDanmakuProtocol.readUInt32(payload)
     }
 
-    private fun inflate(bytes: ByteArray): ByteArray {
-        return readAllBytes(InflaterInputStream(bytes.inputStream()))
-    }
-
-    private fun decodeBrotli(bytes: ByteArray): ByteArray {
-        return readAllBytes(BrotliInputStream(bytes.inputStream()))
-    }
-
-    private fun readAllBytes(input: InputStream): ByteArray {
-        input.use { stream ->
-            val out = ByteArrayOutputStream()
-            val buf = ByteArray(IO_BUFFER_SIZE)
-            var total = 0
-            while (true) {
-                val read = stream.read(buf)
-                if (read <= 0) break
-                total += read
-                if (total > MAX_DECOMPRESSED_SIZE) {
-                    throw IllegalStateException("直播消息包体超过限制")
-                }
-                out.write(buf, 0, read)
-            }
-            return out.toByteArray()
-        }
-    }
+    // B7：`inflate` / `decodeBrotli` / `readAllBytes` 三个方法已随解包逻辑一起
+    // 移入 [LiveDanmakuProtocol]（它们只被那条链路使用，留在这里就是死代码）。
+    // `parseJsonOrNull` / `readInt32` / `readInt16` 仍在本类有真实调用者
+    // （认证包解析、包长校验），所以保留，但**实现委托给同一个 object**，
+    // 避免"两份字节序实现漂移"。
 
     private fun parseJson(payload: ByteArray): JSONObject {
         return parseJsonOrNull(payload)
             ?: throw IllegalStateException("直播消息 JSON 非法")
     }
 
-    private fun parseJsonOrNull(payload: ByteArray): JSONObject? {
-        val text = payload.toString(Charsets.UTF_8).trim()
-        if (text.isBlank()) return null
-        return runCatching { JSONObject(text) }.getOrNull()
-    }
+    private fun parseJsonOrNull(payload: ByteArray): JSONObject? =
+        LiveDanmakuProtocol.parseJsonOrNull(payload)
 
     private fun parseHosts(arr: JSONArray?): List<HostPort> {
         if (arr == null || arr.length() == 0) return emptyList()
@@ -819,21 +755,13 @@ class LiveRoomMessageRepository @Inject constructor(
         msgIds.clear()
     }
 
-    private fun readInt32(bytes: ByteArray, offset: Int): Int {
-        return ((bytes[offset].toInt() and 0xFF) shl 24) or
-            ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
-            ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
-            (bytes[offset + 3].toInt() and 0xFF)
-    }
+    // B7：字节序读取统一委托给 [LiveDanmakuProtocol]，不再本类各留一份实现
+    // （两份实现漂移会让"包长校验"与"解包"对同一段字节给出不同结论）。
+    private fun readInt32(bytes: ByteArray, offset: Int): Int =
+        LiveDanmakuProtocol.readInt32(bytes, offset)
 
-    private fun readInt16(bytes: ByteArray, offset: Int): Int {
-        return ((bytes[offset].toInt() and 0xFF) shl 8) or
-            (bytes[offset + 1].toInt() and 0xFF)
-    }
-
-    private fun readUInt32(bytes: ByteArray): Long {
-        return readInt32(bytes, 0).toLong() and 0xFFFFFFFFL
-    }
+    private fun readInt16(bytes: ByteArray, offset: Int): Int =
+        LiveDanmakuProtocol.readInt16(bytes, offset)
 
     private fun skipFully(input: DataInputStream, count: Int) {
         var remain = count
@@ -894,18 +822,21 @@ class LiveRoomMessageRepository @Inject constructor(
         const val UNKNOWN_EXT_VALUE = "-99998"
         const val DEFAULT_FLOW_EXTEND = """{"position":"1","s_position":"1","slide_direction":"-99998"}"""
         const val DEFAULT_BUSSINESS_EXTEND = """{"broadcast_type":"1","stream_scale":"1","watch_ui_type":"3"}"""
-        const val HEADER_SIZE = 16
-        // 先把单包和解压后的包体做限制,避免恶意数据导致 OOM,后续如果发现合理的包体大小可以再调整
-        const val MAX_PACKET_SIZE = 2 * 1024 * 1024
-        const val MAX_DECOMPRESSED_SIZE = 2 * 1024 * 1024
-        const val VERSION_PLAIN = 0
-        const val VERSION_ZLIB = 2
-        const val VERSION_BROTLI = 3
-        const val OP_HEARTBEAT = 2
-        const val OP_HEARTBEAT_REPLY = 3
-        const val OP_MESSAGE = 5
-        const val OP_AUTH = 7
-        const val OP_AUTH_REPLY = 8
+        // ── 线协议常量：**单一真值源在 [LiveDanmakuProtocol]** ──────────────────
+        // B7（2026-10-13）：解包逻辑抽出去之后，这些值如果在这里再留一份字面量，
+        // 就会与协议层漂移（改了协议上限却忘了改校验）。一律转发。
+        const val HEADER_SIZE = LiveDanmakuProtocol.HEADER_SIZE
+        const val MAX_PACKET_SIZE = LiveDanmakuProtocol.MAX_PACKET_SIZE
+        const val VERSION_PLAIN = LiveDanmakuProtocol.VERSION_PLAIN
+        const val VERSION_ZLIB = LiveDanmakuProtocol.VERSION_ZLIB
+        const val VERSION_BROTLI = LiveDanmakuProtocol.VERSION_BROTLI
+        const val OP_HEARTBEAT = LiveDanmakuProtocol.OP_HEARTBEAT
+        const val OP_HEARTBEAT_REPLY = LiveDanmakuProtocol.OP_HEARTBEAT_REPLY
+        const val OP_MESSAGE = LiveDanmakuProtocol.OP_MESSAGE
+        const val OP_AUTH = LiveDanmakuProtocol.OP_AUTH
+        const val OP_AUTH_REPLY = LiveDanmakuProtocol.OP_AUTH_REPLY
+
+        // 以下两个只被本类的 socket 循环用（ACK / 心跳 / 退避），协议层不关心：
         const val OP_ACK = 24
         const val HEARTBEAT_INTERVAL_MS = 30_000L
         const val CONNECT_TIMEOUT_MS = 3_000
@@ -917,7 +848,6 @@ class LiveRoomMessageRepository @Inject constructor(
         const val ACK_DEDUP_MSG_TYPE = 1
         const val ACK_CACHE_MAX_COUNT = 2_000
         const val ACK_CACHE_WINDOW_MS = 30_000L
-        const val IO_BUFFER_SIZE = 8 * 1024
         const val CMD_DANMU = "DANMU_MSG"
         const val CMD_DANMU_MIRROR = "DANMU_MSG_MIRROR"
         const val CMD_WATCHED_CHANGE = "WATCHED_CHANGE"

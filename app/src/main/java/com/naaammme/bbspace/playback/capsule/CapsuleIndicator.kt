@@ -157,7 +157,11 @@ internal fun LinkedNowPlayingRow(
             // 小横条是 1188×168（≈7:1），封面是 16:9；框架走兜底路径时会把封面
             // 拉伸铺满整个横条 —— 用户反馈的"预览图填充在视频小横条中"就是它。
             // 改为只用 BUNDLE_COLOR（横条底色）兜底，最差是一块纯色。
-            decorateAnchor = false
+            decorateAnchor = false,
+            // 把锚点状态传下去：执行器据此用真实显示矩形（含 Dock 合并动画 /
+            // 全局拖拽反馈的 graphicsLayer 形变）作为 BUNDLE_RECT。横条在合并
+            // 动画里尺寸持续变化，View 的布局矩形未必等于此刻屏幕上那块矩形。
+            anchorState = anchorState
         )
         if (!seamless) onOpen()
     }
@@ -265,9 +269,15 @@ internal fun LinkedNowPlayingRow(
             }
             IconButton(
                 onClick = {
-                    // 起粒子消散；真正的停播与释放会话在 onDissolveComplete 里
-                    //（BiliPai 同序：粒子首帧出现后隐藏本体，消散完成再暂停并关闭）。
-                    // 动效关闭 / 非 GLES3 / 抓图失败时它会立刻回调，不会卡住关闭。
+                    // ① **当场停播**（用户反馈「点关闭的叉叉后视频没有立即关闭，有延迟」）：
+                    //    消散是 ~2.09s 的动画，而"关掉它"是交互的实质结果 —— 若等粒子跑完
+                    //    才停，那两秒里视频照常播放（声音继续、画面继续动），读作"关不掉"。
+                    //    所以这里先停播放器（pause，不 close —— 见 stopPlaybackNow 的注释），
+                    //    粒子只负责把本体送走的视觉收尾。
+                    // ② 起粒子消散；真正的会话释放仍在 onDissolveComplete 里
+                    //   （BiliPai 同序：粒子首帧出现后隐藏本体，消散完成再释放会话）。
+                    //    动效关闭 / 非 GLES3 / 抓图失败时它会立刻回调，不会卡住关闭。
+                    capsuleState.stopPlaybackNow()
                     dissolving = true
                 },
                 enabled = !compact,

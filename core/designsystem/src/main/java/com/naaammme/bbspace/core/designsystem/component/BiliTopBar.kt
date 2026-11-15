@@ -35,6 +35,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.UiStyle
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.component.miuix.AppMiuixIconButton
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 private val largeTitleRowHeight = 52.dp
 private val smallBarHeight = 52.dp
@@ -110,7 +113,14 @@ fun BiliTopBar(
             modifier = modifier,
             navigationIcon = {
                 if (onBack != null) {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        // 全局拖拽反馈（第 34 轮 T2）：MATERIAL 分支的返回钮此前是唯一
+                        // 没接反馈的顶栏图标钮 —— iOS 分支已走 `AppMiuixIconButton`
+                        //（原语自带 `appElasticPress`），两档必须同步，否则同一条顶栏
+                        // 在不同风格下按压手感不一致。
+                        modifier = Modifier.appElasticPress()
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
@@ -147,7 +157,12 @@ private fun IOSLargeTitleTopBar(
                 .height(smallBarHeight)
         ) {
             if (onBack != null) {
-                IconButton(
+                // 2026-10-18（W9）：**iOS 档的返回钮改走 Miuix 渲染层**（命中区 44dp 由原语统一给）。
+                // 这条分支此前用 M3 `IconButton` ⇒ 外观页/设置首页在 iOS 档下是"顶栏大标题是 iOS 语汇、
+                // 返回钮还是 Material"的半迁移状态。只换渲染层：`onBack` 与 chevron 字形一字未动。
+                // MATERIAL 分支仍用 M3 `IconButton`（见 `BiliTopBar` 的 else 分支）—— 不要为了"统一"
+                // 把它也换掉：miuix 的按压/圆角是 iOS 语汇，混进 Material 档反而破坏一致性。
+                AppMiuixIconButton(
                     onClick = onBack,
                     modifier = Modifier.align(Alignment.CenterStart)
                 ) {
@@ -187,7 +202,7 @@ private fun IOSLargeTitleTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .padding(horizontal = BiliSpacing.lg, vertical = BiliSpacing.xs)
                     .alpha(largeAlpha)
             )
         }

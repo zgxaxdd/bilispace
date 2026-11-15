@@ -101,6 +101,63 @@ jobs:
             fi
           done
 
+      - name: Custom lint rules (A2)
+        # ── 为什么必须有这一步（2026-10-14，第 14 轮自我纠正）──────────────────────
+        # A2 把 4 条「扫源码型」守卫迁成了 Lint 检测器（ci-lint/，见执行报告 §1.10~§1.14）。
+        # 但迁完才发现：**这些检测器在 CI 里从来没有真正生效过。**
+        #
+        # `:app:assembleRelease` 里跑的 `lintVitalRelease` 只检查 **fatal** 级，
+        # 而我们 6 条规则都是 `Severity.ERROR` —— ERROR 不是 FATAL，
+        # lintVital 直接跳过。`lintDebug` 又不在任何 workflow 里。
+        # 于是"把守卫换成 Lint"这一步的实际效果是：**守卫消失了，而没有替代品**。
+        #
+        # 这正是 A2 想消灭的那类失败（"报告干净，但一条规则都没生效"）——
+        # 我把自己绕进去了。修法就是在 CI 里显式跑 `lintDebug`。
+        #
+        # 为什么是 `lintDebug` 而不是 `lintVitalRelease`：
+        # 后者只覆盖 `:app` 且只看 fatal；前者覆盖每个模块的**全部** ERROR 级
+        # （含 Jetpack Compose 自带的那套，本仓已知有若干历史 ERROR 需要另行处置，
+        #  所以这里先只对 ci-lint 自有规则做判定 —— 见下一步）。
+        run: chmod +x gradlew
+
+      - name: Custom lint rules must actually run and must find nothing new
+        # 反向守卫（与上面 testDebugUnitTest 那两步同一思路）：
+        # ① 每个模块的 lintDebug 必须**真的执行到 lint 分析**，不能是 UP-TO-DATE；
+        # ② 报告里不得出现任何 `Bbspace*` 规则命中 —— 存量已在各模块 lint.xml 里
+        #    逐处豁免，出现即表示有人新写了违规、或漏登了基线。
+        run: |
+          set -euo pipefail
+          MODULES=(
+            ":app"
+            ":core:designsystem"
+            ":feature:home"
+            ":feature:video"
+            ":feature:dynamic"
+            ":feature:rank"
+          )
+          fail=0
+          for m in "${MODULES[@]}"; do
+            log="/tmp/lint${m//:/_}.log"
+            echo "::group::lintDebug $m"
+            # lintDebug 在"发现 ERROR"时会非零退出 —— 那正是我们想要的信号，
+            # 所以这里不能用 set -e 直接中断，先收下退出码再判。
+            ./gradlew "$m:lintDebug" --console=plain 2>&1 | tee "$log" || true
+            echo "::endgroup::"
+            # ① 真的跑了？（与 testDebugUnitTest 那步同样的坑：缓存会让它静默跳过）
+            if grep -qE "^> Task ${m}:lintDebug( UP-TO-DATE| FROM-CACHE| SKIPPED| NO-SOURCE)" "$log"; then
+              echo "::error::$m:lintDebug 本轮被跳过（UP-TO-DATE/FROM-CACHE/SKIPPED）—— 自定义规则等于没跑。"
+              fail=1
+            fi
+            # ② 自有规则零命中？
+            report="${m#:}"; report="${report//://}/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+            if [ -f "$report" ] && grep -q "from com.naaammme.bbspace.lint" "$report"; then
+              echo "::error::$m: 自有 Lint 规则有命中 —— 新增违规请改代码；确属存量请在该模块 lint.xml 里登记并写明理由。"
+              grep -E "Error: .*\[Bbspace" "$report" | head -20
+              fail=1
+            fi
+          done
+          exit $fail
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4

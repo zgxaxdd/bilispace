@@ -14,11 +14,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.AvatarImage
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.ImSessionItem
 import java.time.Instant
 import java.time.ZoneId
@@ -34,7 +38,11 @@ internal fun ImSessionCard(
     Card(
         onClick = { onClick?.invoke() },
         enabled = onClick != null,
-        modifier = modifier.fillMaxWidth(),
+        // 全局拖拽反馈（第 34 轮 T2）：会话卡可点时才挂（`enabled` 同步透传）。
+        modifier = modifier.fillMaxWidth().appElasticPress(enabled = onClick != null),
+        // 圆角走 token（此前是 Card 默认 shapes.medium，会随 CornerStyle 在 12~16 漂移）：
+        // 与全站卡片同一套 20dp 大圆角语言。
+        shape = ImSessionCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -53,8 +61,8 @@ internal fun ImSessionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(BiliSpacing.md),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AvatarImage(
@@ -66,7 +74,7 @@ internal fun ImSessionCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -101,9 +109,9 @@ internal fun ImSessionCard(
                     modifier = Modifier
                         .background(
                             color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = MaterialTheme.shapes.extraLarge
+                            shape = ImUnreadBadgeShape
                         )
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                        .padding(horizontal = BiliSpacing.sm, vertical = BiliSpacing.xsPlus),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                     maxLines = 1
@@ -129,3 +137,9 @@ private fun formatImTime(micros: Long): String {
 }
 
 private val IM_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
+
+/** 会话卡圆角：全站卡片 token（20dp），不再随 CornerStyle 漂移。 */
+private val ImSessionCardShape = RoundedCornerShape(BiliRadius.card)
+
+/** 未读角标圆角：badge token（8dp）。 */
+private val ImUnreadBadgeShape = RoundedCornerShape(BiliRadius.badge)

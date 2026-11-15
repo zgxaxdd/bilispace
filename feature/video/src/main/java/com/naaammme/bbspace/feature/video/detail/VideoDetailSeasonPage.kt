@@ -41,6 +41,8 @@ import com.naaammme.bbspace.core.model.VideoSeason
 import com.naaammme.bbspace.core.model.VideoSeasonEpisode
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.video.formatDuration
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+import com.naaammme.bbspace.core.designsystem.motion.rememberAppElasticPressState
 
 @Composable
 internal fun SeasonEntryCard(
@@ -53,14 +55,15 @@ internal fun SeasonEntryCard(
 
     Card(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        // 全局拖拽反馈（第 34 轮 T2）：合集/分P入口卡。
+        modifier = modifier.fillMaxWidth().appElasticPress(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
         Column(
             modifier = Modifier.padding(BiliSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Text(
                 text = "合集列表",
@@ -98,14 +101,15 @@ internal fun PageEntryCard(
 
     Card(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        // 全局拖拽反馈（第 34 轮 T2）：合集/分P入口卡。
+        modifier = modifier.fillMaxWidth().appElasticPress(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
         Column(
             modifier = Modifier.padding(BiliSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Text(
                 text = "分P列表",
@@ -258,11 +262,17 @@ internal fun SeasonEpisodeRow(
     } else {
         Modifier
             .fillMaxWidth()
+            // 全局拖拽反馈（第 34 轮 T2）：**未选中**的选集行可点（选中项不可点，
+            // 故那一支不挂 —— 按下去没反应的东西不该有形变）。
+            // 整行宽 ⇒ 用 0.6 克制档，避免满强度下整行横移。
+            .appElasticPress(
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f)
+            )
             .clickable(onClick = onClick)
     }
 
     Row(
-        modifier = rowMod.padding(vertical = 10.dp),
+        modifier = rowMod.padding(vertical = BiliSpacing.smPlus),
         horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
         verticalAlignment = Alignment.Top
     ) {
@@ -319,11 +329,15 @@ internal fun PageSheetRow(
     } else {
         Modifier
             .fillMaxWidth()
+            // 同上（分集卡片行）：未选中才可点，整行宽用 0.6 克制档。
+            .appElasticPress(
+                state = rememberAppElasticPressState(feedbackStrength = 0.6f)
+            )
             .clickable(onClick = onClick)
     }
 
     Column(
-        modifier = rowMod.padding(vertical = 10.dp),
+        modifier = rowMod.padding(vertical = BiliSpacing.smPlus),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
     ) {
         Row(

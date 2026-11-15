@@ -24,8 +24,10 @@ import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardCoverAnchor
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessCardSpec
 import com.naaammme.bbspace.core.designsystem.seamless.rememberSeamlessVideoCardState
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.rememberHighlightedTitle
 import com.naaammme.bbspace.core.model.HistoryItem
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,8 +51,8 @@ fun HistoryItemCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(BiliSpacing.smPlus),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             CoverImage(
                 url = item.cover,
@@ -72,9 +74,9 @@ fun HistoryItemCard(
                     text = item.typeLabel,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(6.dp)
+                        .padding(BiliSpacing.xsPlus)
                         .background(Color.Black.copy(alpha = 0.56f), MaterialTheme.shapes.extraSmall)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White
                 )
@@ -82,7 +84,7 @@ fun HistoryItemCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
             ) {
                 Text(
                     text = titleText,
@@ -117,7 +119,7 @@ fun HistoryItemCard(
                                 MaterialTheme.colorScheme.secondaryContainer,
                                 MaterialTheme.shapes.extraSmall
                             )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -133,7 +135,20 @@ fun HistoryItemCard(
                     onClick()
                 }
             },
-            modifier = modifier.fillMaxWidth(),
+            // ## 为什么这里**不能**挂 appElasticPress（第 34 轮 OPPO 动画修复）
+            //
+            // 本卡内放了 `SeamlessCardCoverAnchor`（见上方 `content()`），而
+            // `appElasticPress` 的形变是 `Modifier.graphicsLayer` —— **绘制期**变换：
+            // 它改变像素落点，但不改布局。OPPO 无缝框架用 `View.getLocationInWindow`
+            // 取锚点矩形（布局期坐标），于是「按住卡片（卡片正被放大/拖偏）→ 点开视频」
+            // 时框架按**屏幕上已不存在的矩形**起飞，动画从错误的位置/大小开始。
+            //
+            // 判据是「本卡是否是系统过渡的锚点宿主」：`seamless.active` 为真时锚点
+            // 真的组合了，此时**整卡形变必须让位**给系统过渡；只有不支持无缝的设备
+            //（`active=false`，锚点不组合、走普通打开）才保留按压反馈 —— 那种情况下
+            // 没有框架取矩形，形变不会和任何东西打架。
+            modifier = modifier.fillMaxWidth()
+                .appElasticPress(enabled = !seamless.active),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow
             )

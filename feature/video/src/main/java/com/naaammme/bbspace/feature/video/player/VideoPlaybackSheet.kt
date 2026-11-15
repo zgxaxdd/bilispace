@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.DanmakuSettingsSection
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.model.PlaybackError
 import com.naaammme.bbspace.core.model.PlayerBufferProfile
 import com.naaammme.bbspace.core.model.PlayerSettingsState
@@ -106,7 +107,7 @@ internal fun VideoPlaybackSheet(
             val screenHeight = with(density) { windowInfo.containerSize.height.toDp() }
             val screenWidth = with(density) { windowInfo.containerSize.width.toDp() }
             val playerHeight = statusBarHeight + (screenWidth * (9f / 16f))
-            val sheetTopPadding = 24.dp
+            val sheetTopPadding = BiliSpacing.xxl
             (screenHeight - playerHeight - sheetTopPadding).coerceAtLeast(240.dp)
         } else {
             Dp.Unspecified
@@ -142,8 +143,8 @@ internal fun VideoPlaybackSheet(
                     }
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp)
-                .padding(bottom = 12.dp)
+                .padding(horizontal = BiliSpacing.md)
+                .padding(bottom = BiliSpacing.md)
         ) {
             Column {
                 SheetDragHandle()
@@ -190,7 +191,7 @@ internal fun VideoPlaybackSidebar(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shadowElevation = 12.dp,
                 modifier = Modifier
-                    .padding(vertical = 12.dp)
+                    .padding(vertical = BiliSpacing.md)
                     .width(panelWidth)
                     .fillMaxHeight()
             ) {
@@ -257,7 +258,9 @@ private fun VideoPlaybackPanelContent(
                     onClick = { onSectionChange(item) },
                     // 等宽分摊整行：侧栏面板宽度有限，默认按内容测量会让
                     // 「视频信息/播放设置/弹幕设置」在中途折行（真机截图实证）
-                    modifier = Modifier.weight(1f),
+                    //
+                    // 全局拖拽反馈（第 34 轮 T2）：分段按钮的每一段都是独立可点件。
+                    modifier = Modifier.weight(1f).appElasticPress(),
                     shape = SegmentedButtonDefaults.itemShape(
                         index = index,
                         count = PlaybackSheetSection.entries.size
@@ -317,8 +320,14 @@ private fun PlaybackSettingsSection(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // 线路诊断（移植自 BiliPai 的 CdnTransferPanel/诊断面板：节点速率、
                     // 首字节、冷却、失败计数 + 手动钉线路/恢复自动）
-                    TextButton(onClick = { showCdnDiagnostics = true }) { Text("线路诊断") }
-                    TextButton(onClick = { showCdnDialog = true }) { Text("切换 CDN") }
+                    TextButton(
+                        onClick = { showCdnDiagnostics = true },
+                        modifier = Modifier.appElasticPress()
+                    ) { Text("线路诊断") }
+                    TextButton(
+                        onClick = { showCdnDialog = true },
+                        modifier = Modifier.appElasticPress()
+                    ) { Text("切换 CDN") }
                 }
             }
         }
@@ -398,6 +407,21 @@ private fun PlaybackSettingsSection(
         subtitle = "竖屏连播时播完自动翻到下一支；关闭后停在结尾（与单曲循环互斥）",
         checked = settingsState.playback.swipeAutoAdvance,
         onCheckedChange = viewModel::updateSwipeAutoAdvance
+    )
+
+    SheetSwitchCard(
+        title = "跨会话已推去重",
+        subtitle = "记住过去刷到过的视频，下次再进刷视频不再重复推荐同一支" +
+            "（关闭后每次会话都可能重复，省一点内存）",
+        checked = settingsState.playback.crossSessionDedup,
+        onCheckedChange = viewModel::updateSwipeCrossSessionDedup
+    )
+
+    SheetSwitchCard(
+        title = "刷视频防烧屏",
+        subtitle = "常驻控件静置后自动变暗并缓慢漂移像素，避免 OLED 长时间压在同一位置",
+        checked = settingsState.playback.burnInGuard,
+        onCheckedChange = viewModel::updateSwipeBurnInGuard
     )
 
     SheetSwitchCard(
@@ -604,6 +628,7 @@ private fun SheetChoiceCard(
                     FilterChip(
                         selected = option == currentValue,
                         onClick = { onSelect(option) },
+                        modifier = Modifier.appElasticPress(),
                         label = { Text(label(option)) }
                     )
                 }
@@ -730,7 +755,10 @@ internal fun VideoCdnModeDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.appElasticPress()
+            ) {
                 Text("取消")
             }
         }

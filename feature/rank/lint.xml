@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A2 迁移基线（2026-10-14 第 14 轮）。
+
+  BbspaceSpLiteral 由 DesignTokenLintTest.spLiteralsOutsideTheme_isFrozen 数文本棘轮
+  （theme 包外上限 4）迁移到 ci-lint/SpLiteralDetector。
+  切换前做过**等价性证明**：检测器在 :feature:home 与 :feature:rank 报出的正是同样那 4 处、
+  行号逐一相同（HomeVideoPage.kt:539/540、RankScreen.kt:366/553）。
+
+  ⚠️ 每一条 <ignore> 对应一处**已存在**的字面量，不是"以后可以随便加"的许可。
+  新增会让 lint 失败（ERROR 级）并直接给出文件:行。
+-->
+<lint>
+    <issue id="BbspaceSpLiteral">
+        <ignore path="src/main/java/com/naaammme/bbspace/feature/rank/RankScreen.kt" />
+    </issue>
+</lint>

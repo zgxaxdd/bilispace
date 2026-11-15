@@ -23,7 +23,14 @@ data class GlassBudget(
 
 /**
  * 动效档位。声明顺序固定为 `Reduced < Normal < Enhanced`（与 BiliPai 一致），
- * [assertMotionTierOrderIsConservativeFirst] 断言该顺序，移植时不得重排。
+ * [motionTierOrderIsConservativeFirst] 断言该顺序，移植时不得重排。
+ *
+ * ## ⚠️ 与 `motion.DeviceMotionTier` 的区别
+ * 本枚举是**玻璃预算档**（滚动/转场/低内存降级要降到哪一档），与上游
+ * `adaptive/MotionTier` 同名同义。`motion` 包里另有一个**设备能力档**
+ * `DeviceMotionTier(Low/Medium/High)`（2026-10-18 由 `MotionTier` 改名，原名与本
+ * 枚举冲突）—— 那个回答"这台机器能跑几档"，本枚举回答"此刻该按哪档画"。
+ * 二者**不可互换**：`resolveGlassBudget(motionTier = ...)` 只接受本枚举。
  */
 enum class MotionTier {
     Reduced,

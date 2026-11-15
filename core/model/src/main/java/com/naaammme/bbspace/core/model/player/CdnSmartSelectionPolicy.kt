@@ -22,13 +22,22 @@ import java.net.URI
  */
 object CdnSmartSelectionPolicy {
 
-    /** 线路来源：决定 [orderCandidates] 的第一排序键。 */
-    enum class Source {
-        /** 用户显式指定的 host（重写出来的线路）。 */
-        Preferred,
+    /**
+     * 线路来源：决定 [orderCandidates] 的第一排序键。
+     *
+     * [priority] 越大越优先，与 BiliPai `sortPlaybackCdnCandidatesByHealth` 的
+     * `sourcePriority` 同值（CUSTOM=3 > REGION=2 > ORIGINAL=1）—— 顺序不是审美，
+     * 而是"用户显式指定 > 属地优选 > 服务端原序"这三层产品语义。
+     */
+    enum class Source(val priority: Int) {
+        /** 用户显式指定的 host / 自定义规则改写出来的线路。 */
+        Preferred(3),
 
-        /** 服务端原始候选。 */
-        Original
+        /** 属地目录改写出来的线路（W4 区域插件）。 */
+        Region(2),
+
+        /** 服务端原始候选（兜底）。 */
+        Original(1)
     }
 
     /** 带来源的候选。 */
@@ -71,11 +80,27 @@ object CdnSmartSelectionPolicy {
     ): List<Candidate> {
         val distinct = candidates.distinctBy { it.url }
         val preferred = distinct.filter { it.source == Source.Preferred }
-        val others = distinct.filter { it.source == Source.Original }
+        // 严格模式：有"指定/自定义"候选就只用它们（健康度再差也不让位）；
+        // 没有则**完整回退**到其余候选 —— 否则用户一开严格模式、规则又没命中时播放会被锁死。
         if (strictPreferred && preferred.isNotEmpty()) {
             return orderWithin(preferred, healthByHost)
         }
-        return orderWithin(preferred, healthByHost) + orderWithin(others, healthByHost)
+        // 非严格：来源优先级（3/2/1）→ 健康度降序 → 原下标升序。
+        // 全局排序而不是"分组拼接"：分组拼接在**三个**来源下无法表达 Region 的中间层。
+        return distinct
+            .mapIndexed { index, candidate ->
+                Triple(
+                    candidate,
+                    index,
+                    CdnHealthPolicy.score(healthByHost[hostOf(candidate.url)])
+                )
+            }
+            .sortedWith(
+                compareByDescending<Triple<Candidate, Int, Int>> { it.first.source.priority }
+                    .thenByDescending { it.third }
+                    .thenBy { it.second }
+            )
+            .map { it.first }
     }
 
     private fun orderWithin(

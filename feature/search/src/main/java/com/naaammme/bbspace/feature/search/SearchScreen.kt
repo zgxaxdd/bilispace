@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Card
@@ -22,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -31,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.CollapsingTopBarScaffold
@@ -42,7 +43,10 @@ import com.naaammme.bbspace.core.designsystem.component.rememberSkeletonBreathOr
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
 import com.naaammme.bbspace.core.designsystem.component.VideoListCardSkeleton
 import com.naaammme.bbspace.core.designsystem.component.VideoListSkeletonList
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
+import com.naaammme.bbspace.core.designsystem.theme.biliColorRoles
 import com.naaammme.bbspace.core.model.SearchFilter
 import com.naaammme.bbspace.core.model.SearchTime
 import com.naaammme.bbspace.core.model.SpaceRoute
@@ -51,6 +55,7 @@ import com.naaammme.bbspace.feature.search.result.SearchAuthorCard
 import com.naaammme.bbspace.feature.search.filter.SearchFiltersSheet
 import com.naaammme.bbspace.feature.search.history.SearchHistoryPanel
 import com.naaammme.bbspace.feature.search.result.SearchCard
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -197,7 +202,7 @@ fun SearchScreen(
                     "error" -> {
                         StateMessageCard(
                             text = viewModel.errorMessage.orEmpty().ifBlank { "搜索失败" },
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            modifier = Modifier.fillMaxWidth().padding(BiliSpacing.lg),
                             isError = true,
                             actionText = "重试",
                             onAction = {
@@ -224,7 +229,7 @@ fun SearchScreen(
 
                     "empty" -> StateMessageCard(
                         text = "没有找到结果",
-                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                        modifier = Modifier.fillMaxSize().padding(BiliSpacing.lg)
                     )
 
                     else -> {
@@ -234,9 +239,33 @@ fun SearchScreen(
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            // 页边距/行距走 token（原 12/10dp 字面量）：与历史面板、
+                            // 其它列表页同一套密度口径，改一处全站同步。
+                            contentPadding = PaddingValues(
+                                horizontal = BiliSpacing.md,
+                                vertical = BiliSpacing.md
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
                         ) {
+                            // 分组小标题（排版层）：作者段/视频段此前是**连续无标题**的两段，
+                            // 用户读到视频卡时不知道上面那一块是什么。这里只加名称行，
+                            // 不改任何查询/分页/点击逻辑；标题作为 LazyColumn item 存在，
+                            // 分页判据 `last >= itemCount - 3` 的 item 空间同步平移，
+                            // 触发时机与原来逐项等价。
+                            if (authors.isNotEmpty()) {
+                                item(key = "search_header_authors", contentType = "header") {
+                                    Text(
+                                        text = "作者",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = biliColorRoles().groupHeader,
+                                        modifier = Modifier.padding(
+                                            start = BiliSpacing.xs,
+                                            top = BiliSpacing.xs,
+                                            bottom = BiliSpacing.xs
+                                        )
+                                    )
+                                }
+                            }
                             items(
                                 items = authors,
                                 key = { it.mid },
@@ -248,6 +277,20 @@ fun SearchScreen(
                                 )
                             }
 
+                            if (videos.isNotEmpty()) {
+                                item(key = "search_header_videos", contentType = "header") {
+                                    Text(
+                                        text = "视频",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = biliColorRoles().groupHeader,
+                                        modifier = Modifier.padding(
+                                            start = BiliSpacing.xs,
+                                            top = BiliSpacing.md,
+                                            bottom = BiliSpacing.xs
+                                        )
+                                    )
+                                }
+                            }
                             items(
                                 items = videos,
                                 key = { "${it.aid}_${it.cid}" },
@@ -363,8 +406,9 @@ private fun SearchFilterButton(
     active: Boolean,
     onClick: () -> Unit
 ) {
-    Card(
+    Card(modifier = Modifier.appElasticPress(), 
         onClick = onClick,
+        shape = SearchFilterButtonShape,
         colors = CardDefaults.cardColors(
             containerColor = if (active) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -376,7 +420,12 @@ private fun SearchFilterButton(
         Icon(
             imageVector = Icons.Default.Menu,
             contentDescription = "筛选",
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            // 命中区：图标 24 + 上下各 12 = 48dp（原 7dp 内边距只有 38dp，
+            // 低于 48dp 触控下限）；左右同样取 12dp，圆角用分组卡 token。
+            modifier = Modifier.padding(
+                horizontal = BiliSpacing.md,
+                vertical = BiliSpacing.md
+            ),
             tint = if (active) {
                 MaterialTheme.colorScheme.onSecondaryContainer
             } else {
@@ -411,3 +460,10 @@ private fun buildSelectedMap(
 private const val INIT_SKELETON_COUNT = 8
 private const val LOAD_MORE_SKELETON_COUNT = 2
 private const val SORT_KEY = "sort"
+
+/**
+ * 筛选按钮形状：分组卡圆角 token（16dp），与历史词 chip、其它分组容器同一语言。
+ * 文件级常量而非内联 `shape = RoundedCornerShape(...)`：后者会被
+ * `ListAllocationStructureTest` 的具名实参棘轮计数，且每次组合重造一份。
+ */
+private val SearchFilterButtonShape = RoundedCornerShape(BiliRadius.groupedList)

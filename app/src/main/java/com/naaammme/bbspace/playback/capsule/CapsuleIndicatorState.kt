@@ -105,4 +105,27 @@ class CapsuleIndicatorState @Inject constructor(
         _dissolving.value = false
         playbackSession.close()
     }
+
+    /**
+     * × 按下**当场**停播（用户反馈：「点关闭的叉叉后，视频没有立即关闭，有延迟」）。
+     *
+     * ## 为什么不能只靠 [dismissAndStop]
+     * 关闭的语义是两件事：**停播**与**把横条本体从屏幕上送走**。原实现把两件事都压在
+     * 消散回调 `onDissolveComplete` 上（照搬 BiliPai 的顺序：粒子首帧出现 → 隐藏本体 →
+     * 消散完成再暂停并关闭）。粒子消散是 `1.5 + 0.9` 秒量级的动画（`THANOS_LONGEVITY`
+     * / `THANOS_TAIL_SECONDS`，除以 `THANOS_TIME_SCALE` 后约 **2.09s**，另有 5s 兜底），
+     * 于是用户按下 × 之后的整整两秒里**视频照常在播**（声音继续、画面继续动），
+     * 只有横条自己在碎 —— 观感就是"点了没反应/关不掉"。
+     *
+     * 正确的分工是：**停播是交互的实质结果，必须当场发生**；粒子只是它的视觉收尾，
+     * 该多长就多长。所以这里只做"停"（暂停播放器），真正的会话释放仍由
+     * [dismissAndStop] 在消散结束时完成 —— 那时画面已经不在屏幕上了。
+     *
+     * 用 `pause()` 而不是 `close()`：`close()` 会立刻把 `currentTarget` 置空，
+     * 而本类的 init 收集器据此把 `active` 翻假 ⇒ 整行离开组合 ⇒ 粒子会话随组件
+     * 一起销毁（只剩半截动画）。停播与卸载分开，两个目标才都成立。
+     */
+    fun stopPlaybackNow() {
+        playbackSession.pause()
+    }
 }

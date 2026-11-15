@@ -677,6 +677,39 @@ class CommentViewModel @Inject constructor(
             sort = sort,
             selectedFilter = filter
         )
+        // A12：stale-while-revalidate。重进同一个评论区时 ViewModel 已被
+        // NavBackStackEntry 回收（CommentPanel 用 hiltViewModel()，挂在各详情目的地
+        // 上），原先只能白屏骨架 + 一次完整 gRPC 往返；现在先把上次的首页铺出来，
+        // 网络请求照常发出，回来后再整体覆盖。
+        //
+        // 为什么刻意保持 `loading = true`：CommentPanel.shouldLoadMore 的判据含
+        // `!uiState.loading`，保持 true 可避免列表底部的自动翻页在刷新途中抢跑、
+        // 把这次首页请求的 reqId 顶掉（与上游同判据）。骨架不会因此出来 ——
+        // `isInitLoading = loading && items.isEmpty()`，此刻 items 非空。
+        //
+        // cacheKey 在这里算一次、读写共用：写入端若改成按"响应到达时的 mid"重算，
+        // 账号在途切换就会把旧账号的点赞态存进新账号的桶（见下面的 mid 比对）。
+        val cacheKey = commentPageCacheKey(
+            subject = subject,
+            sort = sort,
+            filter = filter,
+            viewerMid = currentMid
+        )
+        val cachedSnapshot = sharedCommentPageCache.get(cacheKey)
+        cachedSnapshot?.let { cached ->
+            _uiState.update { cur ->
+                cur.copy(
+                    title = cached.title,
+                    count = cached.count,
+                    canSwitchSort = cached.canSwitchSort,
+                    filterTags = cached.filterTags,
+                    selectedFilter = cached.selectedFilter,
+                    items = cached.items,
+                    nextOffset = cached.nextOffset,
+                    endText = cached.endText
+                )
+            }
+        }
         viewModelScope.launch {
             val result = runCatchingCancellable {
                 repo.fetchMainPage(
@@ -688,13 +721,37 @@ class CommentViewModel @Inject constructor(
             if (callId != reqId) return@launch
             result.fold(
                 onSuccess = { page ->
-                    _uiState.value = page.toUiState(currentMid = _uiState.value.currentMid)
+                    val mid = _uiState.value.currentMid
+                    _uiState.value = page.toUiState(currentMid = mid)
+                    // 只缓存首页：翻页内容不进缓存（缓存整段会让内存迅速膨胀，
+                    // 且重进时从首页 + nextOffset 继续翻就能补齐）。
+                    //
+                    // mid 比对是**必需**的，不是洁癖：请求在途时换账号，这批 items 的
+                    // liked/disliked 属于旧账号，而 cacheKey 是按旧 mid 算的 ——
+                    // 直接写会把旧账号的状态存进旧账号的桶，下一次同账号重进照样命中，
+                    // 用户看到自己没点过的赞。宁可不缓存。
+                    if (mid == currentMid) {
+                        sharedCommentPageCache.put(
+                            key = cacheKey,
+                            snapshot = page.toSnapshot()
+                        )
+                    }
                 },
                 onFailure = { err ->
+                    // A12 之后这里多了一种情形：缓存已把旧内容铺上，随后这次刷新失败。
+                    // CommentPanel 的错误卡只在 `items.isEmpty()` 时渲染（:361）——
+                    // 有旧内容在场时它**根本不会显示**。此时若照旧把 error 写进去，
+                    // 等于埋一颗暗雷：哪一天 items 变空，这次早已过期的刷新失败会
+                    // 突然冒出来。上游同场景的做法就是显式置空
+                    // （`repliesError = if (cached != null) null else …`），照做。
                     _uiState.update {
                         it.copy(
                             loading = false,
-                            error = UserFacingError.messageOf(err)
+                            error = if (cachedSnapshot == null) {
+                                UserFacingError.messageOf(err)
+                            } else {
+                                null
+                            }
                         )
                     }
                 }

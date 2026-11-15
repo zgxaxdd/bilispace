@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A2 迁移基线（2026-10-13 第 10~11 轮）。
+
+  本文件是两条规则的存量豁免：
+   ① BbspaceAnimateAsState —— 原 FrameBudgetLintTest.animateAsState_isFrozen 棘轮（上限 10）；
+   ② BbspaceHardcodedAnimationDuration —— 原 AnimationTokenRatchetTest 棘轮（上限 4，
+      且要求命中项全部来自 DissolvableSurface.kt）。
+
+  两条切换前都做过**等价性证明**（检测器报出的位置与文本扫描器逐一相同），
+  详见 docs/2026-10-13-上游同步落地-执行报告.md §1.11 与 §1.12。
+
+  ⚠️ 每一条 <ignore> 对应一处**已存在**的调用点，不是"以后可以随便加"的许可。
+  新增一律会让 lint 失败（ERROR 级）并直接给出文件:行 —— 这正是棘轮原来的作用。
+-->
+<lint>
+    <!-- ① animate*AsState：本模块原有 5 处。 -->
+    <issue id="BbspaceAnimateAsState">
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/color/VideoCardCoverTint.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/component/BiliCardSurface.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/component/FilledTabRow.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/motion/DissolvableSurface.kt" />
+    </issue>
+
+    <!--
+      ② 硬编码动画参数。**8 处，分两类，理由不同**：
+
+      A. DissolvableSurface.kt 的 5 处 —— 240/135/80/60 与一处 spring。
+         BiliPai 粒子消散的 1:1 移植件，时长/阻尼是其效果时序的一部分，
+         改成 token 就不再是移植。用户明确要求"尽量不要自己写代码，最好移植过来"。
+
+      B. 另 3 处 spring(dampingRatio = Spring.*, stiffness = Spring.*)：
+         BiliCardSurface.kt（卡片按压回弹）、FilledTabRow.kt（分段控件滑块）、
+         IOSControls.kt（开关滑块）。
+         ⚠️ **这 3 处是迁移时新发现的**：文本棘轮的正则是逐行匹配
+         `(tween|spring)\(\s*(durationMillis\s*=\s*)?\d`，而这 3 处的 `spring(`
+         在行尾、首参在下一行 ⇒ 棘轮**从来报不到它们**。检测器走 UAST，天然跨行。
+         它们用的是**具名 Compose 预设**（DampingRatio*/Stiffness*）而不是裸字面量，
+         比"spring(0.5f, 300f)"好；但"阻尼+刚度"这个组合仍然不受动效档位/
+         reduceMotion 控制。要修得先有"弹簧预设 token"（本仓的 LocalAnimations
+         只有 tween 时长档），那是独立的设计决策 —— 这里**登记，不祝福**。
+    -->
+    <issue id="BbspaceHardcodedAnimationDuration">
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/motion/DissolvableSurface.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/component/BiliCardSurface.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/component/FilledTabRow.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/component/IOSControls.kt" />
+        <!--
+          第 5 处（2026-10-18 W3：底栏滑动指示器）。
+
+          这是本轮**首次跑 `lintDebug`** 抓出来的 —— 前几轮只跑了单元测试，
+          自定义规则等于没跑（CI 里那份 workflow 早写着"lintDebug 不在任何
+          workflow 里就等于守卫消失"，这次是我们自己踩了同一坑）。
+
+          为什么要豁免而不是改成 token：
+          `positionSpec()` 是**弹簧的物理参数**（阻尼 1.0 = 临界阻尼、刚度 1000），
+          而 `LocalAnimations` 只提供 tween **时长**档 —— 两者不是同一种量，
+          用 `tween(anim.morph)` 顶替会丢掉"速度连续"（松手瞬间的速度会被截断，
+          指示器在快速滑动切换时会出现一顿）。所以这里**登记，不祝福**：
+          - 无障碍路径已覆盖：调用方在 `reduceMotion` 时 `snapTo`，不播这个弹簧；
+          - 动效速度档（App 设置）对弹簧无意义（弹簧没有 duration）；
+          - 若将来真的加了"弹簧预设 token"，这条 ignore **必须删掉**。
+        -->
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/motion/LiquidIndicatorMotion.kt" />
+    </issue>
+
+    <!--
+      ③ BbspaceSpLiteral：**文本棘轮排除整个 theme/ 目录，而 Lint 只能按文件豁免**。
+
+      DesignTokenLintTest 的扫描器 `nonThemeMainSources` 直接 `filterNot { path 含 theme/ }`
+      —— 于是 theme 包内所有 `.sp` 都不计数。迁移到 Lint 后这层"目录排除"没了，
+      两个字号定义文件（本仓字号的**唯一真值源**）当场报 90 处。
+
+      ⚠️ 这是第 14 轮"全模块 lint 扫描"才发现的：前几轮我只跑了手动挑的模块，
+      `:core:designsystem` 恰好没跑过 `lintDebug`，所以这个洞一直没暴露。
+
+      为什么是"登记这两个文件"而不是"给检测器加包排除"：
+      目录排除是**扫描器的实现细节**；放到 Lint 里应该表达成"这两个文件是 token 定义处"。
+      逐文件 <ignore> 之后，**theme 包里新增第三个文件不会自动被豁免** ——
+      它必须显式登记，那正是我们想要的显式性。
+    -->
+    <issue id="BbspaceSpLiteral">
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/theme/iOSTypography.kt" />
+        <ignore path="src/main/java/com/naaammme/bbspace/core/designsystem/theme/Typography.kt" />
+    </issue>
+</lint>

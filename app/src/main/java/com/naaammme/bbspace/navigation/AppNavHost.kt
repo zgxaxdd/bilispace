@@ -3,9 +3,9 @@ package com.naaammme.bbspace.navigation
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,7 +32,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -51,6 +49,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -68,7 +67,6 @@ import com.naaammme.bbspace.core.designsystem.seamless.LocalSeamlessCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.LocalStoryCardOpener
 import com.naaammme.bbspace.core.designsystem.seamless.OplusViewSeamlessCompat
 import com.naaammme.bbspace.core.designsystem.seamless.SeamlessCardOpener
-import com.naaammme.bbspace.core.designsystem.seamless.SeamlessTransitionState
 import com.naaammme.bbspace.core.designsystem.component.topSolidProgressiveFade
 import com.naaammme.bbspace.core.designsystem.glass.GlassMaterial
 import com.naaammme.bbspace.core.designsystem.glass.GlassSourceRefresher
@@ -80,6 +78,10 @@ import com.naaammme.bbspace.core.designsystem.glass.glassEffect
 import com.naaammme.bbspace.core.designsystem.glass.isGlassActive
 import com.naaammme.bbspace.core.designsystem.glass.rememberChromeBackdropSource
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import com.naaammme.bbspace.core.designsystem.motion.rememberDampedDragState
+import com.naaammme.bbspace.core.designsystem.motion.dampedHorizontalDrag
+import com.naaammme.bbspace.core.designsystem.motion.LiquidIndicatorMotion
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.LocalAnimations
 import com.naaammme.bbspace.core.designsystem.theme.LocalUiStyle
 import com.naaammme.bbspace.core.designsystem.theme.ThemeConfig
@@ -94,10 +96,8 @@ import com.naaammme.bbspace.core.model.StreamPlaybackTarget
 import androidx.compose.runtime.CompositionLocalProvider
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
-import com.naaammme.bbspace.core.model.VideoSrc
 import com.naaammme.bbspace.core.model.VideoTarget
 
-import com.naaammme.bbspace.core.model.VideoTargetTool
 import com.naaammme.bbspace.core.model.WebLinkTarget
 import com.naaammme.bbspace.core.common.log.DiagnosticLog
 import com.naaammme.bbspace.feature.dynamic.DynamicScreen
@@ -157,6 +157,9 @@ import com.naaammme.bbspace.playback.capsule.LinkedBottomDock
 import com.naaammme.bbspace.playback.capsule.DockVerticalPadding
 import com.naaammme.bbspace.playback.capsule.LinkedDockState
 import com.naaammme.bbspace.playback.capsule.LinkedNowPlayingRow
+import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 private const val MAIN_ROUTE = "main"
 private val topLevelNavEdgePadding = 22.dp
@@ -1029,41 +1032,171 @@ private fun TopLevelFloatingNavigation(
             },
         navigationContent = {
             if (isIOS) {
-                // iOS 分段导航：**静态选中胶囊**，不再用滑动的"圈圈"指示器。
+                // iOS 分段导航：**滑动指示器 + 横向拖动切 Tab**（2026-10-18 W6 重做）。
                 //
-                // 为什么去掉滑动指示器：它需要"指示器几何"与"图标几何"两套坐标严丝合缝，
-                // 稍有偏差就不同心（此前 offset 与 padding 叠加导致每格错位 4dp），
-                // 且切换时的位移/回弹在底栏这个尺度上读作"抖一下"。它带来的信息量
-                // （当前在哪个 Tab）完全可以由**选中项自身的底色 + 更重的字重**表达，
-                // 不需要一个独立移动的图层。去掉后：零错位可能、零跳动、层级反而更清楚。
+                // ## 为什么推翻"静态胶囊"的旧决定
+                // 旧实现去掉滑动指示器有两条理由，现在都成立地解决了：
+                // ① "指示器与图标两套坐标容易错位（每格错位 4dp）" —— 旧实现是每个 Tab 各自
+                //    画一层底色、再用 offset 去凑；新实现把指示器放在**与图标同一个 Row 起点**
+                //    上，x = index * itemSize + innerPad，**和图标格共用同一套测量**，不存在第二套几何；
+                // ② "切换时的位移读作抖一下" —— 现在位移曲线来自 `LiquidIndicatorMotion.positionSpec()`
+                //    （spring、临界阻尼），并叠加"拖动距离越大越拉长"的液滴形变，读作"有惯性"而不是"抖动"。
+                // 用户明确要求这一项（"实现 bilipai 的控件拖拽动画"），所以重做而不是永久搁置。
+                //
+                // ## 手势
+                // 底栏整块接 `dampedHorizontalDrag`：只消费**水平**位移（纵向留给列表滚动），
+                // 拖动时指示器阻尼跟手（0.55）并越界橡皮筋，松手按 lattice 吸附到最近一档
+                // **并直接切 Tab**（不是等动画结束再看落在哪 —— 那样晚一帧且会在过路格位上误触发）。
                 val entries = TopLevelRoute.entries
                 val itemSize = DockNavItemWidth
                 val innerPad = DockNavInnerPadding
-                Row(modifier = Modifier.padding(innerPad)) {
-                    entries.forEach { tab ->
-                        val selected = tab == currentTab
-                        Box(
-                            modifier = Modifier
-                                .size(itemSize)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { onTabChange(tab) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // 选中底色：与 Dock 同语汇的大圆角胶囊，只覆盖图标本体
-                            // （inset 4dp），不占满整格，视觉上更轻。
+                val density = LocalDensity.current
+                val animations = LocalAnimations.current
+                // 跟手时直接 snapTo 绝对位置需要协程作用域（snapTo 是 suspend）。
+                val dockScope = rememberCoroutineScope()
+                val selectedIndex = entries.indexOf(currentTab).coerceAtLeast(0)
+                val pitchPx = with(density) { itemSize.toPx() }
+                val innerPadPx = with(density) { innerPad.toPx() }
+                val basePx = pitchPx * selectedIndex
+                // 边界**非对称**：首档不许往左拖（min=0）、尾档不许往右拖（max=0）、
+                // 中间档两侧各 1 格（一次最多跨一档，防"一甩到底"）。
+                val dragMinPx = if (selectedIndex == 0) 0f else -pitchPx
+                val dragMaxPx = if (selectedIndex == entries.lastIndex) 0f else pitchPx
+                val dragState = rememberDampedDragState(
+                    minOffsetPx = dragMinPx,
+                    maxOffsetPx = dragMaxPx,
+                    latticeStepPx = pitchPx
+                )
+                // 这次 Tab 变化是"拖出来的"还是"点出来的"。
+                var switchedByDrag by remember { mutableStateOf(false) }
+                //
+                // ## ⚠️ 唯一状态源：指示器位置 = `indicatorX`（含拖拽残余）
+                //
+                // 早期实现是「基点 Animatable + 拖拽残余 Animatable」在 `offset{}` 里**相加**。
+                // 那是错的：两者各自 `scope.launch` 异步更新，切页时基点 snapTo、残余清零
+                // 不在同一帧生效 ⇒ **必然出现一帧不同步的跳变**。这就是用户看到的"错位/bug"。
+                //
+                // 现在只保留一个 `indicatorX`，它是**绝对位置**（px）：
+                // - 点 Tab：spring 到目标位置；
+                // - 拖拽：手指位移直接 snapTo 到绝对位置（跟手）；
+                // - 松手：spring 到吸附位置（带过冲回弹）；
+                // - 切页：目标位置换成新档位，**同一个 Animatable** 自然滑过去 —— 不可能错位。
+                val indicatorX = remember { Animatable(basePx) }
+                LaunchedEffect(basePx, animations.reduceMotion) {
+                    // 拖拽切页时手指已经把指示器带到了新位置附近，直接 spring 收尾即可；
+                    // 点 Tab 时从旧位置 spring 过去。两者都走同一个 Animatable。
+                    if (animations.reduceMotion) {
+                        indicatorX.snapTo(basePx)
+                    } else {
+                        indicatorX.animateTo(
+                            targetValue = basePx,
+                            animationSpec = if (switchedByDrag) {
+                                LiquidIndicatorMotion.releaseSpec()
+                            } else {
+                                LiquidIndicatorMotion.positionSpec()
+                            }
+                        )
+                    }
+                    switchedByDrag = false
+                }
+                Box(
+                    modifier = Modifier
+                        .padding(innerPad)
+                        .dampedHorizontalDrag(
+                            state = dragState,
+                            // 基准位置每帧现算：切页后 selectedIndex 变了，基准跟着变。
+                            basePositionPx = { pitchPx * (entries.indexOf(currentTab).coerceAtLeast(0)) },
+                            // 跟手：**直接 snapTo 绝对位置**（单一状态源 ⇒ 结构上不可能错位）。
+                            onAbsolutePosition = { absolutePx ->
+                                dockScope.launch { indicatorX.snapTo(absolutePx) }
+                            },
+                            onSettle = { absolutePx ->
+                                // 吸附位置落在哪一档？
+                                val next = (absolutePx / pitchPx).roundToInt()
+                                    .coerceIn(0, entries.lastIndex)
+                                if (next != selectedIndex) {
+                                    // 切页：让 basePx 的 LaunchedEffect 用 releaseSpec 收尾
+                                    // （带过冲回弹），这里只负责触发导航。
+                                    switchedByDrag = true
+                                    onTabChange(entries[next])
+                                    true
+                                } else {
+                                    // 没换档：spring 回原档位（带弹性晃动）。
+                                    dockScope.launch {
+                                        indicatorX.animateTo(
+                                            targetValue = absolutePx,
+                                            animationSpec = LiquidIndicatorMotion.releaseSpec()
+                                        )
+                                    }
+                                    true
+                                }
+                            }
+                        )
+                ) {
+                    // 指示器：在 `offset { }`（布局期）与 `graphicsLayer { }`（绘制期）读动画值，
+                    // 拖动中每帧只改变换、不重组底栏。
+                    //
+                    // ## 几何（错位的根因就在这两行）
+                    // 图标格是 `itemSize`(48dp) 宽，而指示器只有 `itemSize - innerPad*2`(40dp)。
+                    // 它要在格内居中 ⇒ x 必须额外加 `innerPad`，即
+                    //   x = index * pitch + innerPad + drag
+                    // 旧实现只写了 `index * pitch + drag` ⇒ **每格向左偏 4dp**，
+                    // 这正是文件上方旧注释警告过的"每格错位 4dp"。现在补上。
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    x = (indicatorX.value + innerPadPx).roundToInt(),
+                                    y = innerPadPx.roundToInt()
+                                )
+                            }
+                            .graphicsLayer {
+                                // ① 按压膨胀：手指压上去时元素"被挤出来"（1 → 1.18），
+                                //    与本仓按钮族的"缩小"相反 —— 液态物件的物理语言。
+                                //    膨胀进度由 `dragState.pressProgress` 驱动：**按下即开始**
+                                //    （onPressDown 在 awaitFirstDown 后立刻调用），抬手即收回
+                                //    （onPressUp 在 finally 里调用，任何退出路径都覆盖）。
+                                // ② 拖拽拉伸：按**受力方向**形变 —— 横向拉长、纵向同步变细。
+                                //    旧实现只放大 X、Y 跟着一起等比放大，视觉上是"整体变大"
+                                //    而不是"被拉长"，用户要的拉伸感因此不存在。
+                                //    形变公式收在 `LiquidIndicatorMotion.dragStretch()`（纯函数、可单测）。
+                                val press = dragState.pressProgress.value
+                                val pressScale = 1f + (LiquidIndicatorMotion.PressedScale - 1f) * press
+                                // 偏离档位基准的距离，以"一格"为单位归一到 0..1。
+                                val dragRatio = (
+                                    (indicatorX.value - pitchPx * selectedIndex).absoluteValue / pitchPx
+                                    ).coerceIn(0f, 1f)
+                                val (stretchX, squashY) = LiquidIndicatorMotion.dragStretch(dragRatio)
+                                scaleX = pressScale * stretchX
+                                scaleY = pressScale * squashY
+                            }
+                            .size(itemSize - innerPad * 2)
+                            .clip(RoundedCornerShape(BiliRadius.dockChip))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                    )
+                    Row {
+                        entries.forEach { tab ->
+                            val selected = tab == currentTab
                             Box(
                                 modifier = Modifier
-                                    .size(itemSize - innerPad * 2)
-                                    .clip(RoundedCornerShape(BiliRadius.dockChip))
-                                    .background(
-                                        if (selected) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            Color.Transparent
-                                        }
-                                    ),
+                                    .size(itemSize)
+                                    // 全局拖拽反馈（上游 BiliPai `AppElasticPress`）：
+                                    // 按下即鼓起，按住左右拖动时图标跟着手指沿受力方向拉伸。
+                                    //
+                                    // ## 为什么挂在**图标格**而不是整条指示器上
+                                    // 指示器自己已有 `dampedHorizontalDrag` 的液态形变
+                                    // （按压膨胀 + 横向拉伸，见上方 graphicsLayer），
+                                    // 两套形变叠在一起会互相放大成"果冻乱抖"。
+                                    // 这里只给**被按的那一格图标**加反馈，两套动效分工：
+                                    // 指示器 = 液态块被拖动；图标格 = 手指压到的那个按钮。
+                                    //
+                                    // `dragEnabled` 保持默认 true：它会被用户级开关
+                                    // `globalDragFeedbackEnabled` 再门控一次（关闭后只剩按压）。
+                                    .appElasticPress()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { onTabChange(tab) },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -1110,15 +1243,19 @@ private fun TopLevelFloatingNavigationItem(
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    // 全局拖拽反馈（第 34 轮 T2）：浮条导航的每颗图标都是独立可点件。
+    //
+    // 这里与「液态 dock」分支（同一文件 `dock` 段的 `.appElasticPress()`）同口径：
+    // 液态块的形变属于指示器，图标格的形变属于按钮，两套各管各的，不叠在同一元素上。
     if (selected) {
-        FilledIconButton(onClick = onClick) {
+        FilledIconButton(onClick = onClick, modifier = Modifier.appElasticPress()) {
             Icon(
                 imageVector = tab.icon,
                 contentDescription = tab.label
             )
         }
     } else {
-        IconButton(onClick = onClick) {
+        IconButton(onClick = onClick, modifier = Modifier.appElasticPress()) {
             Icon(
                 imageVector = tab.icon,
                 contentDescription = tab.label,

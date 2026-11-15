@@ -28,10 +28,22 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
 import com.naaammme.bbspace.core.model.VideoRelate
 import com.naaammme.bbspace.core.model.VideoTarget
+
+// 形状全部提到文件级：内联 `shape = RoundedCornerShape(...)` 会被
+// ListAllocationStructureTest 的具名实参棘轮计数，且每次组合重造一份。
+/** 关联卡：与全站视频卡同一圆角语言（BiliRadius.card）。 */
+private val RelateCardShape = RoundedCornerShape(BiliRadius.card)
+
+/** 卡内小封面：比整卡小一号的同族圆角。 */
+private val RelateCoverShape = RoundedCornerShape(BiliRadius.groupedList)
+
+/** 推荐理由/「当前播放」角标：8dp 徽章圆角。 */
+private val RelateBadgeShape = RoundedCornerShape(BiliRadius.badge)
 
 @Composable
 internal fun RelateRow(
@@ -47,7 +59,10 @@ internal fun RelateRow(
 
     Card(
         onClick = { onOpenVideo(relate.target) },
-        modifier = modifier.fillMaxWidth(),
+        // 全局拖拽反馈（第 34 轮 T2）：相关推荐卡。
+        modifier = modifier.fillMaxWidth().appElasticPress(),
+        // 与首页/排行/详情简介卡同一圆角（此前是 shapes.medium，随 CornerStyle 漂移）
+        shape = RelateCardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -65,17 +80,19 @@ internal fun RelateRow(
                 modifier = Modifier
                     .weight(0.38f)
                     .aspectRatio(16f / 10f)
-                    .clip(MaterialTheme.shapes.large),
+                    .clip(RelateCoverShape),
                 contentScale = ContentScale.Crop
             )
 
             Column(
                 modifier = Modifier.weight(0.62f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
             ) {
                 Text(
                     text = relate.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    // 标题 SemiBold（titleSmall，14/20）压过作者与 meta 两级：
+                    // 此前 bodyLarge（Regular）与小一号的 author 都只有字号差、没有字重差。
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -105,9 +122,9 @@ internal fun RelateRow(
                         modifier = Modifier
                             .background(
                                 MaterialTheme.colorScheme.secondaryContainer,
-                                RoundedCornerShape(BiliRadius.badge)
+                                RelateBadgeShape
                             )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -120,13 +137,13 @@ internal fun RelateRow(
 internal fun CurBadge() {
     Surface(
         color = MaterialTheme.colorScheme.primary,
-        shape = RoundedCornerShape(BiliRadius.badge)
+        shape = RelateBadgeShape
     ) {
         Text(
             text = "当前播放",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp)
         )
     }
 }

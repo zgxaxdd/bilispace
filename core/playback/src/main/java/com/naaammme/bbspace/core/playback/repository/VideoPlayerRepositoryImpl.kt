@@ -12,6 +12,7 @@ import com.bapis.bilibili.playershared.Stream
 import com.bapis.bilibili.playershared.StreamInfo
 import com.bapis.bilibili.playershared.VideoVod
 import com.naaammme.bbspace.core.common.AuthProvider
+import com.naaammme.bbspace.core.common.cache.OnDemandRequestCache
 import com.naaammme.bbspace.core.common.cache.PlaybackHeadPrewarmer
 import com.naaammme.bbspace.core.common.coroutines.runCatchingCancellable
 import com.naaammme.bbspace.core.common.log.Logger
@@ -28,7 +29,9 @@ import com.naaammme.bbspace.core.model.QualityOption
 import com.naaammme.bbspace.core.model.StreamLimitInfo
 import com.naaammme.bbspace.core.model.VideoTargetTool
 import com.naaammme.bbspace.infra.grpc.BiliGrpcClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -49,6 +52,44 @@ class VideoPlayerRepositoryImpl @Inject constructor(
     /** 播放地址进程内 LRU：正常开播与相邻页预取共用（见 [PlayUrlCache] 的 KDoc）。 */
     private val playUrlCache = PlayUrlCache({ android.os.SystemClock.elapsedRealtime() })
 
+    /**
+     * B12（2026-10-13，上游 v0.3.6 同步）：**在途取流合并**。
+     *
+     * ## 为什么需要它（本仓真实存在的重复请求）
+     *
+     * 竖屏连播有两条**独立发起**的取流路径：预取（`VideoViewModel.prefetchEntry()` →
+     * `preloadPlayUrl`）与开播（用户滑到该页 → `fetchPlaybackSource`）。两者共用
+     * [playUrlCache]，但缓存只在**请求成功之后**才写入 ⇒ "预取在途、用户已经滑到"
+     * 这个窗口里两条路径都 cache miss，**同一个 key 发两次完整 gRPC 往返**
+     * （而 `t1 建源` 在真机读数里占首帧的 ~72%，重复一次就是白等一个往返）。
+     *
+     * ## 为什么只包住**网络段**、不改动 [playUrlCache]
+     *
+     * `PlayUrlCache` 有自己的 TTL / LRU / 前缀失效语义，并且已被
+     * `PlayUrlCacheTest`、`PlayUrlCacheInvalidationTest`、`RetryInvalidationGuardTest`
+     * 钉住。这里把合并层放在它**下面**（只覆盖"真的要发请求"这一段），
+     * 于是：缓存读写顺序、命中计数、失效行为全部不变，只有"并发同 key 会重复发请求"
+     * 这一件事被修掉。TTL 取 0 ⇒ 这一层**不做结果缓存**（缓存仍归 `PlayUrlCache` 管），
+     * 只做在途合并 —— 单一真值源。
+     *
+     * ## 等待者计数取消的语义（对本仓尤其重要）
+     *
+     * 预取协程随用户滑走而被取消时，若它是唯一等待者，这次在途请求会被**取消** ——
+     * 正是我们想要的（用户已经不在等它了）。而当开播请求已经加入（等待者 ≥ 2）时，
+     * 预取离开**不会**取消它，开播拿到的仍是同一次加载。
+     *
+     * ⚠️ `scope` 用自建 scope 而不是任何 UI 生命周期：它只承载"合并中的一次取流"，
+     * 随进程存活；调用方（预取/开播）自己的取消通过等待者计数传导。
+     */
+    private val inFlightPlayUrl = OnDemandRequestCache<String, Result<PlaybackSource>>(
+        maxEntries = 1,
+        maxAgeMs = 0L, // 不做结果缓存（那是 PlayUrlCache 的职责）
+        nowMs = { android.os.SystemClock.elapsedRealtime() },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        // 失败永不进缓存（虽然 TTL=0 已使缓存失效，这里显式表达意图）
+        canCache = { it.isSuccess },
+    )
+
     override suspend fun fetchPlaybackSource(request: PlaybackRequest): PlaybackSource {
         val flavor = flavorOf()
         val cacheKey = PlayUrlCache.keyOf(request, flavor)
@@ -60,7 +101,18 @@ class VideoPlayerRepositoryImpl @Inject constructor(
         }
         PlayUrlCacheMetrics.record(hit = false)
         Logger.d(TAG) { "playurl cache miss aid=${request.ids.aid} cid=${request.ids.cid}" }
-        val source = if (shouldUseWebPlayback(request)) {
+        // B12：合并"同 key 的并发取流"。`Result` 包一层是因为 OnDemandRequestCache
+        // 需要"成功/失败"作为值来判定 canCache；展开在下面。
+        val source = inFlightPlayUrl
+            .getOrLoad(cacheKey) { runCatchingCancellable { loadPlaybackSource(request) } }
+            .getOrThrow()
+        playUrlCache.put(cacheKey, source)
+        return source
+    }
+
+    /** 真正的取流（不含缓存与合并）—— B12 抽出来是为了让合并层只包住这一段。 */
+    private suspend fun loadPlaybackSource(request: PlaybackRequest): PlaybackSource {
+        return if (shouldUseWebPlayback(request)) {
             webPlaybackResolver.fetchPlaybackSource(request)
         } else {
             val reply = withContext(Dispatchers.IO) {
@@ -73,8 +125,6 @@ class VideoPlayerRepositoryImpl @Inject constructor(
             }
             withContext(Dispatchers.Default) { mapReply(request, reply) }
         }
-        playUrlCache.put(cacheKey, source)
-        return source
     }
 
     /**

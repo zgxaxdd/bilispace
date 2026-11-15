@@ -27,7 +27,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -35,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naaammme.bbspace.core.designsystem.component.LoadMoreGrowthGuard
 import com.naaammme.bbspace.core.designsystem.component.SearchCapsuleField
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_COMMENT
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_LIVE_DANMAKU
 import com.naaammme.bbspace.core.model.PUBLISHED_RECORD_KIND_VIDEO_DANMAKU
@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.launch
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @Composable
 fun PublishedRecordPane(
@@ -84,7 +85,7 @@ fun PublishedRecordPane(
 
     Column(
         modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
     ) {
         PublishedRecordFilterBar(
             keyword = state.keywordInput,
@@ -97,7 +98,7 @@ fun PublishedRecordPane(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md),
             contentPadding = PaddingValues(0.dp)
         ) {
             when {
@@ -153,7 +154,7 @@ fun PublishedRecordPane(
             title = { Text("删除记录") },
             text = { Text("只会删除本地记录,不会影响服务器上的内容") },
             confirmButton = {
-                TextButton(
+                TextButton(modifier = Modifier.appElasticPress(),
                     onClick = {
                         pendingDelete = null
                         scope.launch {
@@ -165,7 +166,7 @@ fun PublishedRecordPane(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = { pendingDelete = null }) {
                     Text("取消")
                 }
             }
@@ -184,7 +185,7 @@ private fun PublishedRecordFilterBar(
     val focusManager = LocalFocusManager.current
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
     ) {
         SearchCapsuleField(
             value = keyword,
@@ -199,7 +200,7 @@ private fun PublishedRecordFilterBar(
                 }
             )
         )
-        TextButton(
+        TextButton(modifier = Modifier.appElasticPress(),
             onClick = {
                 focusManager.clearFocus()
                 onSearch()
@@ -207,7 +208,7 @@ private fun PublishedRecordFilterBar(
         ) {
             Text("搜索")
         }
-        TextButton(onClick = onToggleSort) {
+        TextButton(modifier = Modifier.appElasticPress(), onClick = onToggleSort) {
             Text(if (sortDesc) "最新" else "最早")
         }
     }
@@ -222,13 +223,12 @@ private fun PublishedRecordCard(
 ) {
     val cardContent: @Composable () -> Unit = {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
         ) {
             Text(
                 text = item.content.ifBlank { "(空内容)" },
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
@@ -258,11 +258,11 @@ private fun PublishedRecordCard(
                 horizontalArrangement = Arrangement.End
             ) {
                 if (item.kind != PUBLISHED_RECORD_KIND_COMMENT) {
-                    TextButton(onClick = { onOpenTarget(item) }) {
+                    TextButton(modifier = Modifier.appElasticPress(), onClick = { onOpenTarget(item) }) {
                         Text("打开")
                     }
                 }
-                TextButton(onClick = onDelete) {
+                TextButton(modifier = Modifier.appElasticPress(), onClick = onDelete) {
                     Text("删除")
                 }
             }
@@ -272,7 +272,7 @@ private fun PublishedRecordCard(
     if (onClick != null) {
         Card(
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().appElasticPress()
         ) {
             cardContent()
         }

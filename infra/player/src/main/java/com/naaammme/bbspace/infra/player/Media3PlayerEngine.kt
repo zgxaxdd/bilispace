@@ -60,8 +60,14 @@ class Media3PlayerEngine @Inject constructor(
     okHttpClient: OkHttpClient,
     /** PB-03：播放字节缓存（两条数据源链都在最外层挂它）。 */
     private val playbackMediaCache: PlaybackMediaCache,
-      /** 闭环修复（2026-10-06）：换线/索引读取的**真实结果**回传给健康度。 */
-      lineOutcomeListener: CdnLineOutcomeListener,
+      /**
+       * 闭环修复（2026-10-06）：换线/索引读取的**真实结果**回传给健康度。
+       *
+       * 加 `private val`（2026-10-19）：卡顿阶梯第 2 级（SEEK_TO_SELF）要**主动**把
+       * "正在供数却没在供数"的那条线路记一次失败，让候选表下次优先换线 —— 这需要
+       * 在方法里访问它，而构造参数不加 `val` 只在属性初始化与 init 块里可见。
+       */
+      private val lineOutcomeListener: CdnLineOutcomeListener,
     /**
      * 预取的网络判据（对齐 BiliPai `scheduleCdnDashPrefetch` 里的 `NetworkUtils.isWifi`）：
      * 蜂窝网下**不做**后台预取 —— 跳一次就预取一批分段是"流量偷跑"反馈的主要来源。
@@ -192,6 +198,15 @@ class Media3PlayerEngine @Inject constructor(
     // 旧实例的回调（如 release 竞态产生的错误）按代数甄别后丢弃。
     private var rebuildGen = 0L
     private val rebuildThrottle = RebuildThrottle()
+
+    /**
+     * 播放中途**卡死**的阶梯恢复（2026-10-17 夜起的"静默停滞"修复）。
+     *
+     * 与 [rebuildThrottle] 的分工：这里只回答"要不要动、动哪一档"，
+     * 真正的重建仍走 [recoverSession] 并复用那份额度 —— **不自带第二套预算**
+     * （两套预算会互相掩盖，正是上一轮"3.3 秒重建一次"活锁的成因）。
+     */
+    private val stallRecovery = StallRecoveryPolicy()
 
     /**
      * 网络/解码类错误的**重试计数**（BiliPai `maxRetries = 3` 的同值）。
@@ -349,13 +364,17 @@ class Media3PlayerEngine @Inject constructor(
                 }
 
                 else -> {
-                    // 网络类或解码类：走**有预算**的重试（预算只在"稳定播放满 RECOVERY_SETTLE_MS"后清零）
-                    if (rebuildThrottle.tryAcquire(android.os.SystemClock.elapsedRealtime())) {
+                    // 网络类或解码类：走**有预算**的重试（预算只在"稳定播放满 RECOVERY_SETTLE_MS"后清零）。
+                    //
+                    // ⚠️ 额度**只能由 `recoverSession` 内部领取一次**。这里此前自己先
+                    // `tryAcquire` 一次、进去之后它再领一次 ⇒ 一次重建吃掉两个额度，
+                    // 60 秒窗口（3 次）实际只够恢复 1 次，第二次就
+                    // `recover abandoned: rebuild limit hit` 永久落在错误态 ——
+                    // 真机「播一段时间卡住、再也起不来」就是这条。
+                    // 现在改为「先问它有没有真的重建，再记网络重试数」：
+                    // 被防抖拒绝时**不**白加计数（否则重试预算会提前耗尽、提前 GIVE_UP）。
+                    if (recoverSession(error.errorCodeName, error.message)) {
                         networkRetryCount++
-                        recoverSession(error.errorCodeName, error.message)
-                    } else {
-                        // 防抖窗口内已重建太多次：确定性故障，不再重建
-                        updatePlaybackState { it.copy(errorMessage = error.message) }
                     }
                 }
             }
@@ -637,6 +656,8 @@ class Media3PlayerEngine @Inject constructor(
     override fun stopForReuse(resetPosition: Boolean) {
         stopProgressPolling()
         cancelCdnDashPrefetch()
+        // 轮询停了就没有采样点，阶梯只能在这里显式复位（否则下一支视频接着上一支的档位）
+        stallRecovery.reset()
         // 会话结束：CDN 传输运行时归零（源 `CdnRegionPlugin.onPlaybackStop` → `configure(false,false)`）。
         // 路由表在下次 `create()` 按新候选表重建，不会留下上一支视频的线路。
         CdnTransferRuntime.configure(active = false, parallel = false)
@@ -664,6 +685,7 @@ class Media3PlayerEngine @Inject constructor(
     override fun release() {
         stopProgressPolling()
         cancelCdnDashPrefetch()
+        stallRecovery.reset()
         // 网络回调必须摘掉：引擎是单例、回调会一直持有它
         runCatching { connectivityManager?.unregisterNetworkCallback(networkCallback) }
         cdnDashPrefetchPlan = null
@@ -737,19 +759,29 @@ class Media3PlayerEngine @Inject constructor(
      * 复用现有 [setSource] 从原位置恢复。防抖 [RebuildThrottle] 限 60s 内 3 次，
      * 超限落回普通错误态（UI 已有展示）。仅由 playerListener（主线程）调用。
      */
-    private fun recoverSession(errorCodeName: String, detail: String?) {
+    /**
+     * 重建会话（四条恢复路径的**唯一出口**）。
+     *
+     * @return true = 真的重建了（额度已领、新实例已就位）；false = 被防抖拒绝或
+     *   没有可重建的会话 —— 此时调用方**不得**增加网络重试计数。
+     *
+     * 返回布尔而不是让调用方各判一次：调用方自己判就要自己领额度，而额度记账点
+     * **只能有一个**（见 [rebuildThrottle] 的 "一次重建一个额度" 约定与
+     * `PlayerRecoverySpinGuardTest.rebuildBudgetIsAcquiredExactlyOncePerRebuild`）。
+     */
+    private fun recoverSession(errorCodeName: String, detail: String?): Boolean {
         val source = _currentSource.value
         val player = exoPlayer
         if (source == null || player == null) {
             updatePlaybackState { it.copy(errorMessage = detail) }
-            return
+            return false
         }
         val positionMs = player.currentPosition.coerceAtLeast(0L)
         val playWhenReady = player.playWhenReady
         if (!rebuildThrottle.tryAcquire(android.os.SystemClock.elapsedRealtime())) {
             Logger.w(TAG) { "recover abandoned: rebuild limit hit code=$errorCodeName pos=$positionMs" }
             updatePlaybackState { it.copy(errorMessage = detail) }
-            return
+            return false
         }
         Logger.w(TAG) { "recovering from system error code=$errorCodeName pos=$positionMs" }
         stopProgressPolling()
@@ -758,7 +790,10 @@ class Media3PlayerEngine @Inject constructor(
         val nextPlayer = buildPlayer(appContext, playerConfig)
         exoPlayer = nextPlayer
         _player.value = nextPlayer
-        resetRuntimeState()
+        // 阶梯的 REBUILD 级：保留档位（否则同一段卡死会把阶梯读一遍），
+        // 但读数基线必须作废 —— 位置/缓冲来自新实例，与旧实例不可比。
+        resetRuntimeState(keepStallLadder = true)
+        stallRecovery.onSessionRebuilt()
         resetPlaybackFlows()
         // 释放旧实例前先标记释放并摘除仍绑定的视图（同 release() 的所有权顺序）
         PlayerViewTargetBinder.onPlayerReleased(player)
@@ -773,6 +808,7 @@ class Media3PlayerEngine @Inject constructor(
                 updatePlaybackState { it.copy(errorMessage = t.message ?: detail) }
             }
         }
+        return true
     }
 
     private fun buildCodecSelector(config: PlayerConfig): MediaCodecSelector {
@@ -994,12 +1030,88 @@ class Media3PlayerEngine @Inject constructor(
         maybeScheduleCdnDashPrefetch()
     }
 
+    /**
+     * 维护性轮询。
+     *
+     * 两种节奏（**都在"用户仍想播"时运行**，这是上一版漏掉的一半）：
+     * - `STATE_READY`：[PROGRESS_POLL_READY_MS] 一次，跑完整的 [updatePlaybackProgress]
+     *   （CDN 反馈、预取复查、稳定期结算、观测行…）。
+     * - `STATE_BUFFERING`：[PROGRESS_POLL_BUFFERING_MS] 一次，**只跑"救回来"的两件事**
+     *   （卡顿阶梯 + 起播超时）。
+     *
+     * 为什么缓冲期必须单独有一档：真机「播一阵子卡住、停在缓冲上再也不动」那条
+     * **完全没有任何错误回调**，旧实现里进度轮询只在 READY 时跑 ⇒ 一旦落进
+     * BUFFERING 就再也没人观测它，界面一直转圈到用户手动退出。
+     * 反过来也**不能**让缓冲期跑完整维护函数：那一段里的稳定期结算
+     * （`isRecoverySettled` → 清零重建预算）依赖"能走到这里 = 确实在播"这个前提，
+     * 缓冲期跑它会把预算白送回去，退化成 2026-10-06 那种重建活锁。
+     */
+    /**
+     * 采一次"有没有进展"，按 [StallRecoveryPolicy] 的阶梯出一刀。
+     *
+     * 四档都复用**既有**机制，不新造恢复通路：
+     * 1. [StallRecoveryPolicy.Action.FLUSH] —— 原地 seek：让 ExoPlayer flush 渲染器队列、
+     *    重启加载器（对"加载器卡在等一个不会回来的窗口"最轻的一刀）；
+     * 2. [StallRecoveryPolicy.Action.SEEK_TO_SELF] —— 先把当前供数线路记一次失败
+     *    （`CdnHealthPolicy.Event.LineOpenFailure`，线路健康度据此降权）再原地 seek，
+     *    让候选表下次优先换一条路；
+     * 3. [StallRecoveryPolicy.Action.REBUILD] —— 走 [recoverSession]（复用它的 60s/3 次额度）；
+     * 4. [StallRecoveryPolicy.Action.REPORT_ERROR] —— 三档都无效，落错误态交给 UI（可手动重试）。
+     *
+     * 每档**只触发一次**（`stage` 只增不减，直到出现进展），不会在同一档上反复烧。
+     */
+    private fun checkStallRecovery() {
+        val player = exoPlayer ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        val playing = player.playWhenReady &&
+            (player.playbackState == Player.STATE_READY ||
+                player.playbackState == Player.STATE_BUFFERING)
+        val action = stallRecovery.sample(
+            nowMs = now,
+            positionMs = player.currentPosition.coerceAtLeast(0L),
+            bufferedMs = player.bufferedPosition.coerceAtLeast(0L),
+            playing = playing
+        )
+        if (action == StallRecoveryPolicy.Action.NONE) return
+        val positionMs = player.currentPosition.coerceAtLeast(0L)
+        DiagnosticLog.w(STALL_TAG) {
+            "stall ladder stage=${stallRecovery.stage()} action=$action " +
+                "silent=${stallRecovery.msSinceAdvance(now)}ms pos=$positionMs " +
+                "buf=${player.bufferedPosition} host=${currentServingHost().orEmpty()}"
+        }
+        when (action) {
+            StallRecoveryPolicy.Action.FLUSH -> player.seekTo(positionMs)
+
+            StallRecoveryPolicy.Action.SEEK_TO_SELF -> {
+                // 降权"正在供数却没在供数"的那条线路：健康度会把它排到候选表后头。
+                currentServingHost()?.takeIf(String::isNotBlank)?.let { host ->
+                    runCatching { lineOutcomeListener.onOutcome("https://$host/", false) }
+                }
+                player.seekTo(positionMs)
+            }
+
+            StallRecoveryPolicy.Action.REBUILD ->
+                // 额度由 recoverSession 内部领（唯一记账点）；被拒也只落错误态。
+                recoverSession("stall", "no progress ${stallRecovery.msSinceAdvance(now)}ms")
+
+            StallRecoveryPolicy.Action.REPORT_ERROR ->
+                updatePlaybackState {
+                    it.copy(
+                        errorMessage = "播放停滞超过 ${stallRecovery.msSinceAdvance(now) / 1000}s，" +
+                            "已尝试自动恢复"
+                    )
+                }
+
+            StallRecoveryPolicy.Action.NONE -> Unit
+        }
+    }
+
     private fun updateProgressPolling() {
         val player = exoPlayer
-        val shouldPoll = player != null &&
-            lastEventsIsPlaying &&
-            lastEventsPlaybackState == Player.STATE_READY
-        if (!shouldPoll) {
+        val playing = player != null && lastEventsIsPlaying
+        val ready = playing && lastEventsPlaybackState == Player.STATE_READY
+        val buffering = playing && lastEventsPlaybackState == Player.STATE_BUFFERING
+        if (!ready && !buffering) {
             stopProgressPolling()
             return
         }
@@ -1007,8 +1119,16 @@ class Media3PlayerEngine @Inject constructor(
         progressJob?.cancel()
         progressJob = runtimeScope.launch {
             while (isActive) {
-                delay(500)
-                updatePlaybackProgress()
+                // 每轮重新判状态：同一个 job 会跨 READY/BUFFERING 边界继续跑
+                // （上面那条 `isActive` 早退保证不会重复起循环，所以节奏必须在这里判）。
+                if (lastEventsPlaybackState == Player.STATE_READY) {
+                    delay(PROGRESS_POLL_READY_MS)
+                    updatePlaybackProgress()
+                } else {
+                    delay(PROGRESS_POLL_BUFFERING_MS)
+                    checkStallRecovery()
+                    checkFirstFrameTimeout()
+                }
             }
         }
     }
@@ -1230,7 +1350,15 @@ class Media3PlayerEngine @Inject constructor(
         }
     }
 
-    private fun resetRuntimeState() {
+    /**
+     * @param keepStallLadder true = **卡顿阶梯的档位保留**。
+     *
+     * 只有 [recoverSession] 会传 true：那一刀本身就是阶梯的第 3 级（REBUILD），
+     * 若连档位一起清零，同一段卡死会 `FLUSH→SEEK→REBUILD→【清零】→FLUSH→…` 复读，
+     * 直到 [rebuildThrottle] 拒绝，约 74s 才落错误态、期间白烧 3 次整会话重建
+     * （见 [StallRecoveryPolicy.onSessionRebuilt] 的 KDoc）。
+     */
+    private fun resetRuntimeState(keepStallLadder: Boolean = false) {
         firstFrameSeq = 0L
         videoDecoderName = null
         audioDecoderName = null
@@ -1246,6 +1374,8 @@ class Media3PlayerEngine @Inject constructor(
         // 网络恢复重试按**会话**计数：新会话允许再补一次
         pendingOfflineRetry = false
         offlineRetryUsed = false
+        // 卡顿阶梯：换源/释放/停止一律复位；只有"阶梯自己那一刀"的重建保留档位
+        if (!keepStallLadder) stallRecovery.reset()
     }
 
     private fun Int.toPlaybackState(): PlaybackState {
@@ -1279,6 +1409,27 @@ class Media3PlayerEngine @Inject constructor(
 
         /** 解码器复用评估行（R5）的 tag，见 [DecoderReuseReport]。 */
         const val DECODER_REUSE_TAG = "DecoderReuse"
+
+        /**
+         * 卡顿阶梯行的 tag（2026-10-17 夜「播一阵子卡住」）。
+         *
+         * 单独一个 tag 便于 `adb logcat -s StallDiag` 把"卡住那一刻"的档位、静默时长、
+         * 位置/缓冲、供数 host 抓成一条线 —— 与 `PlayWatch` 的稳态丢帧读数是**两件事**：
+         * 那个回答"滑的时候丢了几帧"，这个回答"为什么不动了"。
+         */
+        const val STALL_TAG = "StallDiag"
+
+        /** READY 且正在出帧时的维护 tick（原 500ms 口径保持不变）。 */
+        const val PROGRESS_POLL_READY_MS = 500L
+
+        /**
+         * BUFFERING 时的维护 tick：低频保住"卡顿阶梯 + 起播超时"即可。
+         *
+         * 刻意比 READY 慢 4 倍：缓冲期本就没有进度可结算，高频轮询只是白耗电；
+         * 但**不能为 0**（即不能像修复前那样"一进缓冲就完全停止观测"）——
+         * 那条路径下"卡死在缓冲"没有任何回调可依赖，正是真机复现的那 20 秒黑屏。
+         */
+        const val PROGRESS_POLL_BUFFERING_MS = 2_000L
 
         /** 与源（BiliPai `maxRetries = 3`）一致：网络类错误最多重试 3 次。 */
         const val MAX_NETWORK_RETRIES = 3

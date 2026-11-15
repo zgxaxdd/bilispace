@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,8 +32,20 @@ import com.naaammme.bbspace.core.designsystem.component.BiliAsyncImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImage
 import com.naaammme.bbspace.core.designsystem.component.PreviewImageDialog
 import com.naaammme.bbspace.core.designsystem.theme.asBold
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
 import com.naaammme.bbspace.core.designsystem.component.SelectableText
+import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.naaammme.bbspace.feature.space.SpaceHeaderUiState
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
+
+/** VIP 角标底盘（文件级常量，同上）。 */
+private val SpaceVipBadgeShape = RoundedCornerShape(BiliRadius.badge)
+
+/** 统计/标签 chip 底盘（文件级常量，同上）。 */
+private val SpaceChipShape = RoundedCornerShape(BiliRadius.groupedList)
+
 
 internal fun LazyListScope.spaceHeaderSection(
     state: SpaceHeaderUiState,
@@ -69,11 +79,12 @@ internal fun LazyListScope.spaceHeaderSection(
 
 @Composable
 private fun BannerCard(imageUrl: String) {
-    Card(
+    // 不可点：BiliCardSurface 的按压缩放只在传了 onClick/onLongClick 时才挂
+    // （见其内部 `if (onClick != null || onLongClick != null)`），这里两个都不传
+    // ⇒ 两张头部卡（Banner / Profile）都没有任何缩放反馈（本轮 lead 条件 1）。
+    BiliCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
+        shape = SpaceCardShape
     ) {
         BiliAsyncImage(
             url = imageUrl,
@@ -114,7 +125,11 @@ private fun ProfileCard(
             title = { Text(if (action == RelationConfirmAction.BLOCK) "拉黑用户" else "取消关注") },
             text = { Text(if (action == RelationConfirmAction.BLOCK) "确定要拉黑TA吗？" else "确定要取消关注TA吗？") },
             dismissButton = {
-                TextButton(onClick = { pendingRelationAction = null }) {
+                TextButton(
+                    onClick = { pendingRelationAction = null },
+                    // 全局拖拽反馈（第 34 轮 T2）：关注/拉黑确认框的两个动作（浮层小件）。
+                    modifier = Modifier.appElasticPress()
+                ) {
                     Text("取消")
                 }
             },
@@ -126,7 +141,8 @@ private fun ProfileCard(
                             RelationConfirmAction.UNFOLLOW -> onToggleFollow()
                             RelationConfirmAction.BLOCK -> onToggleBlock()
                         }
-                    }
+                    },
+                    modifier = Modifier.appElasticPress()
                 ) {
                     Text(if (action == RelationConfirmAction.BLOCK) "拉黑" else "取消关注")
                 }
@@ -134,18 +150,19 @@ private fun ProfileCard(
         )
     }
 
-    Card(
+    // 不可点：BiliCardSurface 的按压缩放只在传了 onClick/onLongClick 时才挂
+    // （见其内部 `if (onClick != null || onLongClick != null)`），这里两个都不传
+    // ⇒ 两张头部卡（Banner / Profile）都没有任何缩放反馈（本轮 lead 条件 1）。
+    BiliCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
+        shape = SpaceCardShape
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(BiliSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.md)
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AvatarImage(
@@ -153,6 +170,10 @@ private fun ProfileCard(
                     contentDescription = profile.name,
                     modifier = Modifier
                         .size(72.dp)
+                        // 全局拖拽反馈（第 34 轮 T2）：头像点开大图（`showAvatarPreview`）
+                        // 是独立交互，不参与任何无缝过渡。`enabled` 透传 —— 没脸图时
+                        // 这颗本来点不动，形变也不该出现。
+                        .appElasticPress(enabled = !faceUrl.isNullOrBlank())
                         .clickable(enabled = !faceUrl.isNullOrBlank()) {
                             showAvatarPreview = true
                         },
@@ -166,7 +187,7 @@ private fun ProfileCard(
                 )
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(BiliSpacing.xs)
                 ) {
                     SelectableText(
                         text = profile.name,
@@ -178,7 +199,7 @@ private fun ProfileCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SelectableText(
@@ -189,13 +210,15 @@ private fun ProfileCard(
                         profile.vipLabel?.let { vipLabel ->
                             Surface(
                                 color = MaterialTheme.colorScheme.secondary,
-                                shape = MaterialTheme.shapes.extraSmall
+                                shape = SpaceVipBadgeShape
                             ) {
                                 Text(
                                     text = vipLabel,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSecondary,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    // 角标内边距刻意不用 token：BiliSpacing 最小是 xs=4dp，
+                                    // 会把 12dp 高的角标撑变形（保留字面量并在此说明）。
+                                    modifier = Modifier.padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp)
                                 )
                             }
                         }
@@ -212,8 +235,8 @@ private fun ProfileCard(
             }
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 SpaceStatChip("粉丝", profile.fansCount.toString(), onClick = onOpenFollowers)
                 SpaceStatChip("关注", profile.followingCount.toString(), onClick = onOpenFollowings)
@@ -233,8 +256,8 @@ private fun ProfileCard(
             }
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(BiliSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.sm)
             ) {
                 profile.tags.forEach { tag ->
                     TagChip(text = tag)
@@ -269,7 +292,7 @@ private fun ProfileCard(
                             },
                             enabled = state.isLogin,
                             colors = buttonColors,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = BiliSpacing.md, vertical = BiliSpacing.xs),
                             modifier = Modifier.height(32.dp)
                         ) {
                             Text(text = followText, style = MaterialTheme.typography.labelMedium)
@@ -300,7 +323,7 @@ private fun ProfileCard(
                         },
                         enabled = state.isLogin,
                         colors = blockButtonColors,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = BiliSpacing.md, vertical = BiliSpacing.xs),
                         modifier = Modifier.height(32.dp)
                     ) {
                         Text(text = blockText, style = MaterialTheme.typography.labelMedium)
@@ -319,11 +342,15 @@ private fun SpaceStatChip(
     value: String,
     onClick: (() -> Unit)? = null
 ) {
-    val shape = MaterialTheme.shapes.small
+    val shape = SpaceChipShape
     Surface(
         modifier = if (onClick != null) {
             Modifier
                 .clip(shape)
+                // 全局拖拽反馈（第 34 轮 T2）：粉丝/关注等**统计 chip** 是卡片内的
+                // 独立小件（本文件无 SeamlessAnchor，两张头卡也刻意不传 onClick）。
+                // 只有可点支挂（`onClick != null`），不可点时连按压状态都不该有。
+                .appElasticPress(highlightShape = shape)
                 .clickable(onClick = onClick)
         } else {
             Modifier
@@ -332,8 +359,8 @@ private fun SpaceStatChip(
         shape = shape
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.xsPlus),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus),
             verticalAlignment = Alignment.CenterVertically
         ) {
             SelectableText(
@@ -354,13 +381,15 @@ private fun SpaceStatChip(
 private fun TagChip(text: String) {
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = MaterialTheme.shapes.small
+        shape = SpaceChipShape
     ) {
         SelectableText(
             text = text,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = BiliSpacing.smPlus, vertical = BiliSpacing.xsPlus)
         )
     }
 }
+
+private val SpaceCardShape = RoundedCornerShape(BiliRadius.card)

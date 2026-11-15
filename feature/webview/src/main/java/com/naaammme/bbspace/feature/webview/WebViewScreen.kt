@@ -47,6 +47,7 @@ import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.SpaceRouteTool
 import com.naaammme.bbspace.core.model.WebLinkParser
 import com.naaammme.bbspace.core.model.WebLinkTarget
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -207,18 +208,30 @@ fun WebViewScreen(
                 },
                 navigationIcon = {
                     if (canGoBack) {
-                        IconButton(onClick = { webView.goBack() }) {
+                        IconButton(
+                            onClick = { webView.goBack() },
+                            // 全局拖拽反馈（第 34 轮 T2）：WebView 页顶栏返回/关闭钮。
+                            // ⚠️ 只挂顶栏这两颗 + "更多"，**不挂** WebView 容器本身：
+                            // `AndroidView` 被 graphicsLayer 包住会走离屏合成（同 PlayerView）。
+                            modifier = Modifier.appElasticPress()
+                        ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                         }
                     } else {
-                        IconButton(onClick = currentOnBack) {
+                        IconButton(
+                            onClick = currentOnBack,
+                            modifier = Modifier.appElasticPress()
+                        ) {
                             Icon(Icons.Default.Close, contentDescription = "关闭")
                         }
                     }
                 },
                 actions = {
                     Box {
-                        IconButton(onClick = { showMenu = true }) {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.appElasticPress()
+                        ) {
                             Icon(Icons.Default.MoreVert, contentDescription = "更多")
                         }
                         DropdownMenu(

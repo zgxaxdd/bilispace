@@ -32,6 +32,7 @@ import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.SpaceRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.comment.CommentPanel
+import com.naaammme.bbspace.core.designsystem.motion.appElasticPress
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +57,11 @@ fun MsgFeedScreen(
                 TopAppBar(
                     title = { Text("通知评论") },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(
+                            onClick = onBack,
+                            // 全局拖拽反馈（第 34 轮 T2）：通知评论页顶栏返回钮。
+                            modifier = Modifier.appElasticPress()
+                        ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                         }
                     }

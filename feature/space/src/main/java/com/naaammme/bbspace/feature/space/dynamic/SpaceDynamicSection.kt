@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,11 +21,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.naaammme.bbspace.core.designsystem.component.CoverImage
 import com.naaammme.bbspace.core.designsystem.component.StateMessageCard
+import com.naaammme.bbspace.core.designsystem.theme.BiliSpacing
+import com.naaammme.bbspace.core.designsystem.component.BiliCardSurface
+import com.naaammme.bbspace.core.designsystem.theme.BiliRadius
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.naaammme.bbspace.core.model.DynamicBody
 import com.naaammme.bbspace.core.model.DynamicItem
 import com.naaammme.bbspace.core.model.LiveRoute
 import com.naaammme.bbspace.core.model.VideoTarget
 import com.naaammme.bbspace.feature.space.SpaceDynamicUiState
+
+/** 动态卡角标底盘（文件级常量，同上）。 */
+private val SpaceDynamicBadgeShape = RoundedCornerShape(BiliRadius.badge)
+
 
 internal fun LazyListScope.spaceDynamicSection(
     state: SpaceDynamicUiState,
@@ -110,7 +116,7 @@ private fun SpaceDynamicCard(
     }
     val liveRoute = item.liveRoute
     val videoTarget = item.videoTarget
-    Card(
+    BiliCardSurface(
         onClick = {
             when {
                 liveRoute != null -> onOpenLive(liveRoute)
@@ -119,15 +125,13 @@ private fun SpaceDynamicCard(
             }
         },
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
+        shape = SpaceCardShape
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(BiliSpacing.smPlus),
+            horizontalArrangement = Arrangement.spacedBy(BiliSpacing.smPlus)
         ) {
             CoverImage(
                 url = preview.cover,
@@ -148,12 +152,14 @@ private fun SpaceDynamicCard(
                         text = it,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp)
+                            .padding(BiliSpacing.xsPlus)
                             .background(
                                 color = Color.Black.copy(alpha = 0.56f),
-                                shape = MaterialTheme.shapes.extraSmall
+                                shape = SpaceDynamicBadgeShape
                             )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            // 角标内边距刻意不用 token：BiliSpacing 最小是 xs=4dp，
+                            // 会把 12dp 高的角标撑变形（保留字面量并在此说明）。
+                            .padding(horizontal = BiliSpacing.xsPlus, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White,
                         maxLines = 1,
@@ -163,7 +169,7 @@ private fun SpaceDynamicCard(
             }
             Column(
                 modifier = Modifier.weight(0.62f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(BiliSpacing.xsPlus)
             ) {
                 Text(
                     text = preview.title,
@@ -234,3 +240,5 @@ private data class SpaceDynamicPreview(
     val meta: String,
     val cover: String?
 )
+
+private val SpaceCardShape = RoundedCornerShape(BiliRadius.card)

@@ -47,7 +47,33 @@ data class BiliColorRoles(
     /** 填充色：输入框/分段控件底（iOS systemFill 族，半透明中性灰）。 */
     val fill: Color,
     /** 破坏性操作（删除/取消关注）：iOS systemRed（浅 FF3B30 / 深 FF453A）。 */
-    val destructive: Color
+    val destructive: Color,
+
+    // ── W2（2026-10-18）：Miuix 渲染层需要的"容器/强调"角色 ──────────────────
+    //
+    // 为什么必须加在角色层而不是让组件直取 MaterialTheme.colorScheme：
+    // `ColorRoleAdoptionRatchetTest` 规定 `core/designsystem` 下**新文件不许直取**
+    // （文件数 22 / 出现次数 72 两条棘轮都只许降）。而 miuix 组件需要
+    // 底盘/上浮色/强调色/危险填充四类语义，上面 8 个角色表达不了。
+    //
+    // 取值策略（**零视觉回归**）：下面四个字段是**直通角色** —— `biliColorRoles()`
+    // 在两档里都直接返回当前 `MaterialTheme.colorScheme` 的对应槽位。这与既有
+    // "iOS 档固定灰阶"不同，是刻意的：容器色必须跟随用户的主题变体
+    // （纯黑 / 染色炭 / 浅色），写死会在纯黑主题下与全站卡片对不上。
+    // 默认值 `Color.Unspecified` 只为让 `iosColorRoles(dark)` 这个**非 @Composable**
+    // 的固定灰阶函数保持纯函数（对比度审计测试直调它），真实值一律由入口填。
+    /** 卡片/分组列表底盘（= `surfaceContainerLow`）。 */
+    val card: Color = Color.Unspecified,
+    /** 上浮一档的底盘（= `surfaceContainerHighest`，选中滑块/次级容器用）。 */
+    val cardElevated: Color = Color.Unspecified,
+    /** 页面画布（= `background`，只用于明暗判定与整页底）。 */
+    val canvas: Color = Color.Unspecified,
+    /** 强调色（= `primary`，主操作/选中填充）。 */
+    val accent: Color = Color.Unspecified,
+    /** 强调色上的前景（= `onPrimary`）。 */
+    val onAccent: Color = Color.Unspecified,
+    /** 危险填充上的前景（= `onError`，配合 [destructive] 做大红按钮）。 */
+    val onDangerContainer: Color = Color.Unspecified
 )
 
 /** iOS 档固定灰阶（Apple HIG 取值，见 iOSColor.kt 顶部说明）。internal 供对比度审计测试直调。 */
@@ -123,9 +149,21 @@ const val LIGHT = 0xC83C3C43L
 
 /** 语义角色色的唯一读取入口：组件层用它替代"拿 onSurfaceVariant 拼凑"。 */
 @Composable
-fun biliColorRoles(): BiliColorRoles =
-    if (LocalUiStyle.current == UiStyle.IOS) {
+fun biliColorRoles(): BiliColorRoles {
+    val scheme = MaterialTheme.colorScheme
+    val base = if (LocalUiStyle.current == UiStyle.IOS) {
         iosColorRoles(dark = isDarkTheme())
     } else {
         materialColorRoles()
     }
+    // W2：容器/强调四类角色**两档同源**（直通当前主题槽位）。
+    // 理由见数据类里那组字段的 KDoc：容器色必须跟随主题变体，不能写死灰阶。
+    return base.copy(
+        card = scheme.surfaceContainerLow,
+        cardElevated = scheme.surfaceContainerHighest,
+        canvas = scheme.background,
+        accent = scheme.primary,
+        onAccent = scheme.onPrimary,
+        onDangerContainer = scheme.onError
+    )
+}

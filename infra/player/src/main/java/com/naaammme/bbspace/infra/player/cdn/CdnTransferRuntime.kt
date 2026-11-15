@@ -31,7 +31,37 @@ data class CdnTransferSnapshot(
     val connections: Int = 1,
     val speedHistory: List<Long> = emptyList(),
     val parallelEnabled: Boolean = false,
+    /**
+     * **属地/自定义线路插件**这次真正下发给引擎的候选表（W4 收口，2026-10-18）。
+     *
+     * 为什么不放在会话私有态：诊断面板要显示"真正用了哪条"，而面板读的是本快照。
+     * 若面板自己按设置重算一遍，显示的是"预测顺序"而不是"下发顺序" —— 那种面板会说谎。
+     * 只存 **host 名**（不含签名 URL），与既有 `preferredHost` 同一隐私口径。
+     */
+    val regionEnabled: Boolean = false,
+    val regionHosts: List<String> = emptyList(),
+    val regionSources: List<String> = emptyList(),
     val updatedAtMs: Long = 0
+)
+
+/**
+ * 卡顿诊断行（`Media3PlayerEngine` 的 `StallDiag`）要的一次性快照。
+ *
+ * 刻意**不进** [CdnTransferSnapshot]、也不 `publish()`：这些字段只服务"卡住时打一行日志"，
+ * 放进可观察状态会让每个 500ms tick 都多一次 StateFlow 写入（反而制造卡顿）。
+ */
+data class CdnRuntimeDiag(
+    val permitsAvailable: Int = 0,
+    val parallelEnabled: Boolean = false,
+    val parallelSession: Boolean = false,
+    val routeFresh: Boolean = false,
+    val routeCount: Int = 0,
+    val lastWindow: String = "-",
+    val lastError: String = "-",
+    val fallbackCount: Int = 0,
+    val rescueCount: Int = 0,
+    val bufferMs: Long = 0,
+    val bitrateBps: Long = 0
 )
 
 /** Process-local, bounded diagnostics. URLs/signatures never enter the observable state or disk. */
@@ -53,6 +83,12 @@ object CdnTransferRuntime {
     private var lastSampleMs = 0L
     private var lastSampleBytes = 0L
     private var snapshot = CdnTransferSnapshot()
+
+    // ---- 卡顿诊断的旁路记账（见 [diag]）----
+    // 全部 @Volatile、不加锁写：这些只在"卡住时打一行"里被读，不值得让高频传输路径去抢锁。
+    @Volatile private var diagParallelSession = false
+    @Volatile private var diagLastWindow = "-"
+    @Volatile private var diagLastError = "-"
 
     @Synchronized
     fun configure(active: Boolean, parallel: Boolean) {
@@ -193,6 +229,66 @@ object CdnTransferRuntime {
     @Synchronized fun fallback() { snapshot = snapshot.copy(fallbackCount = snapshot.fallbackCount + 1); publish(true) }
     @Synchronized fun resumed() { snapshot = snapshot.copy(resumedCount = snapshot.resumedCount + 1); publish(true) }
     @Synchronized fun rescue() { snapshot = snapshot.copy(rescueCount = snapshot.rescueCount + 1); publish(true) }
+
+    /** 当前 DataSource 实例是不是在并行模式（降级后可恢复，见 `CdnConnectionPolicy`）。 */
+    fun noteParallelSession(active: Boolean) { diagParallelSession = active }
+
+    /** 最近一次窗口下载的结局（成功/降级/重试），只进诊断行。 */
+    fun noteWindowResult(result: String) { diagLastWindow = result.take(160) }
+
+    /** 最近一次窗口失败原因，只进诊断行（这是"为什么卡住"唯一的一手证据）。 */
+    fun noteWindowError(error: String?) {
+        diagLastError = (error ?: "-").take(160)
+    }
+
+    /**
+     * 发布**本次真正下发**的属地/自定义线路候选表（见 [CdnTransferSnapshot.regionHosts]）。
+     *
+     * 只在**内容变化时**写入 + publish：开播一次写一次，不是每 500ms 轮询都写
+     * （本类的 `publish()` 会进 `StateFlow`，高频写等于自己制造重组）。
+     */
+    @Synchronized
+    fun noteRegionSelection(enabled: Boolean, hosts: List<String>, sources: List<String>) {
+        val trimmedHosts = hosts.take(MAX_REGION_HOSTS)
+        val trimmedSources = sources.take(MAX_REGION_HOSTS)
+        if (snapshot.regionEnabled == enabled &&
+            snapshot.regionHosts == trimmedHosts &&
+            snapshot.regionSources == trimmedSources
+        ) {
+            return
+        }
+        snapshot = snapshot.copy(
+            regionEnabled = enabled,
+            regionHosts = trimmedHosts,
+            regionSources = trimmedSources
+        )
+        publish(true)
+    }
+
+    /**
+     * 卡顿诊断快照。
+     *
+     * `routeFresh` 直接复算"最近一次 register 是否还在 TTL 内"——路由过期是长会话并行
+     * 静默降级的另一个成因，卡住时这一位必须是可判定的 true/false 而不是靠猜。
+     */
+    @Synchronized
+    fun diag(): CdnRuntimeDiag {
+        val now = nowMs()
+        val newestRoute = routes.values.maxOfOrNull { it.registeredAtMs }
+        return CdnRuntimeDiag(
+            permitsAvailable = permits.availablePermits(),
+            parallelEnabled = parallelEnabled,
+            parallelSession = diagParallelSession,
+            routeFresh = newestRoute != null && isRouteFresh(newestRoute, now),
+            routeCount = routes.size,
+            lastWindow = diagLastWindow,
+            lastError = diagLastError,
+            fallbackCount = snapshot.fallbackCount,
+            rescueCount = snapshot.rescueCount,
+            bufferMs = snapshot.bufferMs,
+            bitrateBps = snapshot.bitrateBps
+        )
+    }
     @Synchronized fun avoid(host: String) {
         changeNode(host) { it.copy(cooldownUntilMs = nowMs() + 60_000) }; publish(true)
     }
@@ -215,6 +311,9 @@ object CdnTransferRuntime {
         // Never discard an active transfer when bounding history.
         snapshot = snapshot.copy(nodes = nodes.filter { it.active > 0 } + nodes.filter { it.active == 0 }.takeLast(24))
     }
+
+    /** 诊断快照里最多保留多少条候选（只是展示用；本条线路的真实候选在数据层，不进 UI 状态）。 */
+    private const val MAX_REGION_HOSTS = 8
 
     private fun publish(force: Boolean = false) {
         val now = nowMs()

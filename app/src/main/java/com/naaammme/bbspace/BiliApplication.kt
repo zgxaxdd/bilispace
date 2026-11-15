@@ -19,6 +19,8 @@ import com.naaammme.bbspace.memory.COVER_COLOR_HISTORY
 import com.naaammme.bbspace.memory.COVER_COLOR_VISIBLE_WINDOW
 import com.naaammme.bbspace.memory.CoverColorAction
 import com.naaammme.bbspace.memory.ImageCacheAction
+import com.naaammme.bbspace.memory.MemoryDiagPolicy
+import com.naaammme.bbspace.memory.MemoryDiagReporter
 import com.naaammme.bbspace.memory.MemoryTrimPlan
 import com.naaammme.bbspace.memory.NetCacheAction
 import com.naaammme.bbspace.memory.SeamlessCoverAction
@@ -26,6 +28,7 @@ import com.naaammme.bbspace.memory.TRIM_TO_RATIO
 import com.naaammme.bbspace.memory.imageCacheTrimTargetBytes
 import com.naaammme.bbspace.memory.planLowMemory
 import com.naaammme.bbspace.memory.planTrimMemory
+import com.naaammme.bbspace.perf.FrameJankMonitor
 import coil3.disk.DiskCache
 import coil3.gif.AnimatedImageDecoder
 import coil3.gif.GifDecoder
@@ -107,6 +110,16 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
     /** 前台界面是否可见。用 ActivityLifecycleCallbacks 跟踪，避免引入额外依赖。 */
     private var isUiVisible = false
 
+    /**
+     * `newImageLoader` 是否已经被 Coil 调用过。
+     *
+     * 只服务 [imageCacheStats]：读过 Coil 的实现就知道 `SingletonImageLoader.get()` 在
+     * 尚未初始化时**会在当前线程构造 ImageLoader**（DiskCache 建目录）—— 在 onTrimMemory
+     * 这个主线程回调里做它，等于给自己制造一次主线程磁盘 IO。
+     */
+    @Volatile
+    private var imageLoaderCreated = false
+
     /** 当前已 start（可见）的 Activity 数量。 */
     private var startedActivities = 0
 
@@ -114,11 +127,17 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
         override fun onActivityStarted(activity: Activity) {
             startedActivities++
             isUiVisible = startedActivities > 0
+            // W7：界面可见期间采帧（诊断关闭时 start() 自己早退，量产包不上这条链）。
+            // 放在 onActivityStarted 而不是 onCreate：冷启那一帧序列也算进去，
+            // 但不会在进程空转时白跑 Choreographer。
+            FrameJankMonitor.start()
         }
 
         override fun onActivityStopped(activity: Activity) {
             startedActivities = (startedActivities - 1).coerceAtLeast(0)
             isUiVisible = startedActivities > 0
+            // 全部界面不可见就停：后台没有"用户看到的帧"，继续挂着只是耗电。
+            if (!isUiVisible) FrameJankMonitor.stop()
         }
 
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
@@ -147,13 +166,35 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        applyTrimPlan(planTrimMemory(level, isUiVisible))
+        val plan = planTrimMemory(level, isUiVisible)
+        applyTrimPlan(plan)
+        // W5（2026-10-17 夜）：内存**读数**。此前 trim 只留一句 reason，
+        // 图片缓存水位 / Java 堆 / GC 次数 / 线程数都没有任何一处能回答
+        // ⇒ "优化内存"只能凭印象（交接书里"零测量数据"的同一种病）。
+        // 读数在**既有回调里**打，不新建线程/定时器；量产包默认关（DiagnosticLog）。
+        // ⚠️ 图片缓存只在 ImageLoader **已经构造过**之后才取：`SingletonImageLoader.get()`
+        // 在未初始化时会在主线程建 ImageLoader（含 DiskCache 目录 = 磁盘 IO），
+        // 而这里是 onTrimMemory 主线程回调，StrictMode 下会报一条主线程磁盘读。
+        MemoryDiagReporter.report(this, level, plan.reason, imageCacheStats)
+    }
+
+    /** 图片缓存水位提供者；[imageLoaderCreated] 为假时返回 null（见 `MemoryDiagReporter` 的 KDoc）。 */
+    private val imageCacheStats: () -> MemoryDiagReporter.ImageCacheStats? = {
+        if (!imageLoaderCreated) {
+            null
+        } else {
+            SingletonImageLoader.get(this).memoryCache?.let { cache ->
+                MemoryDiagReporter.ImageCacheStats(used = cache.size, max = cache.maxSize)
+            }
+        }
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
         // 系统级内存紧张：一律释放图片内存缓存（此时已无更温和的选项）。
-        applyTrimPlan(planLowMemory())
+        val plan = planLowMemory()
+        applyTrimPlan(plan)
+        MemoryDiagReporter.report(this, MemoryDiagPolicy.LEVEL_LOW_MEMORY, plan.reason, imageCacheStats)
     }
 
     /**
@@ -238,6 +279,7 @@ class BiliApplication : Application(), SingletonImageLoader.Factory, ComponentCa
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
+        imageLoaderCreated = true
         return ImageLoader.Builder(context)
             .components {
                 if (SDK_INT >= 28) {
